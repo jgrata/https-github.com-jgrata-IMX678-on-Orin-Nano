@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/raw_capture.dir/raw_capture.cpp.o -o raw_capture  -Wl,-rpath,/usr/lib/aarch64-linux-gnu/nvidia:/usr/lib/aarch64-linux-gnu/tegra /usr/lib/aarch64-linux-gnu/nvidia/libnvargus_socketclient.so /usr/lib/aarch64-linux-gnu/tegra/libnvbufsurface.so /usr/lib/aarch64-linux-gnu/libEGL.so /usr/lib/aarch64-linux-gnu/libcuda.so -lpthread 

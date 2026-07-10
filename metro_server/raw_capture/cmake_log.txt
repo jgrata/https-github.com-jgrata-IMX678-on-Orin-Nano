@@ -1,0 +1,14 @@
+-- The CXX compiler identification is GNU 11.4.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- ARGUS_INC   = /usr/src/jetson_multimedia_api/argus/include
+-- NVBUF_INC   = /usr/src/jetson_multimedia_api/include
+-- NVARGUS_LIB = /usr/lib/aarch64-linux-gnu/nvidia/libnvargus_socketclient.so
+-- NVBUF_LIB   = /usr/lib/aarch64-linux-gnu/tegra/libnvbufsurface.so
+-- EGL_LIB     = /usr/lib/aarch64-linux-gnu/libEGL.so
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /home/metro/raw_capture

@@ -49,6 +49,7 @@ classdef ECamHDRClient < handle
         bit_depth
         hdr_exp_ratio
         sat_threshold
+        lossless
         actual_exposure_ns   % read-only actual
         actual_gain_value    % read-only actual
     end
@@ -62,6 +63,7 @@ classdef ECamHDRClient < handle
         p_bit_depth     (1,1) double = 10
         p_hdr_exp_ratio (1,1) double = 4
         p_sat_threshold (1,1) double = 0.95
+        p_lossless      (1,1) logical = true
     end
 
     % ── Private infrastructure ────────────────────────────────────────────────
@@ -270,15 +272,20 @@ classdef ECamHDRClient < handle
             addParameter(p, 'bit_depth',     [], @isnumeric);
             addParameter(p, 'sat_threshold', [], @isnumeric);
             addParameter(p, 'hdr_exp_ratio', [], @isnumeric);
+            addParameter(p, 'lossless',      [], @(x)islogical(x)||isnumeric(x));
             parse(p, varargin{:});
 
             params = struct();
             flds = {'sensormode','fps','exposure_ns','gain', ...
-                    'bit_depth','sat_threshold','hdr_exp_ratio'};
+                    'bit_depth','sat_threshold','hdr_exp_ratio','lossless'};
             for k = 1:numel(flds)
                 f = flds{k};
                 if ~isempty(p.Results.(f))
-                    params.(f) = p.Results.(f);
+                    if strcmp(f,'lossless')
+                        params.(f) = logical(p.Results.(f));
+                    else
+                        params.(f) = p.Results.(f);
+                    end
                 end
             end
             if isempty(fieldnames(params))
@@ -403,6 +410,7 @@ classdef ECamHDRClient < handle
         function v = get.bit_depth(obj),     v = obj.p_bit_depth;     end
         function v = get.hdr_exp_ratio(obj), v = obj.p_hdr_exp_ratio; end
         function v = get.sat_threshold(obj), v = obj.p_sat_threshold; end
+        function v = get.lossless(obj),      v = obj.p_lossless;      end
 
         function v = get.exposure_ns(obj)
             if obj.p_exposure_ns == 0 && ...
@@ -481,6 +489,10 @@ classdef ECamHDRClient < handle
             obj.p_sat_threshold = v;
             if obj.IsConnected, obj.setParams('sat_threshold', v); end
         end
+        function set.lossless(obj, v)
+            obj.p_lossless = logical(v);
+            if obj.IsConnected, obj.setParams('lossless', logical(v)); end
+        end
         function set.actual_exposure_ns(~,~), end  % read-only
         function set.actual_gain_value(~,~),  end  % read-only
 
@@ -524,7 +536,8 @@ classdef ECamHDRClient < handle
                    'fps',       'p_fps'; ...
                    'bit_depth', 'p_bit_depth'; ...
                    'hdr_exp_ratio','p_hdr_exp_ratio'; ...
-                   'sat_threshold','p_sat_threshold'};
+                   'sat_threshold','p_sat_threshold'; ...
+                   'lossless',  'p_lossless'};
             for k = 1:size(map,1)
                 if isfield(info, map{k,1})
                     obj.(map{k,2}) = info.(map{k,1});
@@ -556,6 +569,9 @@ classdef ECamHDRClient < handle
                     s = sprintf('%d',obj.p_hdr_exp_ratio);
                 case 'sat_threshold'
                     s = sprintf('%.2f',obj.p_sat_threshold);
+                case 'lossless'
+                    if obj.p_lossless, s = 'true (RAW10 packed)';
+                    else, s = 'false (lossy allowed)'; end
                 otherwise, s = '?';
             end
         end
@@ -619,8 +635,12 @@ classdef ECamHDRClient < handle
                 frame  = reshape(pixels, [W, H])';
 
             elseif dtype == 0x11
-                % RAW10 packed: 5 bytes per 4 pixels = H*W*10/8 bytes
-                n_packed = ceil(double(H) * double(W) * 10 / 8);
+                % RAW10 packed: server packs in groups of 4 pixels -> 5 bytes,
+                % padding a partial final group. Must match pack_raw10 exactly:
+                %   n_bytes = ceil(H*W/4) * 5   (NOT ceil(H*W*10/8), which
+                %   differs when H*W is not a multiple of 4).
+                n_groups = ceil(double(H) * double(W) / 4);
+                n_packed = n_groups * 5;
                 raw      = obj.rdBytes(n_packed);
                 frame    = obj.unpackRaw10(uint8(raw(:)'), H, W);
 
@@ -652,54 +672,38 @@ classdef ECamHDRClient < handle
 
         function data = rdBytes(obj, n)
             %RDBYTES  Read exactly n bytes. No Java. Pure MATLAB tcpclient.
+            %  Uses a single blocking read() for ALL sizes — MATLAB's read()
+            %  waits internally against obj.Socket.Timeout and reassembles TCP
+            %  segments, so the old NumBytesAvailable polling loop (which added
+            %  ~10-15ms of pause() latency per call, and was hit repeatedly for
+            %  the tiny 1/5/9-byte frame-header reads) is gone.
             n = double(n);
             if n == 0, data = uint8([]); return; end
 
             deadline = tic;
 
-            % Wait for first byte
-            while obj.Socket.NumBytesAvailable == 0
+            % Single blocking read. read() returns as soon as n bytes arrive
+            % or the socket Timeout elapses.
+            data = read(obj.Socket, n, 'uint8');
+
+            % Rare: read() returned short (e.g. Timeout mid-frame). Top up
+            % without a fixed-interval sleep — block for whatever remains.
+            received = numel(data);
+            while received < n
                 if toc(deadline) > obj.RECV_TIMEOUT_S
                     error('ECamHDRClient:timeout', ...
-                        'No data received after %.0fs', obj.RECV_TIMEOUT_S);
+                        'Got %d of %d bytes after %.0fs', ...
+                        received, n, obj.RECV_TIMEOUT_S);
                 end
-                pause(obj.POLL_INTERVAL);
-            end
-
-            if n <= 65536
-                % Small: wait for all bytes then single read
-                while obj.Socket.NumBytesAvailable < n
-                    if toc(deadline) > obj.RECV_TIMEOUT_S
-                        error('ECamHDRClient:timeout', ...
-                            'Timeout waiting for %d bytes', n);
-                    end
+                chunk    = read(obj.Socket, n-received, 'uint8');
+                if ~isempty(chunk)
+                    data     = [data(:); chunk(:)];  %#ok
+                    received = numel(data);
+                else
                     pause(obj.POLL_INTERVAL);
                 end
-                data = read(obj.Socket, n, 'uint8');
-
-            else
-                % Large frames: single blocking read
-                % MATLAB read() handles TCP segmentation internally
-                data = read(obj.Socket, n, 'uint8');
-
-                % Handle partial reads (rare)
-                received = numel(data);
-                while received < n && toc(deadline) < obj.RECV_TIMEOUT_S
-                    avail = obj.Socket.NumBytesAvailable;
-                    if avail > 0
-                        chunk    = read(obj.Socket, ...
-                            min(avail, n-received), 'uint8');
-                        data     = [data; chunk(:)];  %#ok
-                        received = received + numel(chunk);
-                    else
-                        pause(obj.POLL_INTERVAL);
-                    end
-                end
-                if numel(data) < n
-                    error('ECamHDRClient:timeout', ...
-                        'Got %d of %d bytes', numel(data), n);
-                end
             end
+            data = data(:)';
         end
 
         % ── Stream helpers ─────────────────────────────────────────────────────

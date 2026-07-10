@@ -25,6 +25,7 @@
 #include <sys/socket.h>
 #include <sys/select.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -200,6 +201,29 @@ struct Session {
     ISourceSettings*           iSrc       = nullptr;
     uint32_t                   W=0,H=0,BPP=0;
 
+    /* Currently-applied exp/gain on the live request (for live updates). */
+    uint64_t                   cur_exp_ns = 0;
+    float                      cur_gain   = 0.0f;
+
+    /* Live-update exposure/gain on the running pipeline without a session
+     * rebuild. On R36/JetPack6, mutating ISourceSettings and re-submitting
+     * the request applies the new values to subsequent frames — no teardown
+     * of the EGL stream or CUDA consumer needed. Returns true if a change
+     * was applied. Called from the single Argus thread (server loop) only. */
+    bool set_exposure_gain_live(uint64_t exp_ns, float gain)
+    {
+        if (!iSrc) return false;
+        if (exp_ns == cur_exp_ns && gain == cur_gain) return false;
+        apply_exposure(exp_ns, gain);
+        cur_exp_ns = exp_ns;
+        cur_gain   = gain;
+        /* Re-submit so the mutated request takes effect. The server loop
+         * submits a fresh capture after each acquire anyway; this ensures
+         * the change lands even if the pipeline is momentarily drained. */
+        iSess->capture(req.get());
+        return true;
+    }
+
     bool init(const Config& cfg)
     {
         prov.reset(CameraProvider::create());
@@ -226,8 +250,8 @@ struct Session {
         printf("[Session] mode=%d  %ux%u  bpp=%u\n",cfg.mode,W,H,BPP);
         fflush(stdout);
 
-        Range<uint64_t> er=iMode->getExposureTimeRange();
-        Range<float>    gr=iMode->getAnalogGainRange();
+        exp_range  = iMode->getExposureTimeRange();
+        gain_range = iMode->getAnalogGainRange();
 
         sess.reset(iProv->createCaptureSession(devs[0]));
         iSess=interface_cast<ICaptureSession>(sess);
@@ -267,25 +291,58 @@ struct Session {
             iSrc->setSensorMode(sm);
             uint64_t dur=1000000000ULL/(uint64_t)cfg.fps;
             iSrc->setFrameDurationRange(Range<uint64_t>(dur,dur));
-            apply_exposure(cfg, er, gr);
+            apply_exposure(cfg.exp_ns, cfg.gain);
         }
+        /* Track what the running request currently reflects, so the server
+         * loop can detect a pending change and re-submit only when needed. */
+        cur_exp_ns = cfg.exp_ns;
+        cur_gain   = cfg.gain;
         iReq->enableOutputStream(os.get());
         return true;
     }
 
-    void apply_exposure(const Config& cfg,
-                        const Range<uint64_t>& er,
-                        const Range<float>& gr)
+    /* Cached mode limits so live updates can clamp without re-querying. */
+    Range<uint64_t> exp_range{0,0};
+    Range<float>    gain_range{0.0f,0.0f};
+
+    /* Apply exposure/gain to iSrc following the 2x2 auto/manual rule:
+     *
+     *   exp_ns==0, gain==0  -> full auto  (AE on, AGC on)   leave both unset
+     *   exp_ns==0, gain>0   -> auto exposure, gain pinned    set gain only
+     *   exp_ns>0,  gain==0  -> fixed exposure, auto gain     set exposure only
+     *   exp_ns>0,  gain>0   -> both fixed                    set both
+     *
+     * Not calling setExposureTimeRange / setGainRange leaves that axis under
+     * Argus AC (auto) control. Passing a degenerate [v,v] range pins it.
+     * This is called both at session init and on every live re-submit, so the
+     * running pipeline always reflects the current persisted exp/gain.
+     */
+    void apply_exposure(uint64_t exp_ns, float gain)
     {
         if (!iSrc) return;
-        if (cfg.exp_ns>0) {
-            uint64_t e=std::max((uint64_t)er.min(),
-                       std::min((uint64_t)er.max(),cfg.exp_ns));
+
+        IAutoControlSettings* iAC = interface_cast<IAutoControlSettings>(
+            iReq->getAutoControlSettings());
+
+        if (exp_ns > 0) {
+            uint64_t e = std::max((uint64_t)exp_range.min(),
+                         std::min((uint64_t)exp_range.max(), exp_ns));
             iSrc->setExposureTimeRange(Range<uint64_t>(e,e));
+        } else {
+            /* auto exposure: hand the full sensor range back to AE */
+            iSrc->setExposureTimeRange(exp_range);
         }
-        if (cfg.gain>0.0f) {
-            float g=std::max(gr.min(),std::min(gr.max(),cfg.gain));
+
+        if (gain > 0.0f) {
+            float g = std::max(gain_range.min(),
+                      std::min(gain_range.max(), gain));
             iSrc->setGainRange(Range<float>(g,g));
+            /* pinning gain while exposure is auto: keep AE from also
+             * driving ISP digital gain, so the pin actually holds */
+            if (iAC) iAC->setIspDigitalGainRange(Range<float>(1.0f,1.0f));
+        } else {
+            iSrc->setGainRange(gain_range);
+            if (iAC) iAC->setIspDigitalGainRange(gain_range);
         }
     }
 
@@ -358,8 +415,49 @@ static bool send_all(int fd,const void*p,size_t n)
     return true;
 }
 
-static void serve_client(int cli, const FrameBuffer& buf,
-                          const Config& cfg)
+/* Read exactly n bytes from fd. Returns false on close/error. */
+static bool recv_all(int fd, void* p, size_t n)
+{
+    uint8_t* b=(uint8_t*)p;
+    while (n>0){
+        ssize_t r=::recv(fd,b,n,0);
+        if (r<=0) return false;
+        b+=(size_t)r; n-=(size_t)r;
+    }
+    return true;
+}
+
+/* ── Localhost request protocol (persistent connection) ───────────────────────
+ *
+ * The Python image_server opens ONE socket to this server and reuses it for
+ * every frame, eliminating per-frame connect/accept/teardown (the dominant
+ * cost in the old design). Each request is a fixed 20-byte command:
+ *
+ *   cmd        uint32   REQ_FRAME=1  SET_EXPGAIN=2  PING=3
+ *   want_exp   uint64   (SET_EXPGAIN) new exposure_ns, 0=auto
+ *   want_gain  float    (SET_EXPGAIN) new gain, 0=auto
+ *   pad        uint32
+ *
+ * REQ_FRAME  -> server replies NetHdr(36B) + pixel payload (w*h*2 bytes)
+ * SET_EXPGAIN-> server replies 4-byte ack (0=applied, 1=nochange); the actual
+ *               live re-apply is performed on the Argus thread (see loop),
+ *               not here, so this only stashes the request.
+ * PING       -> server replies NetHdr with magic only (nf=0), no payload
+ */
+#pragma pack(push,1)
+struct ReqHdr { uint32_t cmd; uint64_t want_exp; float want_gain; uint32_t pad; };
+#pragma pack(pop)
+enum { REQ_FRAME=1, REQ_SET_EXPGAIN=2, REQ_PING=3 };
+
+/* Pending exp/gain change requested by a client, consumed by the Argus loop.
+ * Guarded by a simple flag pair; only the loop writes cur_* on the Session. */
+struct PendingCtl {
+    volatile bool     have = false;
+    volatile uint64_t exp_ns = 0;
+    volatile float    gain = 0.0f;
+} g_pending;
+
+static void serve_frame(int cli, const FrameBuffer& buf)
 {
     if (!buf.valid) {
         NetHdr err{}; err.magic=0xDEADBEEF;
@@ -379,25 +477,74 @@ static void serve_client(int cli, const FrameBuffer& buf,
     send_all(cli,buf.pixels.data(),buf.pixels.size()*2);
 }
 
-/* Non-blocking: serve any waiting clients, return number served */
-static int serve_waiting_clients(int srv, const FrameBuffer& buf,
-                                  const Config& cfg)
+/* Handle one request on an already-open client socket.
+ * Returns false if the connection should be closed. */
+static bool handle_request(int cli, const FrameBuffer& buf)
 {
-    int served=0;
-    while (true) {
-        fd_set fds; FD_ZERO(&fds); FD_SET(srv,&fds);
-        struct timeval tv={0,0};  /* instant poll, no wait */
-        if (select(srv+1,&fds,nullptr,nullptr,&tv)<=0) break;
-        int cli=accept(srv,nullptr,nullptr);
-        if (cli<0) break;
-        double age=buf.age_ms();
-        /* No per-client print in hot path */
-        serve_client(cli,buf,cfg);
-        close(cli);
-        served++;
+    ReqHdr rq{};
+    if (!recv_all(cli,&rq,sizeof(rq))) return false;  /* client closed */
+
+    switch (rq.cmd) {
+    case REQ_FRAME:
+        serve_frame(cli, buf);
+        return true;
+    case REQ_SET_EXPGAIN: {
+        g_pending.exp_ns = rq.want_exp;
+        g_pending.gain   = rq.want_gain;
+        g_pending.have   = true;
+        uint32_t ack = 0;
+        return send_all(cli,&ack,sizeof(ack));
     }
-    return served;
+    case REQ_PING: {
+        NetHdr nh{}; nh.magic=0x52413130; nh.nf=0;
+        return send_all(cli,&nh,sizeof(nh));
+    }
+    default:
+        return false;  /* unknown command: drop connection */
+    }
 }
+
+/* Non-blocking client set management. Accept new connections, service any
+ * readable client sockets, drop closed ones. clients[] holds open fds. */
+struct ClientSet {
+    std::vector<int> fds;
+
+    void poll(int srv, const FrameBuffer& buf)
+    {
+        /* Accept every pending new connection (non-blocking). */
+        while (true) {
+            fd_set afds; FD_ZERO(&afds); FD_SET(srv,&afds);
+            struct timeval tv={0,0};
+            if (select(srv+1,&afds,nullptr,nullptr,&tv)<=0) break;
+            int cli=accept(srv,nullptr,nullptr);
+            if (cli<0) break;
+            int one=1; setsockopt(cli,IPPROTO_TCP,TCP_NODELAY,&one,sizeof(one));
+            fds.push_back(cli);
+        }
+
+        if (fds.empty()) return;
+
+        /* Which existing clients have a request waiting? */
+        fd_set rfds; FD_ZERO(&rfds); int maxfd=-1;
+        for (int fd : fds) { FD_SET(fd,&rfds); if (fd>maxfd) maxfd=fd; }
+        struct timeval tv={0,0};
+        if (select(maxfd+1,&rfds,nullptr,nullptr,&tv)<=0) return;
+
+        std::vector<int> keep;
+        keep.reserve(fds.size());
+        for (int fd : fds) {
+            if (FD_ISSET(fd,&rfds)) {
+                if (handle_request(fd, buf)) keep.push_back(fd);
+                else close(fd);
+            } else {
+                keep.push_back(fd);
+            }
+        }
+        fds.swap(keep);
+    }
+
+    void close_all() { for (int fd : fds) close(fd); fds.clear(); }
+};
 
 // ── File save (single-shot mode) ──────────────────────────────────────────────
 
@@ -506,21 +653,35 @@ int main(int argc,char*argv[])
 
         int srv=socket(AF_INET,SOCK_STREAM,0);
         int one=1; setsockopt(srv,SOL_SOCKET,SO_REUSEADDR,&one,sizeof(one));
+        /* Non-blocking accept so the Argus loop never stalls on connect. */
         sockaddr_in a{}; a.sin_family=AF_INET;
         a.sin_addr.s_addr=INADDR_ANY; a.sin_port=htons(cfg.port);
         bind(srv,(sockaddr*)&a,sizeof(a)); listen(srv,16);
 
-        printf("[Server] port %d  (continuous RAW16 buffer)\n",cfg.port);
+        printf("[Server] port %d  (continuous RAW16 buffer, persistent conns)\n",cfg.port);
         printf("[Server] clients served from latest in-memory frame\n");
         printf("[Server] READY — fast captures enabled\n");
         fflush(stdout);
 
+        ClientSet clients;
+
         /* Stats */
         int frames_captured = 0;
-        int clients_served  = 0;
-        double t_last_frame = 0;
 
         while (g_running) {
+
+            /* ── Apply any pending live exp/gain change (Argus thread) ────── */
+            if (g_pending.have) {
+                uint64_t we = g_pending.exp_ns;
+                float    wg = g_pending.gain;
+                g_pending.have = false;
+                if (session.set_exposure_gain_live(we, wg)) {
+                    printf("[Server] live exp=%.1fms gain=%s\n",
+                           we/1e6,
+                           wg>0.0f ? std::to_string(wg).c_str() : "auto");
+                    fflush(stdout);
+                }
+            }
 
             /* ── Try to get latest frame (short timeout) ─────────────────── */
             CUgraphicsResource cuRes=0;
@@ -536,16 +697,17 @@ int main(int argc,char*argv[])
                     &session.cuConn,cuRes,nullptr);
 
                 if (ok) {
+                    /* Tag with the values CURRENTLY applied to the pipeline,
+                     * not the launch-time cfg (which is stale after a live
+                     * update). This is what the client reads back as actual. */
                     g_buf.update(std::move(px),
                                  session.W,session.H,session.BPP,
-                                 cfg.exp_ns,cfg.gain);
+                                 session.cur_exp_ns,session.cur_gain);
                     frames_captured++;
 
-                    /* Print stats every 10 frames */
-                    if (frames_captured%10==1) {
-                        printf("[Buffer] frame=%d  clients=%d\n",
-                           g_buf.seq, clients_served);
-                    fflush(stdout);
+                    if (frames_captured%30==1) {
+                        printf("[Buffer] frame=%d  conns=%zu\n",
+                               g_buf.seq, clients.fds.size());
                         fflush(stdout);
                     }
 
@@ -555,19 +717,18 @@ int main(int argc,char*argv[])
 
             } else if (cr==CUDA_ERROR_LAUNCH_TIMEOUT) {
                 /* No frame in 100ms — pipeline might be stalling */
-                /* Submit more captures to keep it flowing */
                 session.fill_pipeline(3);
             }
             /* CUDA_ERROR_UNKNOWN or other: ignore, try again */
 
-            /* ── Serve all waiting TCP clients (non-blocking) ────────────── */
-            int n=serve_waiting_clients(srv,g_buf,cfg);
-            clients_served+=n;
+            /* ── Service persistent client connections (non-blocking) ────── */
+            clients.poll(srv, g_buf);
         }
 
-        printf("[Server] shutting down  frames=%d  clients=%d\n",
-               frames_captured,clients_served);
+        printf("[Server] shutting down  frames=%d  conns=%zu\n",
+               frames_captured, clients.fds.size());
         fflush(stdout);
+        clients.close_all();
         close(srv);
     }
 

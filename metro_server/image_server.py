@@ -18,6 +18,11 @@ DEFAULT_FPS         = 30
 DEFAULT_EXPOSURE_NS = 33000000
 DEFAULT_GAIN        = 0.0
 DEFAULT_BIT_DEPTH   = 10
+DEFAULT_LOSSLESS    = True    # lossless-by-default; True => RAW10 packed
+
+# Frame wire dtypes (status 0x00 frame header: [0x00][H u32][W u32][dtype u8])
+DTYPE_U16      = 0x10   # uint16 unpacked  (16.6 MB / 4K frame)
+DTYPE_RAW10    = 0x11   # RAW10 bit-packed (9.5 MB / 4K frame, lossless)
 
 HDR_SAT_THRESHOLD  = 0.95
 HDR_EXPOSURE_RATIO = 4
@@ -105,8 +110,19 @@ def pack_raw10(frame_u16):
 
 # ── RawCaptureProcess ─────────────────────────────────────────────────────────
 
+import struct as _struct
+
+# raw_capture localhost request protocol (must match ReqHdr in raw_capture.cpp)
+_REQ_FMT        = '<IQfI'          # cmd u32, want_exp u64, want_gain f32, pad u32
+_REQ_FRAME      = 1
+_REQ_SET_EXPGAIN= 2
+_REQ_PING       = 3
+
+
 class RawCaptureProcess:
-    """Manages raw_capture --server as a persistent background process."""
+    """Manages raw_capture --server as a persistent background process,
+    and holds ONE persistent localhost connection to it (reused for every
+    frame) instead of reconnecting per capture."""
 
     def __init__(self):
         self.proc        = None
@@ -116,8 +132,11 @@ class RawCaptureProcess:
         self.fps         = DEFAULT_FPS
         self.exposure_ns = DEFAULT_EXPOSURE_NS
         self.gain        = DEFAULT_GAIN
+        self._sock       = None        # persistent connection to raw_capture
 
     def _build_cmd(self):
+        # Pass the FULL current state every launch so a restart for one
+        # parameter (e.g. sensormode) never silently resets the others.
         cmd = [RAW_CAPTURE_BIN,'--server',
                '--port', str(RAW_CAPTURE_PORT),
                '--mode', str(self.sensor_mode),
@@ -164,6 +183,7 @@ class RawCaptureProcess:
 
     def stop(self):
         self.ready = False
+        self._close_sock()
         if self.proc:
             try: self.proc.terminate(); self.proc.wait(timeout=5)
             except:
@@ -174,8 +194,57 @@ class RawCaptureProcess:
     def is_alive(self):
         return self.proc is not None and self.proc.poll() is None
 
+    def _close_sock(self):
+        if self._sock is not None:
+            try: self._sock.close()
+            except: pass
+            self._sock = None
+
+    def _connect(self):
+        """Open (or reopen) the persistent localhost connection."""
+        self._close_sock()
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        try:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8*1024*1024)
+        except: pass
+        s.settimeout(60)
+        s.connect(('127.0.0.1', RAW_CAPTURE_PORT))
+        self._sock = s
+
+    def restart_with_params(self):
+        """Restart raw_capture carrying the FULL current state. Used only for
+        changes Argus can't apply live (sensor mode, fps)."""
+        with self.lock:
+            nvargus_restart()
+            time.sleep(2)
+            if not self.start():
+                raise RuntimeError("raw_capture restart failed")
+
+    def set_expgain_live(self, exposure_ns, gain):
+        """Push a live exposure/gain change to raw_capture over the persistent
+        connection — no process restart. Safe for exp/gain-only changes."""
+        with self.lock:
+            self.exposure_ns = int(exposure_ns)
+            self.gain        = float(gain)
+            if self._sock is None:
+                # No live channel yet; values are stashed and will apply
+                # on next (re)connect / launch args.
+                return
+            req = _struct.pack(_REQ_FMT, _REQ_SET_EXPGAIN,
+                               int(exposure_ns), float(gain), 0)
+            try:
+                self._sock.sendall(req)
+                ack = self._recv_fast(self._sock, 4)  # 4-byte ack
+                _ = _struct.unpack('<I', ack)[0]
+            except Exception as e:
+                # Live channel broke — drop it, next capture reconnects.
+                self._close_sock()
+                print("[RCP] live set failed, will reconnect: " + str(e))
+
     def capture(self):
-        """Connect to raw_capture server, retrieve one frame."""
+        """Request one frame over the persistent connection. Reconnects
+        transparently if the socket is not yet open or was dropped."""
         with self.lock:
             if not self.is_alive() or not self.ready:
                 print("[RCP] Not ready — restarting...")
@@ -184,46 +253,55 @@ class RawCaptureProcess:
                 if not self.start():
                     raise RuntimeError("raw_capture server failed to start")
 
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(60)
+            # (Re)establish persistent connection if needed.
+            if self._sock is None:
+                try:
+                    self._connect()
+                except Exception as e:
+                    self.ready = False
+                    raise RuntimeError("Cannot connect to raw_capture: " + str(e))
+
             try:
-                s.connect(('127.0.0.1', RAW_CAPTURE_PORT))
-            except Exception as e:
-                self.ready = False
-                raise RuntimeError("Cannot connect to raw_capture: " + str(e))
+                return self._request_frame()
+            except (ConnectionError, OSError) as e:
+                # One transparent retry after reconnect.
+                print("[RCP] frame req failed (" + str(e) + "), reconnecting...")
+                try:
+                    self._connect()
+                    return self._request_frame()
+                except Exception as e2:
+                    self._close_sock()
+                    self.ready = False
+                    raise RuntimeError("raw_capture frame failed: " + str(e2))
 
-            # NetHdr: 36 bytes — magic(4) w(4) h(4) bpp(4) nf(4)
-            #                     exp_ns(8) gain_x1000(4) pad(4)
-            hdr_bytes = self._recv_fast(s, 36)
-            magic, w, h, bpp, nf, exp_ns, gain_x1000, pad = \
-                struct.unpack('<IIIIIQII', hdr_bytes)
+    def _request_frame(self):
+        s = self._sock
+        s.sendall(_struct.pack(_REQ_FMT, _REQ_FRAME, 0, 0.0, 0))
 
-            if magic == 0xDEADBEEF:
-                s.close()
-                self.ready = False
-                raise RuntimeError("raw_capture returned error")
-            if magic != 0x52413130:
-                s.close()
-                raise RuntimeError("Bad magic: " + hex(magic))
+        # NetHdr: 36 bytes — magic(4) w(4) h(4) bpp(4) nf(4)
+        #                     exp_ns(8) gain_x1000(4) pad(4)
+        hdr_bytes = self._recv_fast(s, 36)
+        magic, w, h, bpp, nf, exp_ns, gain_x1000, pad = \
+            struct.unpack('<IIIIIQII', hdr_bytes)
 
-            total_px = w * h * nf
-            n_bytes  = total_px * 2
+        if magic == 0xDEADBEEF:
+            self.ready = False
+            raise RuntimeError("raw_capture returned error")
+        if magic != 0x52413130:
+            raise RuntimeError("Bad magic: " + hex(magic))
 
-            # Efficient receive using numpy recv_into
-            pixel_arr = np.empty(total_px, dtype=np.uint16)
-            view = pixel_arr.view(np.uint8)
-            received = 0
-            while received < n_bytes:
-                got = s.recv_into(view[received:], n_bytes - received)
-                if got == 0: raise ConnectionError("raw_capture closed")
-                received += got
-            s.close()
+        total_px = w * h * nf
+        n_bytes  = total_px * 2
 
-            print("[RCP] " + str(w) + "x" + str(h) +
-                  "  bpp=" + str(bpp) +
-                  "  exp=" + '{:.1f}'.format(exp_ns/1e6) + "ms" +
-                  "  gain=" + '{:.3f}'.format(gain_x1000/1000.0) + "x")
-            return pixel_arr, w, h, bpp, nf, exp_ns, gain_x1000
+        pixel_arr = np.empty(total_px, dtype=np.uint16)
+        view = pixel_arr.view(np.uint8)
+        received = 0
+        while received < n_bytes:
+            got = s.recv_into(view[received:], n_bytes - received)
+            if got == 0: raise ConnectionError("raw_capture closed")
+            received += got
+
+        return pixel_arr, w, h, bpp, nf, exp_ns, gain_x1000
 
     @staticmethod
     def _recv_fast(sock, n):
@@ -246,13 +324,15 @@ class Camera:
                  fps=DEFAULT_FPS,
                  exposure_ns=DEFAULT_EXPOSURE_NS,
                  gain=DEFAULT_GAIN,
-                 bit_depth=DEFAULT_BIT_DEPTH):
+                 bit_depth=DEFAULT_BIT_DEPTH,
+                 lossless=DEFAULT_LOSSLESS):
         self.rcp         = rcp
         self.sensor_mode = sensor_mode
         self.fps         = fps
         self.exposure_ns = exposure_ns
         self.gain        = gain
         self.bit_depth   = bit_depth
+        self.lossless    = lossless
         self.actual_exp  = 0
         self.actual_gain = 0.0
         self._ae_lock    = threading.Lock()
@@ -321,7 +401,8 @@ class Camera:
 
     def set_params(self, params):
         changed = []
-        restart = False
+        restart = False          # only True for mode/fps (needs session rebuild)
+        exp_gain_touched = False # exposure/gain changed -> live update
         if 'sensormode' in params:
             m = int(params['sensormode'])
             if m not in SENSOR_MODES: raise ValueError("bad sensormode")
@@ -335,15 +416,20 @@ class Camera:
             self.exposure_ns = int(params['exposure_ns'])
             self.rcp.exposure_ns = self.exposure_ns
             with self._ae_lock: self.actual_exp = 0
-            changed.append("exp_ns="+str(self.exposure_ns)); restart = True
+            changed.append("exp_ns="+str(self.exposure_ns))
+            exp_gain_touched = True
         if 'gain' in params:
             self.gain = float(params['gain']); self.rcp.gain = self.gain
             with self._ae_lock: self.actual_gain = 0.0
-            changed.append("gain="+'{:.3f}'.format(self.gain)); restart = True
+            changed.append("gain="+'{:.3f}'.format(self.gain))
+            exp_gain_touched = True
         if 'bit_depth' in params:
             bd = int(params['bit_depth'])
             if bd not in (8,10,12): raise ValueError("bit_depth 8/10/12")
             self.bit_depth = bd; changed.append("bit_depth="+str(bd))
+        if 'lossless' in params:
+            self.lossless = bool(params['lossless'])
+            changed.append("lossless="+str(self.lossless))
         if 'sat_threshold' in params:
             global HDR_SAT_THRESHOLD
             HDR_SAT_THRESHOLD = float(params['sat_threshold'])
@@ -352,11 +438,20 @@ class Camera:
             global HDR_EXPOSURE_RATIO
             HDR_EXPOSURE_RATIO = int(params['hdr_exp_ratio'])
             changed.append("ratio="+str(HDR_EXPOSURE_RATIO))
+
+        # Only the requested setting changes:
+        #  - mode/fps  -> full restart, but restart carries ALL persisted params
+        #  - exp/gain  -> live update on the running pipeline (no restart),
+        #                 unless a restart is already happening for mode/fps
+        #                 (in which case the new exp/gain go in via launch args)
         if restart and changed:
             def do_restart():
                 print("[Camera] Restarting pipeline: " + str(changed))
                 self.rcp.restart_with_params()
             threading.Thread(target=do_restart, daemon=True).start()
+        elif exp_gain_touched:
+            # Live path — apply immediately without disturbing mode/fps.
+            self.rcp.set_expgain_live(self.exposure_ns, self.gain)
         return changed
 
     def info(self):
@@ -368,6 +463,7 @@ class Camera:
             'height':             self.height,
             'fps':                self.fps,
             'bit_depth':          self.bit_depth,
+            'lossless':           self.lossless,
             'native_bpp':         self.native_bpp,
             'hdr':                self.hdr,
             'sensormode':         self.sensor_mode,
@@ -460,11 +556,22 @@ class ClientHandler(threading.Thread):
         self._resp(b'STOPPED')
 
     def _send_frame(self, frame):
-        """Send frame as uint16 (dtype=0x10). Reliable baseline format."""
-        h, w    = frame.shape
-        pixels  = frame.astype(np.uint16).tobytes()
-        header  = struct.pack('<BIIB', 0x00, h, w, 0x10)
-        send_exactly(self.conn, header + pixels)
+        """Send one frame. Lossless-by-default:
+          lossless + 10-bit  -> RAW10 bit-packed (dtype 0x11, 9.5MB/4K)
+          otherwise          -> uint16 unpacked  (dtype 0x10, 16.6MB/4K)
+        RAW10 packing is only valid for true 10-bit data (0-1023); for 8/12-bit
+        scaled output we fall back to lossless uint16 so no bits are lost."""
+        h, w = frame.shape
+        use_raw10 = bool(getattr(self.camera, 'lossless', True)) and \
+                    self.camera.bit_depth == 10
+        if use_raw10:
+            packed = pack_raw10(frame)
+            header = struct.pack('<BIIB', 0x00, h, w, DTYPE_RAW10)
+            send_exactly(self.conn, header + packed)
+        else:
+            pixels = frame.astype(np.uint16).tobytes()
+            header = struct.pack('<BIIB', 0x00, h, w, DTYPE_U16)
+            send_exactly(self.conn, header + pixels)
 
     def _resp(self, data):
         send_exactly(self.conn,

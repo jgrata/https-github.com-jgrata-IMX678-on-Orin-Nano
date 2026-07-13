@@ -671,23 +671,19 @@ classdef ECamHDRClient < handle
         end
 
         function data = rdBytes(obj, n)
-            %RDBYTES  Read exactly n bytes. No Java. Pure MATLAB tcpclient.
-            %  Uses a single blocking read() for ALL sizes — MATLAB's read()
-            %  waits internally against obj.Socket.Timeout and reassembles TCP
-            %  segments, so the old NumBytesAvailable polling loop (which added
-            %  ~10-15ms of pause() latency per call, and was hit repeatedly for
-            %  the tiny 1/5/9-byte frame-header reads) is gone.
+            %RDBYTES  Read exactly n bytes from the tcpclient socket.
+            %  A single blocking read() is correct and fast here: once bytes
+            %  are present read() returns immediately (verified: sub-ms for
+            %  headers and full frames). Earlier multi-second stalls were a
+            %  server-side issue (a blocking v4l2-ctl subprocess), not this
+            %  read path — that has been removed on the server.
             n = double(n);
             if n == 0, data = uint8([]); return; end
 
             deadline = tic;
-
-            % Single blocking read. read() returns as soon as n bytes arrive
-            % or the socket Timeout elapses.
             data = read(obj.Socket, n, 'uint8');
 
-            % Rare: read() returned short (e.g. Timeout mid-frame). Top up
-            % without a fixed-interval sleep — block for whatever remains.
+            % Top up in the rare case read() returns short.
             received = numel(data);
             while received < n
                 if toc(deadline) > obj.RECV_TIMEOUT_S
@@ -695,7 +691,7 @@ classdef ECamHDRClient < handle
                         'Got %d of %d bytes after %.0fs', ...
                         received, n, obj.RECV_TIMEOUT_S);
                 end
-                chunk    = read(obj.Socket, n-received, 'uint8');
+                chunk = read(obj.Socket, n-received, 'uint8');
                 if ~isempty(chunk)
                     data     = [data(:); chunk(:)];  %#ok
                     received = numel(data);

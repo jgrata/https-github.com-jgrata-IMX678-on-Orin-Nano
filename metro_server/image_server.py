@@ -70,25 +70,10 @@ def nvargus_restart():
     print("[nvargus] " + r.stdout.strip())
     return r.stdout.strip() == 'active'
 
-def read_actual_sensor_params():
-    try:
-        r = subprocess.run(
-            ['v4l2-ctl','-d','/dev/video0','--get-ctrl=exposure,gain'],
-            capture_output=True, text=True, timeout=3)
-        exp_ns = 0; gain = 0.0
-        for line in r.stdout.splitlines():
-            low = line.lower().strip()
-            if low.startswith('exposure:'):
-                m = re.search(r'(\d+)', low)
-                if m: exp_ns = int(m.group(1)) * 1000
-            elif low.startswith('gain:'):
-                m = re.search(r'(\d+)', low)
-                if m:
-                    gain_db = int(m.group(1)) * 0.1
-                    gain = 10.0 ** (gain_db / 20.0)
-        return exp_ns, gain
-    except Exception:
-        return 0, 0.0
+# NOTE: read_actual_sensor_params() (v4l2-ctl subprocess) was removed. Actual
+# exposure/gain now come from raw_capture's NetHdr on every frame and via
+# RawCaptureProcess.poll_actual(). The old subprocess blocked the process for
+# up to 3s while Argus owned /dev/video0, starving the socket threads.
 
 
 # ── RAW10 packing (reduces 16.6MB → 9.5MB) ───────────────────────────────────
@@ -242,6 +227,27 @@ class RawCaptureProcess:
                 self._close_sock()
                 print("[RCP] live set failed, will reconnect: " + str(e))
 
+    def poll_actual(self):
+        """Lightweight query of the pipeline's current actual exp/gain via a
+        PING (36-byte NetHdr reply, no pixel payload). Returns (exp_ns, gain).
+        Never shells out; never blocks other threads for more than one tiny
+        round-trip. On any error returns (0, 0.0) and drops the socket so the
+        next capture reconnects."""
+        with self.lock:
+            if self._sock is None or not self.is_alive():
+                return 0, 0.0
+            try:
+                self._sock.sendall(_struct.pack(_REQ_FMT, _REQ_PING, 0, 0.0, 0))
+                hdr = self._recv_fast(self._sock, 36)
+                magic, w, h, bpp, nf, exp_ns, gain_x1000, pad = \
+                    struct.unpack('<IIIIIQII', hdr)
+                if magic != 0x52413130:
+                    return 0, 0.0
+                return int(exp_ns), gain_x1000 / 1000.0
+            except Exception:
+                self._close_sock()
+                return 0, 0.0
+
     def capture(self):
         """Request one frame over the persistent connection. Reconnects
         transparently if the socket is not yet open or was dropped."""
@@ -348,18 +354,59 @@ class Camera:
         self.hdr        = m['hdr']
 
     def _ae_monitor(self):
+        # AE monitoring sourced from raw_capture's NetHdr (exp/gain reported on
+        # every frame), NOT from a v4l2-ctl subprocess. The old subprocess call
+        # blocked in the kernel for up to 3s while Argus owned /dev/video0,
+        # which starved the socket handler threads (ping/setParams took
+        # seconds). Polling the pipeline's own reported values is cheap, local,
+        # and never blocks other threads.
         time.sleep(8)
         while True:
             time.sleep(3)
-            exp, g = read_actual_sensor_params()
-            if exp > 0:
-                with self._ae_lock: self.actual_exp = exp
-            if g > 0:
-                with self._ae_lock: self.actual_gain = g
-            elif self.gain > 0:
-                with self._ae_lock: self.actual_gain = self.gain
+            try:
+                exp, g = self.rcp.poll_actual()   # lightweight PING round-trip
+            except Exception:
+                continue
             if self.exposure_ns > 0:
+                # fixed exposure: actual == set
                 with self._ae_lock: self.actual_exp = self.exposure_ns
+            elif exp > 0:
+                with self._ae_lock: self.actual_exp = exp
+            if self.gain > 0:
+                with self._ae_lock: self.actual_gain = self.gain
+            elif g > 0:
+                with self._ae_lock: self.actual_gain = g
+
+    def ae_settle(self, gain_fixed=1.0, settle_s=4.0):
+        """One-shot startup AE convergence, then FREEZE.
+
+        Boot with a fixed gain and auto exposure (exp_ns=0), let the sensor's
+        AE converge for ~settle_s (about one AE cycle), read the actual
+        exposure the pipeline reports, then pin exposure_ns to that value.
+        After this both exposure and gain are fixed and AE is effectively
+        frozen — no ongoing AE churn, and no per-request AE surprises.
+
+        Runs entirely over the fast NetHdr/live-update path; no subprocess,
+        no full-frame transfer, no session restart."""
+        print("[AE] settle: gain={:.2f} exposure=auto, waiting {:.1f}s...".format(
+            gain_fixed, settle_s))
+        # 1) auto exposure at fixed gain
+        self.set_params({'gain': float(gain_fixed), 'exposure_ns': 0})
+        # 2) let AE converge (poll a few times so actual_exp updates)
+        deadline = time.monotonic() + settle_s
+        last = 0
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+            try:
+                exp, g = self.rcp.poll_actual()
+                if exp > 0: last = exp
+            except Exception:
+                pass
+        # 3) pin exposure to the converged value (fall back to a sane default)
+        pinned = last if last > 0 else DEFAULT_EXPOSURE_NS
+        self.set_params({'exposure_ns': int(pinned)})
+        print("[AE] settled: exposure pinned to {:.2f}ms, gain fixed {:.2f}x".format(
+            pinned/1e6, gain_fixed))
 
     def capture_frame(self):
         if self.hdr:
@@ -605,8 +652,10 @@ def main():
     rcp = RawCaptureProcess()
     rcp.sensor_mode  = DEFAULT_SENSOR_MODE
     rcp.fps          = DEFAULT_FPS
-    rcp.exposure_ns  = DEFAULT_EXPOSURE_NS
-    rcp.gain         = DEFAULT_GAIN
+    # Boot with auto exposure at fixed gain=1; ae_settle() will converge then
+    # pin exposure. (Was: fixed 33ms + auto gain, which maxed gain in the dark.)
+    rcp.exposure_ns  = 0
+    rcp.gain         = 1.0
 
     print("[Init] Starting raw_capture --server (first init ~7s)...")
     if not rcp.start():
@@ -615,9 +664,16 @@ def main():
     camera = Camera(rcp,
         sensor_mode = DEFAULT_SENSOR_MODE,
         fps         = DEFAULT_FPS,
-        exposure_ns = DEFAULT_EXPOSURE_NS,
-        gain        = DEFAULT_GAIN,
+        exposure_ns = 0,
+        gain        = 1.0,
         bit_depth   = DEFAULT_BIT_DEPTH)
+
+    # Startup AE convergence then freeze (see Camera.ae_settle).
+    if rcp.is_alive() and rcp.ready:
+        try:
+            camera.ae_settle(gain_fixed=1.0, settle_s=4.0)
+        except Exception as e:
+            print("[AE] settle skipped: " + str(e))
 
     print("\n[Server] Camera info:")
     for k,v in camera.info().items():

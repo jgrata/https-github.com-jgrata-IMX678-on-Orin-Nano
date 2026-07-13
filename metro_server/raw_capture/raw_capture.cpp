@@ -496,7 +496,19 @@ static bool handle_request(int cli, const FrameBuffer& buf)
         return send_all(cli,&ack,sizeof(ack));
     }
     case REQ_PING: {
-        NetHdr nh{}; nh.magic=0x52413130; nh.nf=0;
+        /* Lightweight actual-value probe: return a NetHdr (no pixel payload)
+         * carrying the exp/gain currently tagged on the latest buffer, so the
+         * Python AE monitor can poll without a full-frame transfer or any
+         * v4l2-ctl subprocess. nf=0 signals "header only". */
+        NetHdr nh{};
+        nh.magic      = 0x52413130;
+        nh.w          = buf.w;
+        nh.h          = buf.h;
+        nh.bpp        = buf.bpp;
+        nh.nf         = 0;
+        nh.exp_ns     = buf.exp_ns;
+        nh.gain_x1000 = (uint32_t)(buf.gain*1000);
+        nh.pad        = 0;
         return send_all(cli,&nh,sizeof(nh));
     }
     default:

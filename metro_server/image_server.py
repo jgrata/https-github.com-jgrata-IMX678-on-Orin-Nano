@@ -13,6 +13,12 @@ RAW_CAPTURE_BIN  = '/home/metro/raw_capture/raw_capture'
 RAW_CAPTURE_PORT = 9001
 CAPTURE_DIR      = '/tmp/ecam_captures'
 
+# TCP send buffer for the MATLAB client connection. On a high-RTT link TCP
+# throughput ~= buffer / RTT, so this (with a matching net.core.wmem_max on the
+# Jetson) sets the throughput ceiling for bulk frame transfer. 16MB over a
+# 300ms link allows ~53MB/s vs ~13MB/s at the old 4MB.
+SEND_BUF_BYTES   = 16 * 1024 * 1024
+
 DEFAULT_SENSOR_MODE = 1
 DEFAULT_FPS         = 30
 DEFAULT_EXPOSURE_NS = 33000000
@@ -701,10 +707,24 @@ def main():
 
     while True:
         conn, addr = srv.accept()
+        # Bulk 4K frames (~10MB packed) over a high-RTT link are TCP-window
+        # limited: max throughput ~= socket_buffer / RTT. On a 300ms link a
+        # 4MB buffer caps us at ~13MB/s (~0.8s/frame). Widen the send buffer so
+        # more data stays in flight. NOTE: Linux silently clamps SO_SNDBUF to
+        # net.core.wmem_max — to actually get 16MB you must raise it on the
+        # Jetson:  sudo sysctl -w net.core.wmem_max=33554432
+        # (persist in /etc/sysctl.conf). We print the granted size below so you
+        # can see whether the request was clamped.
         try:
-            conn.setsockopt(socket.SOL_SOCKET,
-                            socket.SO_SNDBUF, 4*1024*1024)
-        except: pass
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, SEND_BUF_BYTES)
+            granted = conn.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF)
+            print("[Server] SO_SNDBUF requested={}MB granted={:.1f}MB{}".format(
+                SEND_BUF_BYTES // (1024*1024), granted / (1024*1024),
+                "  (CLAMPED — raise net.core.wmem_max)"
+                if granted < SEND_BUF_BYTES else ""))
+        except Exception as e:
+            print("[Server] socket tuning failed: " + str(e))
         ClientHandler(conn, addr, camera).start()
 
 

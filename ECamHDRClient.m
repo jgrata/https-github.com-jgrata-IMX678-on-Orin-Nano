@@ -153,6 +153,14 @@ classdef ECamHDRClient < handle
             obj.IsConnected = false;
         end
 
+        % ── setDebug ──────────────────────────────────────────────────────────
+        function setDebug(obj, tf)
+            %SETDEBUG  Toggle verbose per-frame timing/statistics at runtime.
+            %  cam.setDebug(true) then cam.capture() prints the network
+            %  throughput (MB/s), unpack time, and info round-trip time.
+            obj.Debug = logical(tf);
+        end
+
         % ── ping ──────────────────────────────────────────────────────────────
         function ping(obj)
             obj.requireConnected();
@@ -327,16 +335,29 @@ classdef ECamHDRClient < handle
             fprintf('[ECam] Capture  mode=%d  %d-bit  exp=%s\n', ...
                 obj.p_sensormode, obj.p_bit_depth, exp_s);
 
+            t_frame = tic;
             obj.sendCmd(obj.CMD_CAPTURE);
             frame = obj.recvFrame();
+            t_frame = toc(t_frame);
 
+            t_info = tic;
             obj.CameraInfo = obj.getInfo();
             obj.syncFromServer();
+            t_info = toc(t_info);
 
-            fprintf('[ECam] Frame    %dx%d  [%d,%d]  mean=%.1f  distinct=%d\n', ...
-                size(frame,1), size(frame,2), ...
-                min(frame(:)), max(frame(:)), ...
-                mean(double(frame(:))), numel(unique(frame(:))));
+            if obj.Debug
+                % Full diagnostics (distinct/mean are O(n log n) / heavy
+                % allocations over ~8.3M pixels — Debug-only, not per-frame).
+                fprintf('[ECam] Frame    %dx%d  [%d,%d]  mean=%.1f  distinct=%d\n', ...
+                    size(frame,1), size(frame,2), ...
+                    min(frame(:)), max(frame(:)), ...
+                    mean(double(frame(:))), numel(unique(frame(:))));
+                fprintf('[ECam] Timing   frame=%.3fs  info=%.3fs\n', ...
+                    t_frame, t_info);
+            else
+                fprintf('[ECam] Frame    %dx%d  (%.3fs)\n', ...
+                    size(frame,1), size(frame,2), t_frame + t_info);
+            end
 
             has_ae = isfield(obj.CameraInfo,'actual_exposure_ns') && ...
                 obj.CameraInfo.actual_exposure_ns > 0;
@@ -345,6 +366,20 @@ classdef ECamHDRClient < handle
                     obj.CameraInfo.actual_exposure_ns/1e6, ...
                     obj.CameraInfo.actual_gain);
             end
+        end
+
+        % ── grab ──────────────────────────────────────────────────────────────
+        function frame = grab(obj)
+            %GRAB  Fast single-frame capture for high-throughput DAQ loops.
+            %  Returns uint16 [H x W], identical pixels to capture().
+            %  Unlike capture() it skips the per-frame getInfo() round-trip,
+            %  the syncFromServer() JSON decode, and all statistics/printing —
+            %  everything not needed to move pixels. Use this in tight
+            %  acquisition loops; call capture() (or showParams()) when you
+            %  need the refreshed actual exposure/gain.
+            obj.requireConnected();
+            obj.sendCmd(obj.CMD_CAPTURE);
+            frame = obj.recvFrame();
         end
 
         % ── captureNormalized ─────────────────────────────────────────────────
@@ -397,6 +432,70 @@ classdef ECamHDRClient < handle
             end
             fprintf('[ECam] Stream stopped. Frames: %d\n', ...
                 obj.StreamFrameCount);
+        end
+
+        % ── streamPull ──────────────────────────────────────────────────────────
+        function stats = streamPull(obj, callback, nFrames, depth)
+            %STREAMPULL  High-throughput pipelined acquisition.
+            %  stats = cam.streamPull(cb, N)         keep 2 requests in flight
+            %  stats = cam.streamPull(cb, N, depth)  keep `depth` in flight
+            %
+            %  Keeps `depth` capture requests in flight at once so the network
+            %  transfer of one frame overlaps the sensor/CUDA capture of the
+            %  next (and your callback processing the previous). This hides the
+            %  request round-trip that limits a plain capture() loop to
+            %  ~1/RTT fps, letting throughput approach the link bandwidth.
+            %
+            %  callback is invoked as cb(frame, k) for each frame k=1..N, where
+            %  frame is uint16 [H x W] (identical to capture()/grab()). Runs as
+            %  a blocking foreground loop — deterministic, best for recording.
+            %  Returns struct(frames, elapsed_s, fps).
+            %
+            %  No getInfo() round-trip or per-frame stats — pure pixel path.
+            %  Uses CMD_CAPTURE, so it needs no special server stream mode.
+            obj.requireConnected();
+            if nargin < 4 || isempty(depth), depth = 2; end
+            depth = max(1, min(round(depth), nFrames));
+
+            sent = 0; got = 0;
+            for i = 1:depth                       % prime the pipeline
+                obj.sendCmd(obj.CMD_CAPTURE); sent = sent + 1;
+            end
+
+            t0 = tic;
+            while got < nFrames
+                frame = obj.recvFrame();
+                got   = got + 1;
+                if sent < nFrames                 % refill to keep `depth` in flight
+                    obj.sendCmd(obj.CMD_CAPTURE); sent = sent + 1;
+                end
+                if ~isempty(callback), callback(frame, got); end
+            end
+            elapsed = toc(t0);
+
+            stats = struct('frames', got, 'elapsed_s', elapsed, ...
+                           'fps', got / max(elapsed, eps));
+            fprintf('[ECam] streamPull: %d frames in %.2fs = %.1f fps\n', ...
+                got, elapsed, stats.fps);
+        end
+
+        % ── recordFrames ────────────────────────────────────────────────────────
+        function [frames, stats] = recordFrames(obj, nFrames, depth)
+            %RECORDFRAMES  Acquire N frames into a uint16 [H x W x N] array.
+            %  [frames, stats] = cam.recordFrames(N)
+            %  Convenience wrapper over streamPull for burst DAQ. Note memory:
+            %  each 4K 10-bit frame is ~16.6MB in uint16, so N frames need
+            %  ~16.6*N MB of RAM.
+            obj.requireConnected();
+            if nargin < 3 || isempty(depth), depth = 2; end
+            H = double(obj.CameraInfo.height);
+            W = double(obj.CameraInfo.width);
+            frames = zeros(H, W, nFrames, 'uint16');
+            stats  = obj.streamPull(@store, nFrames, depth);
+
+            function store(f, k)
+                frames(:,:,k) = f;
+            end
         end
 
     end % public
@@ -630,9 +729,15 @@ classdef ECamHDRClient < handle
 
             if dtype == 0x10
                 % uint16 format: 2 bytes per pixel
-                raw    = obj.rdBytes(H * W * 2);
-                pixels = typecast(uint8(raw(:)'), 'uint16');
-                frame  = reshape(pixels, [W, H])';
+                n_bytes = H * W * 2;
+                t_rd    = tic;
+                raw     = obj.rdBytes(n_bytes);
+                t_rd    = toc(t_rd);
+                t_up    = tic;
+                pixels  = typecast(uint8(raw(:)'), 'uint16');
+                frame   = reshape(pixels, [W, H])';
+                t_up    = toc(t_up);
+                obj.reportRecv(n_bytes, t_rd, t_up);
 
             elseif dtype == 0x11
                 % RAW10 packed: server packs in groups of 4 pixels -> 5 bytes,
@@ -641,13 +746,28 @@ classdef ECamHDRClient < handle
                 %   differs when H*W is not a multiple of 4).
                 n_groups = ceil(double(H) * double(W) / 4);
                 n_packed = n_groups * 5;
+                t_rd     = tic;
                 raw      = obj.rdBytes(n_packed);
+                t_rd     = toc(t_rd);
+                t_up     = tic;
                 frame    = obj.unpackRaw10(uint8(raw(:)'), H, W);
+                t_up     = toc(t_up);
+                obj.reportRecv(n_packed, t_rd, t_up);
 
             else
                 error('ECamHDRClient:unknownDtype', ...
                     'Unknown frame dtype 0x%02X', dtype);
             end
+        end
+
+        function reportRecv(obj, n_bytes, t_rd, t_up)
+            %REPORTRECV  Debug-only network-vs-CPU breakdown for one frame.
+            %  Prints link throughput (MB/s) and unpack time so the
+            %  bottleneck (slow link vs MATLAB-side decode) is unambiguous.
+            if ~obj.Debug, return; end
+            mb = n_bytes / 1e6;
+            fprintf('[ECam]   recv %.1fMB in %.3fs (%.0f MB/s)  unpack %.3fs\n', ...
+                mb, t_rd, mb / max(t_rd, 1e-6), t_up);
         end
 
         function frame = unpackRaw10(~, packed, h, w)

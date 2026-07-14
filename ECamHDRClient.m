@@ -498,6 +498,69 @@ classdef ECamHDRClient < handle
             end
         end
 
+        % ── recordFramesFast ────────────────────────────────────────────────────
+        function [frames, stats] = recordFramesFast(obj, nFrames, depth)
+            %RECORDFRAMESFAST  Highest-throughput burst capture via a .NET
+            %  background receiver (EcamReceiver.dll). A background thread
+            %  receives frame N+1 while MATLAB unpacks/stores frame N, so the
+            %  network transfer overlaps the CPU work and throughput approaches
+            %  the gigabit ceiling (~10 fps at 4K 10-bit) instead of the
+            %  serialized ~7 fps of recordFrames.
+            %
+            %  Requires EcamReceiver.dll next to this class file (build from
+            %  EcamReceiver.cs:  csc /target:library /optimize+ EcamReceiver.cs).
+            %  Opens a SECOND connection to the server for bulk frames; the
+            %  control connection (this object) is used only for setup.
+            obj.requireConnected();
+            if nargin < 3 || isempty(depth), depth = 2; end
+
+            persistent asmLoaded
+            if isempty(asmLoaded)
+                dll = fullfile(fileparts(which('ECamHDRClient')), 'EcamReceiver.dll');
+                if ~isfile(dll)
+                    error('ECamHDRClient:noDll', ...
+                        'EcamReceiver.dll not found next to ECamHDRClient.m (build it from EcamReceiver.cs).');
+                end
+                NET.addAssembly(dll);
+                asmLoaded = true;
+            end
+
+            H = double(obj.CameraInfo.height);
+            W = double(obj.CameraInfo.width);
+            frames = zeros(H, W, nFrames, 'uint16');
+
+            rx = Ecam.Receiver(obj.Host, int32(obj.Port));
+            guard = onCleanup(@() rx.Stop());   %#ok<NASGU>  stops thread + closes socket
+            rx.Start(int32(depth));
+
+            lastSeq = int32(0);
+            t0 = tic;
+            for k = 1:nFrames
+                [payload, Hh, Ww, dtype, seq] = ...
+                    rx.GetFrame(lastSeq, int32(10000));
+                if isempty(payload)
+                    error('ECamHDRClient:rxTimeout', ...
+                        'Fast receiver timed out at frame %d/%d', k, nFrames);
+                end
+                lastSeq = seq;
+                raw = uint8(payload);            % .NET byte[] -> MATLAB uint8
+                if dtype == 17                    % 0x11 RAW10 packed
+                    frames(:,:,k) = obj.unpackRaw10(raw(:)', double(Hh), double(Ww));
+                elseif dtype == 16                % 0x10 uint16
+                    px = typecast(raw(:)', 'uint16');
+                    frames(:,:,k) = reshape(px, [double(Ww), double(Hh)])';
+                else
+                    error('ECamHDRClient:dtype', 'Unknown dtype %d', dtype);
+                end
+            end
+            elapsed = toc(t0);
+
+            stats = struct('frames', nFrames, 'elapsed_s', elapsed, ...
+                           'fps', nFrames / max(elapsed, eps));
+            fprintf('[ECam] recordFramesFast: %d frames in %.2fs = %.1f fps\n', ...
+                nFrames, elapsed, stats.fps);
+        end
+
     end % public
 
     % ═════════════════════════════════════════════════════════════════════════

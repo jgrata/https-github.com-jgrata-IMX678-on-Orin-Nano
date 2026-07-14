@@ -37,3 +37,5 @@ target_include_directories(raw_capture PRIVATE
 
 target_link_libraries(raw_capture
     ${NVARGUS_LIB} ${NVBUF_LIB} ${EGL_LIB} ${CUDA_LIB} pthread)
+
+target_compile_options(raw_capture PRIVATE -O3 -march=native -funroll-loops)

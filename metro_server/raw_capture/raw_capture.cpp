@@ -171,7 +171,8 @@ static bool cuda_frame_to_u16(CUgraphicsResource res,
     if (alloc) cuMemFree(dptr);
     if (mr!=CUDA_SUCCESS) return false;
 
-    /* Left-aligned 10-bit: stored = sensor<<6  →  sensor = stored>>6 (0-1023) */
+    /* Left-aligned 10-bit: stored = sensor<<6  →  sensor = stored>>6 (0-1023).
+     * Vectorized under -O3/NEON (~2ms); was ~86ms at the old default -O0. */
     for (auto& v:out) v>>=6;
 
     if (fw!=w||fh!=h) {
@@ -447,7 +448,33 @@ static bool recv_all(int fd, void* p, size_t n)
 #pragma pack(push,1)
 struct ReqHdr { uint32_t cmd; uint64_t want_exp; float want_gain; uint32_t pad; };
 #pragma pack(pop)
-enum { REQ_FRAME=1, REQ_SET_EXPGAIN=2, REQ_PING=3 };
+enum { REQ_FRAME=1, REQ_SET_EXPGAIN=2, REQ_PING=3, REQ_FRAME_PACKED=4 };
+
+/* Pack uint16 10-bit pixels (0-1023) into RAW10: 4 px -> 5 bytes.
+ * out size = ceil(n/4)*5. Byte layout matches the Python pack_raw10 and the
+ * MATLAB unpackRaw10 exactly:
+ *   o0..o3 = p0..p3 >> 2   (high 8 bits)
+ *   o4     = (p0&3) | (p1&3)<<2 | (p2&3)<<4 | (p3&3)<<6   (low 2 bits, LE)
+ * Doing this in C++ replaces the ~0.10s NumPy pack in image_server. */
+static void pack_raw10(const uint16_t* px, size_t n, std::vector<uint8_t>& out)
+{
+    size_t groups = (n + 3) / 4;
+    out.resize(groups * 5);
+    uint8_t* o = out.data();
+    size_t i = 0;
+    for (size_t g = 0; g < groups; ++g, o += 5, i += 4) {
+        uint16_t p0 = i   < n ? px[i]   : 0;
+        uint16_t p1 = i+1 < n ? px[i+1] : 0;
+        uint16_t p2 = i+2 < n ? px[i+2] : 0;
+        uint16_t p3 = i+3 < n ? px[i+3] : 0;
+        o[0] = (uint8_t)(p0 >> 2);
+        o[1] = (uint8_t)(p1 >> 2);
+        o[2] = (uint8_t)(p2 >> 2);
+        o[3] = (uint8_t)(p3 >> 2);
+        o[4] = (uint8_t)((p0 & 3) | ((p1 & 3) << 2) |
+                         ((p2 & 3) << 4) | ((p3 & 3) << 6));
+    }
+}
 
 /* Pending exp/gain change requested by a client, consumed by the Argus loop.
  * Guarded by a simple flag pair; only the loop writes cur_* on the Session. */
@@ -477,6 +504,32 @@ static void serve_frame(int cli, const FrameBuffer& buf)
     send_all(cli,buf.pixels.data(),buf.pixels.size()*2);
 }
 
+/* Serve the latest frame RAW10-packed (4px->5B) instead of uint16. Packing is
+ * done here in C++ (~few ms) rather than in the Python image_server (~0.10s).
+ * The packed length is self-describing via NetHdr.pad so the client reads
+ * exactly that many bytes. Runs on the single Argus loop thread (no races). */
+static void serve_frame_packed(int cli, const FrameBuffer& buf)
+{
+    if (!buf.valid) {
+        NetHdr err{}; err.magic=0xDEADBEEF;
+        send_all(cli,&err,sizeof(err));
+        return;
+    }
+    static std::vector<uint8_t> packed;   // reused; single-threaded serve path
+    pack_raw10(buf.pixels.data(), buf.pixels.size(), packed);
+    NetHdr nh{};
+    nh.magic      = 0x52413130;
+    nh.w          = buf.w;
+    nh.h          = buf.h;
+    nh.bpp        = buf.bpp;
+    nh.nf         = 1;
+    nh.exp_ns     = buf.exp_ns;
+    nh.gain_x1000 = (uint32_t)(buf.gain*1000);
+    nh.pad        = (uint32_t)packed.size();   // packed payload length in bytes
+    send_all(cli,&nh,sizeof(nh));
+    send_all(cli,packed.data(),packed.size());
+}
+
 /* Handle one request on an already-open client socket.
  * Returns false if the connection should be closed. */
 static bool handle_request(int cli, const FrameBuffer& buf)
@@ -487,6 +540,9 @@ static bool handle_request(int cli, const FrameBuffer& buf)
     switch (rq.cmd) {
     case REQ_FRAME:
         serve_frame(cli, buf);
+        return true;
+    case REQ_FRAME_PACKED:
+        serve_frame_packed(cli, buf);
         return true;
     case REQ_SET_EXPGAIN: {
         g_pending.exp_ns = rq.want_exp;

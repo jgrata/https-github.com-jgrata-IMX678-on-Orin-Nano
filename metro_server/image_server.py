@@ -6,18 +6,14 @@ raw_capture --server on localhost port 9001
 """
 import socket, struct, subprocess, numpy as np
 import threading, time, os, signal, sys, json, re
+import os
 
 SERVER_HOST      = '0.0.0.0'
 SERVER_PORT      = 9000
-RAW_CAPTURE_BIN  = '/home/metro/raw_capture/raw_capture'
+_HERE = os.path.dirname(os.path.abspath(__file__))
+RAW_CAPTURE_BIN  = os.path.join(_HERE, 'raw_capture', 'raw_capture')
 RAW_CAPTURE_PORT = 9001
 CAPTURE_DIR      = '/tmp/ecam_captures'
-
-# TCP send buffer for the MATLAB client connection. On a high-RTT link TCP
-# throughput ~= buffer / RTT, so this (with a matching net.core.wmem_max on the
-# Jetson) sets the throughput ceiling for bulk frame transfer. 16MB over a
-# 300ms link allows ~53MB/s vs ~13MB/s at the old 4MB.
-SEND_BUF_BYTES   = 16 * 1024 * 1024
 
 DEFAULT_SENSOR_MODE = 1
 DEFAULT_FPS         = 30
@@ -105,9 +101,20 @@ import struct as _struct
 
 # raw_capture localhost request protocol (must match ReqHdr in raw_capture.cpp)
 _REQ_FMT        = '<IQfI'          # cmd u32, want_exp u64, want_gain f32, pad u32
-_REQ_FRAME      = 1
-_REQ_SET_EXPGAIN= 2
-_REQ_PING       = 3
+_REQ_FRAME        = 1
+_REQ_SET_EXPGAIN  = 2
+_REQ_PING         = 3
+_REQ_FRAME_PACKED = 4     # raw_capture packs RAW10 in C++ (needs rebuilt binary)
+
+# Fast path: have raw_capture pack RAW10 in C++ (~few ms) instead of NumPy
+# pack_raw10 here (~0.10s). Requires the raw_capture binary rebuilt with
+# REQ_FRAME_PACKED. Set False to fall back to the Python pack path.
+USE_CPP_PACK      = True
+
+# Prefetch packed frames from raw_capture on a background thread so the client
+# network send overlaps the next localhost fetch (~10 fps vs ~7 serialized).
+# Set False to fetch synchronously in the client handler.
+USE_PREFETCH      = True
 
 
 class RawCaptureProcess:
@@ -254,9 +261,12 @@ class RawCaptureProcess:
                 self._close_sock()
                 return 0, 0.0
 
-    def capture(self):
+    def capture(self, packed=False):
         """Request one frame over the persistent connection. Reconnects
-        transparently if the socket is not yet open or was dropped."""
+        transparently if the socket is not yet open or was dropped.
+        packed=True asks raw_capture to RAW10-pack in C++ and returns the
+        packed bytes; packed=False returns a uint16 numpy array (as before)."""
+        req = self._request_frame_packed if packed else self._request_frame
         with self.lock:
             if not self.is_alive() or not self.ready:
                 print("[RCP] Not ready — restarting...")
@@ -274,13 +284,13 @@ class RawCaptureProcess:
                     raise RuntimeError("Cannot connect to raw_capture: " + str(e))
 
             try:
-                return self._request_frame()
+                return req()
             except (ConnectionError, OSError) as e:
                 # One transparent retry after reconnect.
                 print("[RCP] frame req failed (" + str(e) + "), reconnecting...")
                 try:
                     self._connect()
-                    return self._request_frame()
+                    return req()
                 except Exception as e2:
                     self._close_sock()
                     self.ready = False
@@ -314,6 +324,34 @@ class RawCaptureProcess:
             received += got
 
         return pixel_arr, w, h, bpp, nf, exp_ns, gain_x1000
+
+    def _request_frame_packed(self):
+        """Ask raw_capture to RAW10-pack the frame in C++ and return the packed
+        bytes directly (no NumPy pack here). Payload length is self-describing
+        via NetHdr.pad. Returns (packed_bytes, w, h, bpp, nf, exp_ns, gain)."""
+        s = self._sock
+        s.sendall(_struct.pack(_REQ_FMT, _REQ_FRAME_PACKED, 0, 0.0, 0))
+
+        hdr_bytes = self._recv_fast(s, 36)
+        magic, w, h, bpp, nf, exp_ns, gain_x1000, pad = \
+            struct.unpack('<IIIIIQII', hdr_bytes)
+
+        if magic == 0xDEADBEEF:
+            self.ready = False
+            raise RuntimeError("raw_capture returned error")
+        if magic != 0x52413130:
+            raise RuntimeError("Bad magic: " + hex(magic))
+
+        n_bytes = pad          # packed payload length (ceil(w*h*nf/4)*5)
+        buf  = bytearray(n_bytes)
+        view = memoryview(buf)
+        received = 0
+        while received < n_bytes:
+            got = s.recv_into(view[received:], n_bytes - received)
+            if got == 0: raise ConnectionError("raw_capture closed")
+            received += got
+
+        return bytes(buf), w, h, bpp, nf, exp_ns, gain_x1000
 
     @staticmethod
     def _recv_fast(sock, n):
@@ -423,6 +461,22 @@ class Camera:
             if ag > 0: self.actual_gain = ag / 1000.0
         frame = pixels[:w*h].reshape(h, w)
         return self._scale(frame)
+
+    def can_pack_in_cpp(self):
+        """Fast path is valid only for true 10-bit, non-HDR, lossless output —
+        exactly when the C++ RAW10 pack is bit-identical to the Python one.
+        8/12-bit need _scale(); HDR needs a merge; both require the uint16 frame."""
+        return (USE_CPP_PACK and getattr(self, 'lossless', True)
+                and self.bit_depth == 10 and not self.hdr)
+
+    def capture_packed(self):
+        """Fast path: RAW10-packed bytes straight from raw_capture (C++ pack),
+        skipping NumPy pack_raw10. Returns (packed_bytes, h, w)."""
+        packed, w, h, bpp, nf, ae, ag = self.rcp.capture(packed=True)
+        with self._ae_lock:
+            if ae > 0: self.actual_exp  = ae
+            if ag > 0: self.actual_gain = ag / 1000.0
+        return packed, h, w
 
     def _scale(self, frame):
         bd = self.bit_depth
@@ -536,6 +590,48 @@ class Camera:
         }
 
 
+# ── Prefetcher ────────────────────────────────────────────────────────────────
+
+class Prefetcher(threading.Thread):
+    """Continuously pull RAW10-packed frames from raw_capture so a client's
+    network send overlaps the next localhost fetch (Python socket I/O releases
+    the GIL, so fetch and send run concurrently). Holds only the latest packed
+    frame with a monotonically increasing sequence number."""
+
+    def __init__(self, camera):
+        super().__init__(daemon=True)
+        self.camera  = camera
+        self._cv     = threading.Condition()
+        self._latest = None      # (packed_bytes, h, w)
+        self._seq    = 0
+        self.running = True
+
+    def run(self):
+        while self.running:
+            try:
+                if not self.camera.can_pack_in_cpp():
+                    time.sleep(0.05); continue
+                packed, h, w = self.camera.capture_packed()
+                with self._cv:
+                    self._latest = (packed, h, w)
+                    self._seq   += 1
+                    self._cv.notify_all()
+            except Exception as e:
+                print("[Prefetch] " + str(e)); time.sleep(0.1)
+
+    def get_next(self, last_seq, timeout=10.0):
+        """Block until a frame newer than last_seq is ready; return
+        (packed, h, w, seq). Guarantees each client gets a fresh frame."""
+        with self._cv:
+            ok = self._cv.wait_for(
+                lambda: self._seq > last_seq and self._latest is not None,
+                timeout)
+            if not ok:
+                raise RuntimeError("prefetch timeout")
+            packed, h, w = self._latest
+            return packed, h, w, self._seq
+
+
 # ── ClientHandler ─────────────────────────────────────────────────────────────
 
 class ClientHandler(threading.Thread):
@@ -544,6 +640,7 @@ class ClientHandler(threading.Thread):
         super().__init__(daemon=True)
         self.conn = conn; self.addr = addr
         self.camera = camera; self.streaming = False
+        self._last_seq = 0       # last prefetch seq this client has sent
 
     def run(self):
         print("[Server] Connected: " + str(self.addr))
@@ -581,10 +678,25 @@ class ClientHandler(threading.Thread):
 
     def _capture(self):
         try:
-            t0    = time.monotonic()
-            frame = self.camera.capture_frame()
-            t_cap = time.monotonic()-t0
-            self._send_frame(frame)
+            t0 = time.monotonic()
+            pf = getattr(self.camera, 'prefetcher', None)
+            if pf is not None and self.camera.can_pack_in_cpp():
+                # Prefetched packed frame: the localhost fetch already overlapped
+                # the previous network send. Wait for one newer than we last sent.
+                packed, h, w, self._last_seq = pf.get_next(self._last_seq)
+                t_cap  = time.monotonic()-t0
+                header = struct.pack('<BIIB', 0x00, h, w, DTYPE_RAW10)
+                send_exactly(self.conn, header + packed)
+            elif self.camera.can_pack_in_cpp():
+                # Fast path, no prefetch: pack in C++, forward synchronously.
+                packed, h, w = self.camera.capture_packed()
+                t_cap  = time.monotonic()-t0
+                header = struct.pack('<BIIB', 0x00, h, w, DTYPE_RAW10)
+                send_exactly(self.conn, header + packed)
+            else:
+                frame = self.camera.capture_frame()
+                t_cap = time.monotonic()-t0
+                self._send_frame(frame)
             t_tot = time.monotonic()-t0
             print("[Server] cap={:.2f}s net={:.2f}s total={:.2f}s".format(
                 t_cap, t_tot-t_cap, t_tot))
@@ -681,6 +793,15 @@ def main():
         except Exception as e:
             print("[AE] settle skipped: " + str(e))
 
+    # Background prefetcher: overlaps the raw_capture localhost fetch with the
+    # client network send (see Prefetcher). Only active for the packed path.
+    if USE_PREFETCH:
+        camera.prefetcher = Prefetcher(camera)
+        camera.prefetcher.start()
+        print("[Init] Prefetcher started")
+    else:
+        camera.prefetcher = None
+
     print("\n[Server] Camera info:")
     for k,v in camera.info().items():
         print("  "+str(k).ljust(22)+": "+str(v))
@@ -707,24 +828,10 @@ def main():
 
     while True:
         conn, addr = srv.accept()
-        # Bulk 4K frames (~10MB packed) over a high-RTT link are TCP-window
-        # limited: max throughput ~= socket_buffer / RTT. On a 300ms link a
-        # 4MB buffer caps us at ~13MB/s (~0.8s/frame). Widen the send buffer so
-        # more data stays in flight. NOTE: Linux silently clamps SO_SNDBUF to
-        # net.core.wmem_max — to actually get 16MB you must raise it on the
-        # Jetson:  sudo sysctl -w net.core.wmem_max=33554432
-        # (persist in /etc/sysctl.conf). We print the granted size below so you
-        # can see whether the request was clamped.
         try:
-            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, SEND_BUF_BYTES)
-            granted = conn.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF)
-            print("[Server] SO_SNDBUF requested={}MB granted={:.1f}MB{}".format(
-                SEND_BUF_BYTES // (1024*1024), granted / (1024*1024),
-                "  (CLAMPED — raise net.core.wmem_max)"
-                if granted < SEND_BUF_BYTES else ""))
-        except Exception as e:
-            print("[Server] socket tuning failed: " + str(e))
+            conn.setsockopt(socket.SOL_SOCKET,
+                            socket.SO_SNDBUF, 16*1024*1024)
+        except: pass
         ClientHandler(conn, addr, camera).start()
 
 

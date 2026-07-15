@@ -38,6 +38,7 @@ classdef ECamHDRClient < handle
         IsConnected  (1,1) logical = false
         CameraInfo   (1,1) struct
         Debug        (1,1) logical = false
+        Verbose      (1,1) logical = true   % print per-capture status lines
     end
 
     % ── Dependent settable parameters ─────────────────────────────────────────
@@ -159,6 +160,15 @@ classdef ECamHDRClient < handle
             %  cam.setDebug(true) then cam.capture() prints the network
             %  throughput (MB/s), unpack time, and info round-trip time.
             obj.Debug = logical(tf);
+        end
+
+        % ── setVerbose ────────────────────────────────────────────────────────
+        function setVerbose(obj, tf)
+            %SETVERBOSE  Toggle the per-capture status lines from capture()
+            %  (the "[ECam] Capture/Frame/Actual" prints). cam.setVerbose(false)
+            %  silences them; grab() is always silent. Debug stats are separate
+            %  (see setDebug) and still require Debug=true.
+            obj.Verbose = logical(tf);
         end
 
         % ── ping ──────────────────────────────────────────────────────────────
@@ -338,17 +348,18 @@ classdef ECamHDRClient < handle
             %  Bayer pattern RGGB — use captureRGB() for colour.
             obj.requireConnected();
 
-            if obj.p_exposure_ns == 0
-                exp_s = 'auto';
-            else
-                exp_s = sprintf('%.0fms', obj.p_exposure_ns/1e6);
+            if obj.Verbose
+                if obj.p_exposure_ns == 0
+                    exp_s = 'auto';
+                else
+                    exp_s = sprintf('%.0fms', obj.p_exposure_ns/1e6);
+                end
+                fprintf('[ECam] Capture  mode=%d  %d-bit  exp=%s\n', ...
+                    obj.p_sensormode, obj.p_bit_depth, exp_s);
             end
-            fprintf('[ECam] Capture  mode=%d  %d-bit  exp=%s\n', ...
-                obj.p_sensormode, obj.p_bit_depth, exp_s);
 
             t_frame = tic;
-            obj.sendCmd(obj.CMD_CAPTURE);
-            frame = obj.recvFrame();
+            frame   = obj.grabFrame();   % flush + send + recv, resync on desync
             t_frame = toc(t_frame);
 
             t_info = tic;
@@ -356,26 +367,28 @@ classdef ECamHDRClient < handle
             obj.syncFromServer();
             t_info = toc(t_info);
 
-            if obj.Debug
-                % Full diagnostics (distinct/mean are O(n log n) / heavy
-                % allocations over ~8.3M pixels — Debug-only, not per-frame).
-                fprintf('[ECam] Frame    %dx%d  [%d,%d]  mean=%.1f  distinct=%d\n', ...
-                    size(frame,1), size(frame,2), ...
-                    min(frame(:)), max(frame(:)), ...
-                    mean(double(frame(:))), numel(unique(frame(:))));
-                fprintf('[ECam] Timing   frame=%.3fs  info=%.3fs\n', ...
-                    t_frame, t_info);
-            else
-                fprintf('[ECam] Frame    %dx%d  (%.3fs)\n', ...
-                    size(frame,1), size(frame,2), t_frame + t_info);
-            end
+            if obj.Verbose
+                if obj.Debug
+                    % Full diagnostics (distinct/mean are O(n log n) / heavy
+                    % allocations over ~8.3M pixels — Debug-only, not per-frame).
+                    fprintf('[ECam] Frame    %dx%d  [%d,%d]  mean=%.1f  distinct=%d\n', ...
+                        size(frame,1), size(frame,2), ...
+                        min(frame(:)), max(frame(:)), ...
+                        mean(double(frame(:))), numel(unique(frame(:))));
+                    fprintf('[ECam] Timing   frame=%.3fs  info=%.3fs\n', ...
+                        t_frame, t_info);
+                else
+                    fprintf('[ECam] Frame    %dx%d  (%.3fs)\n', ...
+                        size(frame,1), size(frame,2), t_frame + t_info);
+                end
 
-            has_ae = isfield(obj.CameraInfo,'actual_exposure_ns') && ...
-                obj.CameraInfo.actual_exposure_ns > 0;
-            if has_ae
-                fprintf('[ECam] Actual   exp=%.2fms  gain=%.4fx\n', ...
-                    obj.CameraInfo.actual_exposure_ns/1e6, ...
-                    obj.CameraInfo.actual_gain);
+                has_ae = isfield(obj.CameraInfo,'actual_exposure_ns') && ...
+                    obj.CameraInfo.actual_exposure_ns > 0;
+                if has_ae
+                    fprintf('[ECam] Actual   exp=%.2fms  gain=%.4fx\n', ...
+                        obj.CameraInfo.actual_exposure_ns/1e6, ...
+                        obj.CameraInfo.actual_gain);
+                end
             end
         end
 
@@ -389,8 +402,7 @@ classdef ECamHDRClient < handle
             %  acquisition loops; call capture() (or showParams()) when you
             %  need the refreshed actual exposure/gain.
             obj.requireConnected();
-            obj.sendCmd(obj.CMD_CAPTURE);
-            frame = obj.recvFrame();
+            frame = obj.grabFrame();
         end
 
         % ── autoExposure ────────────────────────────────────────────────────────
@@ -993,6 +1005,38 @@ classdef ECamHDRClient < handle
             if status ~= 0x00
                 error('ECamHDRClient:badStatus', ...
                     'Status 0x%02X', status);
+            end
+        end
+
+        function flushInput(obj)
+            %FLUSHINPUT  Discard any bytes sitting in the socket before a fresh
+            %  one-shot request, so a prior interrupted/partial read can't
+            %  desync the next response. Safe only for strict request-response
+            %  (grab/capture) — NOT the pipelined streamPull, which keeps
+            %  multiple frames in flight.
+            try
+                n = obj.Socket.NumBytesAvailable;
+                if n > 0, read(obj.Socket, n, 'uint8'); end
+            catch
+            end
+        end
+
+        function frame = grabFrame(obj)
+            %GRABFRAME  One CMD_CAPTURE round-trip with desync recovery: flush
+            %  stale input, request a frame, read it; on a bad status byte
+            %  (stream misalignment) resync and retry once.
+            obj.flushInput();
+            obj.sendCmd(obj.CMD_CAPTURE);
+            try
+                frame = obj.recvFrame();
+            catch ME
+                if strcmp(ME.identifier, 'ECamHDRClient:badStatus')
+                    obj.flushInput();
+                    obj.sendCmd(obj.CMD_CAPTURE);
+                    frame = obj.recvFrame();   % retry once after resync
+                else
+                    rethrow(ME);
+                end
             end
         end
 

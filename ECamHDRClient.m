@@ -382,6 +382,54 @@ classdef ECamHDRClient < handle
             frame = obj.recvFrame();
         end
 
+        % ── autoExposure ────────────────────────────────────────────────────────
+        function exp_ns = autoExposure(obj, target_frac, max_iter)
+            %AUTOEXPOSURE  Set exposure so the brightest pixels sit just below
+            %  saturation — no clipping, maximum usable dynamic range.
+            %
+            %  cam.autoExposure()               target 93% of full scale
+            %  cam.autoExposure(frac)           custom target fraction (0-1)
+            %  cam.autoExposure(frac, max_iter) cap the number of iterations
+            %
+            %  Iterates: grab a frame, measure the max, scale exposure toward
+            %  the target. Exposure changes apply live (no pipeline restart),
+            %  so this converges in a handful of fast steps. Returns the final
+            %  exposure_ns. Full scale follows bit_depth (1023 @10-bit,
+            %  4095 @12-bit), so run it after choosing the sensor mode.
+            obj.requireConnected();
+            if nargin < 2 || isempty(target_frac), target_frac = 0.93; end
+            if nargin < 3 || isempty(max_iter),    max_iter    = 8;    end
+            target_frac = max(0.30, min(0.99, target_frac));
+
+            full   = 2^obj.p_bit_depth - 1;
+            target = target_frac * full;
+
+            for it = 1:max_iter
+                pause(0.30);                 % let the last exposure change settle
+                f  = obj.grab();
+                mx = double(max(f(:)));
+                fprintf('[ECam] AE %d: exp=%.2fms  max=%d (%.0f%% of %d)\n', ...
+                    it, obj.p_exposure_ns/1e6, mx, 100*mx/full, full);
+
+                if mx >= full
+                    newexp = obj.p_exposure_ns * 0.5;      % clipping: halve
+                else
+                    newexp = obj.p_exposure_ns * (target / max(mx, 1));
+                    if abs(newexp - obj.p_exposure_ns) < 0.03 * obj.p_exposure_ns
+                        break;                              % within 3%: converged
+                    end
+                end
+
+                newexp = max(450000, min(400000000, round(newexp)));
+                if newexp == obj.p_exposure_ns, break; end  % hit a clamp
+                obj.exposure_ns = newexp;                   % applies live
+            end
+
+            exp_ns = obj.p_exposure_ns;
+            fprintf('[ECam] AE done: exposure=%.2fms  (%.0f%% target)\n', ...
+                exp_ns/1e6, 100*target_frac);
+        end
+
         % ── captureNormalized ─────────────────────────────────────────────────
         function img = captureNormalized(obj)
             img = double(obj.capture()) / double(2^obj.p_bit_depth - 1);
@@ -624,7 +672,19 @@ classdef ECamHDRClient < handle
 
         function set.sensormode(obj, v)
             obj.p_sensormode = v;
-            if obj.IsConnected, obj.setParams('sensormode', v); end
+            if obj.IsConnected
+                obj.setParams('sensormode', v);
+                % Native sensor modes deliver a fixed bit depth (mode 0/2 =
+                % 12-bit, mode 1/3 = 10-bit) and the lossless packed path emits
+                % exactly those native bits. Align bit_depth so capture()/
+                % showParams report the true output depth (else e.g. mode 0
+                % would still print "10-bit" while the data is 0-4095).
+                if ~isempty(fieldnames(obj.CameraInfo)) && ...
+                        isfield(obj.CameraInfo,'native_bpp') && ...
+                        obj.CameraInfo.native_bpp > 0
+                    obj.p_bit_depth = obj.CameraInfo.native_bpp;
+                end
+            end
         end
         function set.exposure_ns(obj, v)
             obj.p_exposure_ns = v;

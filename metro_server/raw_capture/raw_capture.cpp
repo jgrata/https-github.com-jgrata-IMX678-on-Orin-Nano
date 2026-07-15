@@ -338,9 +338,8 @@ struct Session {
         iSrc=interface_cast<ISourceSettings>(iReq->getSourceSettings());
         if (iSrc) {
             iSrc->setSensorMode(sm);
-            uint64_t dur=1000000000ULL/(uint64_t)cfg.fps;
-            iSrc->setFrameDurationRange(Range<uint64_t>(dur,dur));
-            apply_exposure(cfg.exp_ns, cfg.gain);
+            base_frame_dur_ns = 1000000000ULL/(uint64_t)cfg.fps;
+            apply_exposure(cfg.exp_ns, cfg.gain);   // sets frame duration too
         }
         /* Track what the running request currently reflects, so the server
          * loop can detect a pending change and re-submit only when needed. */
@@ -353,6 +352,9 @@ struct Session {
     /* Cached mode limits so live updates can clamp without re-querying. */
     Range<uint64_t> exp_range{0,0};
     Range<float>    gain_range{0.0f,0.0f};
+    /* Frame period from the requested fps. Exposure can't exceed the frame
+     * duration, so apply_exposure() extends it for long exposures (fps drops). */
+    uint64_t        base_frame_dur_ns = 33333333;   /* 30 fps default */
 
     /* Apply exposure/gain to iSrc following the 2x2 auto/manual rule:
      *
@@ -373,14 +375,20 @@ struct Session {
         IAutoControlSettings* iAC = interface_cast<IAutoControlSettings>(
             iReq->getAutoControlSettings());
 
+        uint64_t fd = base_frame_dur_ns;
         if (exp_ns > 0) {
             uint64_t e = std::max((uint64_t)exp_range.min(),
                          std::min((uint64_t)exp_range.max(), exp_ns));
             iSrc->setExposureTimeRange(Range<uint64_t>(e,e));
+            /* Exposure can't exceed the frame duration — extend the frame
+             * period for long exposures so the request actually takes effect
+             * (fps drops) instead of being silently clamped to ~1/fps. */
+            if (e > fd) fd = e;
         } else {
-            /* auto exposure: hand the full sensor range back to AE */
+            /* auto exposure within the fps-derived frame period */
             iSrc->setExposureTimeRange(exp_range);
         }
+        iSrc->setFrameDurationRange(Range<uint64_t>(fd, fd));
 
         if (gain > 0.0f) {
             float g = std::max(gain_range.min(),

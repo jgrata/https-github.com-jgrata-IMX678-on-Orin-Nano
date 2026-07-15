@@ -181,6 +181,17 @@ classdef ECamHDRClient < handle
             info = jsondecode(char(data(:)'));
         end
 
+        % ── refresh ───────────────────────────────────────────────────────────
+        function refresh(obj)
+            %REFRESH  Re-query the server and update CameraInfo + synced params
+            %  (including actual_exposure_ns / actual_gain). Use after changing
+            %  exposure/gain and waiting ~1 frame, to read the settled actuals
+            %  without a full capture().
+            obj.requireConnected();
+            obj.CameraInfo = obj.getInfo();
+            obj.syncFromServer();
+        end
+
         % ── showParams ────────────────────────────────────────────────────────
         function showParams(obj)
             obj.requireConnected();
@@ -699,6 +710,7 @@ classdef ECamHDRClient < handle
         end
 
         function v = get.actual_exposure_ns(obj)
+            obj.refreshInfo();   % live query so the value is current, not cached
             if ~isempty(fieldnames(obj.CameraInfo)) && ...
                     isfield(obj.CameraInfo,'actual_exposure_ns')
                 v = obj.CameraInfo.actual_exposure_ns;
@@ -708,6 +720,7 @@ classdef ECamHDRClient < handle
         end
 
         function v = get.actual_gain_value(obj)
+            obj.refreshInfo();   % live query so the value is current, not cached
             if ~isempty(fieldnames(obj.CameraInfo)) && ...
                     isfield(obj.CameraInfo,'actual_gain')
                 v = obj.CameraInfo.actual_gain;
@@ -782,6 +795,19 @@ classdef ECamHDRClient < handle
             if ~obj.IsConnected
                 error('ECamHDRClient:notConnected', ...
                     'Not connected. Call connect() first.');
+            end
+        end
+
+        function refreshInfo(obj)
+            %REFRESHINFO  Pull a fresh CameraInfo snapshot from the server so
+            %  actual_* reflect current sensor state. Guarded + no-throw so it
+            %  is safe to call from property getters (incl. object display).
+            %  NOTE: after changing a long exposure the sensor still needs ~1
+            %  frame at the new setting before the actual value updates.
+            if ~obj.IsConnected, return; end
+            try
+                obj.CameraInfo = obj.getInfo();
+            catch
             end
         end
 

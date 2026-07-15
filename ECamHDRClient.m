@@ -674,6 +674,99 @@ classdef ECamHDRClient < handle
                 nFrames, elapsed, stats.fps);
         end
 
+        % ── captureBracket ──────────────────────────────────────────────────────
+        function [frames, meta] = captureBracket(obj, exposures_ns, gain)
+            %CAPTUREBRACKET  Exposure-bracketed capture for HDR radiance work.
+            %  [frames, meta] = cam.captureBracket([e1 e2 ... eN])
+            %  [frames, meta] = cam.captureBracket([...], gainValue)
+            %
+            %  For each exposure (ns): set it, wait for the sensor to actually
+            %  reach it (frame duration auto-extends for long exposures, so fps
+            %  drops), then grab one full-bit frame and record the ACTUAL
+            %  exposure/gain. Intended for STATIC scenes — each leg settles
+            %  before capture. Returns:
+            %    frames : uint16 [H x W x N]  (native bit depth: 10 or 12)
+            %    meta   : struct array (1xN) with .exposure_ns .gain
+            %             (actual values, for radiance reconstruction).
+            %
+            %  Gain is held fixed across the bracket (default: pin the current
+            %  gain; pass gainValue to override). Exposures need not be sorted.
+            %  Restores the prior exposure/gain when done.
+            obj.requireConnected();
+            exposures_ns = round(double(exposures_ns(:)'));
+            N = numel(exposures_ns);
+            if N < 1, error('ECamHDRClient:bracket','need >=1 exposure'); end
+
+            % Pin gain so only exposure varies across the bracket.
+            if nargin >= 3 && ~isempty(gain), g_fix = double(gain);
+            else,  g_fix = obj.actual_gain_value; if g_fix<=0, g_fix = 1.0; end
+            end
+            orig_exp = obj.p_exposure_ns;
+            orig_gain = obj.p_gain;
+            obj.setParams('gain', g_fix);
+
+            H = double(obj.CameraInfo.height);
+            W = double(obj.CameraInfo.width);
+            frames = zeros(H, W, N, 'uint16');
+            meta = struct('exposure_ns', cell(1,N), 'gain', cell(1,N), ...
+                          'requested_ns', cell(1,N));
+
+            for k = 1:N
+                obj.exposure_ns = exposures_ns(k);            % applies live
+                obj.waitExposureSettle(exposures_ns(k));      % wait until reached
+                obj.grab();                                   % flush one settled frame
+                frames(:,:,k)       = obj.grab();             % keep the next
+                meta(k).requested_ns = exposures_ns(k);
+                meta(k).exposure_ns  = obj.actual_exposure_ns;
+                meta(k).gain         = obj.actual_gain_value;
+                fprintf('[ECam] bracket %d/%d: req=%.2fms actual=%.2fms gain=%.3fx  [%d..%d]\n', ...
+                    k, N, exposures_ns(k)/1e6, meta(k).exposure_ns/1e6, ...
+                    meta(k).gain, min(frames(:,:,k),[],'all'), max(frames(:,:,k),[],'all'));
+            end
+
+            obj.setParams('exposure_ns', orig_exp, 'gain', orig_gain);  % restore
+        end
+
+        % ── reconstructRadiance ─────────────────────────────────────────────────
+        function [rad, wsum] = reconstructRadiance(obj, frames, meta, blacklevel, satfrac)
+            %RECONSTRUCTRADIANCE  Combine an exposure bracket into a linear HDR
+            %  radiance map (Debevec-style weighted average; RAW sensor data is
+            %  already linear, so no camera response curve is needed).
+            %
+            %  [rad, wsum] = cam.reconstructRadiance(frames, meta)
+            %  [...] = cam.reconstructRadiance(frames, meta, blacklevel, satfrac)
+            %
+            %  frames/meta come from captureBracket. For each exposure the
+            %  per-pixel estimate is (DN - blacklevel) / (exposure_s * gain),
+            %  weighted by a triangle that rejects saturated and noise-floor
+            %  pixels, then averaged. Output `rad` is RELATIVE linear radiance
+            %  (single, H x W); `wsum` is the summed weight (0 = no valid
+            %  exposure covered that pixel — over/under-exposed everywhere).
+            %
+            %  blacklevel : sensor black level in DN (default 0 — MEASURE IT:
+            %               a lens-capped frame's median gives a real value;
+            %               it materially affects dark-region radiance).
+            %  satfrac    : saturation cutoff as fraction of full scale (0.95).
+            if nargin < 4 || isempty(blacklevel), blacklevel = 0;    end
+            if nargin < 5 || isempty(satfrac),    satfrac    = 0.95; end
+            [H, W, N] = size(frames);
+            full = 2^obj.p_bit_depth - 1;
+            sat  = satfrac * full;
+
+            rad  = zeros(H, W, 'single');
+            wsum = zeros(H, W, 'single');
+            for k = 1:N
+                f   = single(frames(:,:,k));
+                eff = double(meta(k).exposure_ns)/1e9 * max(double(meta(k).gain), eps);
+                w   = min(f - blacklevel, sat - f);   % triangle: peak mid-range
+                w   = max(w, 0);
+                w(f >= sat) = 0;                      % reject saturated
+                rad  = rad  + w .* (max(f - blacklevel, 0) / eff);
+                wsum = wsum + w;
+            end
+            rad = rad ./ max(wsum, eps('single'));    % relative linear radiance
+        end
+
     end % public
 
     % ═════════════════════════════════════════════════════════════════════════
@@ -1004,6 +1097,31 @@ classdef ECamHDRClient < handle
                     stable = 0;
                 end
                 prev = v;
+            end
+        end
+
+        function waitExposureSettle(obj, target_ns, timeout_s)
+            %WAITEXPOSURESETTLE  Block until the sensor's actual exposure reaches
+            %  target_ns (within 5%) or stabilizes (if clamped), or a timeout.
+            %  Timeout/poll scale with the exposure, since long exposures lower
+            %  fps (a frame period ~= the exposure time).
+            target = double(target_ns);
+            if nargin < 3 || isempty(timeout_s)
+                timeout_s = max(2.0, 6 * target/1e9);   % ~6 frame periods
+            end
+            tol = 0.05; t0 = tic; prev = -1; stable = 0;
+            while toc(t0) < timeout_s
+                pause(max(0.05, target/1e9));            % ~one frame period
+                a = double(obj.actual_exposure_ns);      % live query
+                if a > 0 && abs(a - target) <= tol*max(target,1)
+                    return;                               % reached target
+                end
+                if a > 0 && abs(a - prev) <= tol*max(a,1) % clamped but settled
+                    stable = stable + 1; if stable >= 2, return; end
+                else
+                    stable = 0;
+                end
+                prev = a;
             end
         end
 

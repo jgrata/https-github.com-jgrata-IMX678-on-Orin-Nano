@@ -208,6 +208,37 @@ struct Session {
     uint64_t                   cur_exp_ns = 0;
     float                      cur_gain   = 0.0f;
 
+    /* CAPTURE_COMPLETE event queue → ACTUAL sensor exp/gain the AE/AGC chose
+     * (read from CaptureMetadata), so exposure_ns=0 / gain=0 report back what
+     * the sensor actually settled on rather than the requested 0. */
+    IEventProvider*            iEvents       = nullptr;
+    UniqueObj<EventQueue>      eventQueue;
+    IEventQueue*               iEventQueue   = nullptr;
+    uint64_t                   actual_exp_ns = 0;
+    float                      actual_gain   = 0.0f;
+
+    /* Drain capture-complete events; keep the most recent actual exp/gain.
+     * Non-blocking; called from the server loop (single Argus thread). */
+    void poll_metadata()
+    {
+        if (!iEvents || !iEventQueue) return;
+        iEvents->waitForEvents(eventQueue.get(), 0);   /* timeout 0: drain only */
+        const Event* ev;
+        while ((ev = iEventQueue->getNextEvent()) != nullptr) {
+            const IEvent* iEv = interface_cast<const IEvent>(ev);
+            if (!iEv || iEv->getEventType() != EVENT_TYPE_CAPTURE_COMPLETE) continue;
+            const IEventCaptureComplete* iCC =
+                interface_cast<const IEventCaptureComplete>(ev);
+            if (!iCC) continue;
+            const CaptureMetadata* m = iCC->getMetadata();
+            const ICaptureMetadata* iM = interface_cast<const ICaptureMetadata>(m);
+            if (iM) {
+                actual_exp_ns = iM->getSensorExposureTime();
+                actual_gain   = iM->getSensorAnalogGain();
+            }
+        }
+    }
+
     /* Live-update exposure/gain on the running pipeline without a session
      * rebuild. On R36/JetPack6, mutating ISourceSettings and re-submitting
      * the request applies the new values to subsequent frames — no teardown
@@ -260,6 +291,19 @@ struct Session {
         iSess=interface_cast<ICaptureSession>(sess);
         if (!iSess){fprintf(stderr,"[Session] no session\n");return false;}
         printf("[Session] capture session created\n"); fflush(stdout);
+
+        /* CAPTURE_COMPLETE event queue for actual exp/gain readback (metadata).
+         * Non-fatal if unavailable — actuals then fall back to requested. */
+        iEvents = interface_cast<IEventProvider>(sess);
+        if (iEvents) {
+            std::vector<EventType> types;
+            types.push_back(EVENT_TYPE_CAPTURE_COMPLETE);
+            eventQueue.reset(iEvents->createEventQueue(types));
+            iEventQueue = interface_cast<IEventQueue>(eventQueue);
+        }
+        printf("[Session] metadata queue %s\n",
+               iEventQueue ? "ready" : "UNAVAILABLE (actuals=requested)");
+        fflush(stdout);
 
         /* EGL stream — MAILBOX mode: producer always has latest frame */
         UniqueObj<OutputStreamSettings> oss(
@@ -789,12 +833,18 @@ int main(int argc,char*argv[])
                     &session.cuConn,cuRes,nullptr);
 
                 if (ok) {
-                    /* Tag with the values CURRENTLY applied to the pipeline,
-                     * not the launch-time cfg (which is stale after a live
-                     * update). This is what the client reads back as actual. */
+                    /* Tag with the ACTUAL sensor exp/gain from capture metadata
+                     * (what AE/AGC settled on), falling back to the requested
+                     * values if metadata isn't available yet. This is what the
+                     * client reads back as actual_exposure_ns / actual_gain. */
+                    session.poll_metadata();
+                    uint64_t rep_exp  = session.actual_exp_ns > 0
+                                        ? session.actual_exp_ns : session.cur_exp_ns;
+                    float    rep_gain = session.actual_gain > 0.0f
+                                        ? session.actual_gain : session.cur_gain;
                     g_buf.update(std::move(px),
                                  session.W,session.H,session.BPP,
-                                 session.cur_exp_ns,session.cur_gain);
+                                 rep_exp, rep_gain);
                     frames_captured++;
 
                     if (frames_captured%30==1) {

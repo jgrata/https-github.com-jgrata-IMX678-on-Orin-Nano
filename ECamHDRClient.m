@@ -430,6 +430,58 @@ classdef ECamHDRClient < handle
                 exp_ns/1e6, 100*target_frac);
         end
 
+        % ── aeOnce ──────────────────────────────────────────────────────────────
+        function exp_ns = aeOnce(obj, settle_s)
+            %AEONCE  One-shot hardware auto-exposure: hand exposure to the
+            %  sensor's AE, wait for it to converge, then PIN exposure to the
+            %  value it chose — freezing AE so later frames run at full fps.
+            %  Returns the pinned exposure_ns. Gain is left as-is (pin/auto it
+            %  separately, or use aeagOnce to do both together).
+            obj.requireConnected();
+            if nargin < 2 || isempty(settle_s), settle_s = 3.0; end
+            obj.exposure_ns = 0;                        % hand to sensor AE
+            obj.waitActual(@() obj.actual_exposure_ns, 0.02, settle_s);
+            pinned = obj.actual_exposure_ns;
+            if pinned <= 0, pinned = obj.p_exposure_ns; end
+            obj.exposure_ns = pinned;                   % pin -> AE frozen
+            exp_ns = pinned;
+            fprintf('[ECam] aeOnce: pinned exposure = %.2f ms\n', pinned/1e6);
+        end
+
+        % ── agOnce ──────────────────────────────────────────────────────────────
+        function g = agOnce(obj, settle_s)
+            %AGONCE  One-shot hardware auto-gain: hand gain to the sensor's
+            %  AGC, wait for convergence, then PIN gain to the chosen value.
+            %  Returns the pinned gain multiplier.
+            obj.requireConnected();
+            if nargin < 2 || isempty(settle_s), settle_s = 3.0; end
+            obj.gain = 0;                               % hand to sensor AGC
+            obj.waitActual(@() obj.actual_gain_value, 0.03, settle_s);
+            pinned = obj.actual_gain_value;
+            if pinned <= 0, pinned = obj.p_gain; end
+            obj.gain = pinned;                          % pin -> AGC frozen
+            g = pinned;
+            fprintf('[ECam] agOnce: pinned gain = %.4fx\n', pinned);
+        end
+
+        % ── aeagOnce ────────────────────────────────────────────────────────────
+        function [exp_ns, g] = aeagOnce(obj, settle_s)
+            %AEAGONCE  One-shot auto exposure AND gain together: enable both,
+            %  let them co-converge, then pin both. Best from unknown lighting,
+            %  since AE and AGC interact (fixing one changes the other's target).
+            obj.requireConnected();
+            if nargin < 2 || isempty(settle_s), settle_s = 4.0; end
+            obj.setParams('exposure_ns', 0, 'gain', 0);      % both auto
+            obj.waitActual(@() obj.actual_exposure_ns, 0.02, settle_s);
+            exp_ns = obj.actual_exposure_ns;
+            g      = obj.actual_gain_value;
+            if exp_ns <= 0, exp_ns = obj.p_exposure_ns; end
+            if g      <= 0, g      = obj.p_gain;        end
+            obj.setParams('exposure_ns', exp_ns, 'gain', g); % pin both
+            fprintf('[ECam] aeagOnce: pinned exposure=%.2f ms  gain=%.4fx\n', ...
+                exp_ns/1e6, g);
+        end
+
         % ── captureNormalized ─────────────────────────────────────────────────
         function img = captureNormalized(obj)
             img = double(obj.capture()) / double(2^obj.p_bit_depth - 1);
@@ -906,6 +958,27 @@ classdef ECamHDRClient < handle
             mb = n_bytes / 1e6;
             fprintf('[ECam]   recv %.1fMB in %.3fs (%.0f MB/s)  unpack %.3fs\n', ...
                 mb, t_rd, mb / max(t_rd, 1e-6), t_up);
+        end
+
+        function v = waitActual(obj, readFcn, tol, settle_s)
+            %WAITACTUAL  Poll an actual-value getter (refreshing CameraInfo each
+            %  step) until it stabilizes — two consecutive reads within `tol`
+            %  fractional change — or settle_s elapses. Used by ae/agOnce to
+            %  detect AE/AGC convergence before pinning. Returns last value.
+            prev = -1; stable = 0; v = 0;
+            t0 = tic;
+            while toc(t0) < settle_s
+                pause(0.25);
+                obj.CameraInfo = obj.getInfo();     % refresh actuals from server
+                v = readFcn();
+                if v > 0 && abs(v - prev) <= tol * max(v, 1)
+                    stable = stable + 1;
+                    if stable >= 2, break; end       % converged
+                else
+                    stable = 0;
+                end
+                prev = v;
+            end
         end
 
         function frame = unpackRaw10(~, packed, h, w)

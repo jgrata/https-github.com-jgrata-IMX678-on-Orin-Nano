@@ -32,6 +32,7 @@
 #include <cuda.h>
 #include <cudaEGL.h>
 #include <Argus/Argus.h>
+#include <Argus/Ext/DolWdrSensorMode.h>
 #include <EGLStream/EGLStream.h>
 
 using namespace Argus;
@@ -88,6 +89,7 @@ struct Config {
     bool        server     = false;
     int         port       = 9001;
     std::string outfile    = "/tmp/raw_capture.bin";
+    bool        list_modes = false;
 };
 
 #pragma pack(push,1)
@@ -697,6 +699,68 @@ static void save_file(const std::string& p,
            buf.seq);
 }
 
+// ── Sensor mode enumeration (--list-modes) ─────────────────────────────────────
+//
+// Dumps every Argus sensor mode with resolution, in/out bit depth, mode type
+// (BAYER / BAYER_PWL / BAYER_DOL — the PWL/DOL types are the sensor's native
+// HDR modes), exposure/gain/frame-duration/HDR-ratio ranges, and DOL exposure
+// count. This tells us whether the IMX678 exposes native HDR (single-shot WDR)
+// or whether HDR must be done by software exposure bracketing.
+
+static const char* mode_type_name(SensorModeType t)
+{
+    if (t == SENSOR_MODE_TYPE_BAYER)     return "BAYER";
+    if (t == SENSOR_MODE_TYPE_BAYER_PWL) return "BAYER_PWL(HDR)";
+    if (t == SENSOR_MODE_TYPE_BAYER_DOL) return "BAYER_DOL(HDR)";
+    if (t == SENSOR_MODE_TYPE_YUV)       return "YUV";
+    if (t == SENSOR_MODE_TYPE_RGB)       return "RGB";
+    if (t == SENSOR_MODE_TYPE_DEPTH)     return "DEPTH";
+    return "OTHER";
+}
+
+static bool list_modes()
+{
+    UniqueObj<CameraProvider> prov(CameraProvider::create());
+    ICameraProvider* iProv = interface_cast<ICameraProvider>(prov);
+    if (!iProv) { fprintf(stderr,"[Modes] no provider\n"); return false; }
+    printf("[Modes] Argus %s\n", iProv->getVersion().c_str());
+
+    std::vector<CameraDevice*> devs;
+    iProv->getCameraDevices(&devs);
+    if (devs.empty()) { fprintf(stderr,"[Modes] no devices\n"); return false; }
+    printf("[Modes] %zu camera device(s)\n", devs.size());
+
+    ICameraProperties* iProps = interface_cast<ICameraProperties>(devs[0]);
+    if (!iProps) { fprintf(stderr,"[Modes] no properties\n"); return false; }
+    std::vector<SensorMode*> modes;
+    iProps->getAllSensorModes(&modes);
+    printf("[Modes] device 0: %zu sensor mode(s)\n\n", modes.size());
+
+    for (size_t i=0;i<modes.size();i++) {
+        ISensorMode* m = interface_cast<ISensorMode>(modes[i]);
+        if (!m) continue;
+        Size2D<uint32_t> r   = m->getResolution();
+        Range<uint64_t>  er  = m->getExposureTimeRange();
+        Range<uint64_t>  fdr = m->getFrameDurationRange();
+        Range<float>     gr  = m->getAnalogGainRange();
+        Range<float>     hr  = m->getHdrRatioRange();
+        double maxfps = fdr.min()>0 ? 1e9/(double)fdr.min() : 0.0;
+        int expcount = 1;
+        Ext::IDolWdrSensorMode* dol =
+            interface_cast<Ext::IDolWdrSensorMode>(modes[i]);
+        if (dol) expcount = (int)dol->getExposureCount();
+
+        printf("  [%zu] %ux%u  type=%-14s  inBits=%u outBits=%u  maxfps=%.1f\n",
+               i, r.width(), r.height(), mode_type_name(m->getSensorModeType()),
+               m->getInputBitDepth(), m->getOutputBitDepth(), maxfps);
+        printf("       exp=[%llu..%llu]ns  gain=[%.2f..%.2fx]  hdrRatio=[%.2f..%.2f]  exposures=%d\n",
+               (unsigned long long)er.min(), (unsigned long long)er.max(),
+               gr.min(), gr.max(), hr.min(), hr.max(), expcount);
+    }
+    printf("\n[Modes] done\n");
+    return true;
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 int main(int argc,char*argv[])
@@ -716,7 +780,12 @@ int main(int argc,char*argv[])
         if (!strcmp(argv[i],"--out")     &&i+1<argc) cfg.outfile=argv[++i];
         if (!strcmp(argv[i],"--port")    &&i+1<argc) cfg.port  =(int)atoi(argv[++i]);
         if (!strcmp(argv[i],"--server"))              cfg.server=true;
+        if (!strcmp(argv[i],"--list-modes"))          cfg.list_modes=true;
     }
+
+    /* --list-modes: enumerate sensor modes and exit (no session needed). */
+    if (cfg.list_modes) { bool ok = list_modes(); return ok ? 0 : 1; }
+
     printf("[RAW] mode=%d fps=%d exp=%llu gain=%.3f server=%d\n",
            cfg.mode,cfg.fps,(unsigned long long)cfg.exp_ns,
            cfg.gain,cfg.server);

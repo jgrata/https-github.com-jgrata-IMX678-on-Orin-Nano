@@ -101,6 +101,7 @@ namespace Ecam
 
                     int nBytes;
                     if (dtype == 0x11)      nBytes = ((H * W + 3) / 4) * 5;  // RAW10 packed
+                    else if (dtype == 0x12) nBytes = ((H * W + 1) / 2) * 3;  // RAW12 packed
                     else if (dtype == 0x10) nBytes = H * W * 2;             // uint16
                     else throw new Exception("unknown dtype " + dtype);
 

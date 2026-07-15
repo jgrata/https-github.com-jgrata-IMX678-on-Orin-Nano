@@ -136,7 +136,7 @@ struct FrameBuffer {
 // ── CUDA EGL frame → uint16 ───────────────────────────────────────────────────
 
 static bool cuda_frame_to_u16(CUgraphicsResource res,
-                               uint32_t w, uint32_t h,
+                               uint32_t w, uint32_t h, uint32_t bpp,
                                std::vector<uint16_t>& out)
 {
     CUeglFrame f; memset(&f,0,sizeof(f));
@@ -171,9 +171,11 @@ static bool cuda_frame_to_u16(CUgraphicsResource res,
     if (alloc) cuMemFree(dptr);
     if (mr!=CUDA_SUCCESS) return false;
 
-    /* Left-aligned 10-bit: stored = sensor<<6  →  sensor = stored>>6 (0-1023).
-     * Vectorized under -O3/NEON (~2ms); was ~86ms at the old default -O0. */
-    for (auto& v:out) v>>=6;
+    /* Argus RAW16 is MSB-aligned: an N-bit sensor value is stored as
+     * sensor<<(16-N), so sensor = stored>>(16-N). 10-bit -> >>6 (0-1023),
+     * 12-bit -> >>4 (0-4095). Vectorized under -O3/NEON (~2ms). */
+    uint32_t sh = (bpp < 16) ? (16 - bpp) : 0;
+    if (sh) for (auto& v:out) v>>=sh;
 
     if (fw!=w||fh!=h) {
         std::vector<uint16_t> tmp(w*h,0);
@@ -476,6 +478,26 @@ static void pack_raw10(const uint16_t* px, size_t n, std::vector<uint8_t>& out)
     }
 }
 
+/* Pack uint16 12-bit pixels (0-4095) into RAW12: 2 px -> 3 bytes.
+ * out size = ceil(n/2)*3. Byte layout matches the MATLAB unpackRaw12:
+ *   o0 = p0 >> 4                              (high 8 bits of p0)
+ *   o1 = p1 >> 4                              (high 8 bits of p1)
+ *   o2 = (p0 & 0xF) | ((p1 & 0xF) << 4)       (low nibbles, LE) */
+static void pack_raw12(const uint16_t* px, size_t n, std::vector<uint8_t>& out)
+{
+    size_t groups = (n + 1) / 2;
+    out.resize(groups * 3);
+    uint8_t* o = out.data();
+    size_t i = 0;
+    for (size_t g = 0; g < groups; ++g, o += 3, i += 2) {
+        uint16_t p0 = i   < n ? px[i]   : 0;
+        uint16_t p1 = i+1 < n ? px[i+1] : 0;
+        o[0] = (uint8_t)(p0 >> 4);
+        o[1] = (uint8_t)(p1 >> 4);
+        o[2] = (uint8_t)((p0 & 0xF) | ((p1 & 0xF) << 4));
+    }
+}
+
 /* Pending exp/gain change requested by a client, consumed by the Argus loop.
  * Guarded by a simple flag pair; only the loop writes cur_* on the Session. */
 struct PendingCtl {
@@ -504,10 +526,11 @@ static void serve_frame(int cli, const FrameBuffer& buf)
     send_all(cli,buf.pixels.data(),buf.pixels.size()*2);
 }
 
-/* Serve the latest frame RAW10-packed (4px->5B) instead of uint16. Packing is
- * done here in C++ (~few ms) rather than in the Python image_server (~0.10s).
- * The packed length is self-describing via NetHdr.pad so the client reads
- * exactly that many bytes. Runs on the single Argus loop thread (no races). */
+/* Serve the latest frame bit-packed instead of uint16: RAW10 (4px->5B) for a
+ * 10-bit sensor mode, RAW12 (2px->3B) for 12-bit. Packing is done here in C++
+ * (~few ms) rather than in the Python image_server (~0.10s). The packed length
+ * is self-describing via NetHdr.pad (and the format via NetHdr.bpp) so the
+ * client reads exactly that many bytes. Runs on the single Argus loop thread. */
 static void serve_frame_packed(int cli, const FrameBuffer& buf)
 {
     if (!buf.valid) {
@@ -516,7 +539,8 @@ static void serve_frame_packed(int cli, const FrameBuffer& buf)
         return;
     }
     static std::vector<uint8_t> packed;   // reused; single-threaded serve path
-    pack_raw10(buf.pixels.data(), buf.pixels.size(), packed);
+    if (buf.bpp == 12) pack_raw12(buf.pixels.data(), buf.pixels.size(), packed);
+    else               pack_raw10(buf.pixels.data(), buf.pixels.size(), packed);
     NetHdr nh{};
     nh.magic      = 0x52413130;
     nh.w          = buf.w;
@@ -683,7 +707,7 @@ int main(int argc,char*argv[])
                 const char*s="?"; cuGetErrorString(cr,&s);
                 fprintf(stderr,"[CUDA] AcquireFrame: %s\n",s); break;}
             std::vector<uint16_t> px;
-            bool ok=cuda_frame_to_u16(cuRes,session.W,session.H,px);
+            bool ok=cuda_frame_to_u16(cuRes,session.W,session.H,session.BPP,px);
             cuEGLStreamConsumerReleaseFrame(&session.cuConn,cuRes,nullptr);
             if (ok) {
                 g_buf.update(std::move(px),
@@ -760,7 +784,7 @@ int main(int argc,char*argv[])
             if (cr==CUDA_SUCCESS && cuRes) {
                 /* Got a frame — decode into buffer */
                 std::vector<uint16_t> px;
-                bool ok=cuda_frame_to_u16(cuRes,session.W,session.H,px);
+                bool ok=cuda_frame_to_u16(cuRes,session.W,session.H,session.BPP,px);
                 cuEGLStreamConsumerReleaseFrame(
                     &session.cuConn,cuRes,nullptr);
 

@@ -546,6 +546,8 @@ classdef ECamHDRClient < handle
                 raw = uint8(payload);            % .NET byte[] -> MATLAB uint8
                 if dtype == 17                    % 0x11 RAW10 packed
                     frames(:,:,k) = obj.unpackRaw10(raw(:)', double(Hh), double(Ww));
+                elseif dtype == 18                % 0x12 RAW12 packed
+                    frames(:,:,k) = obj.unpackRaw12(raw(:)', double(Hh), double(Ww));
                 elseif dtype == 16                % 0x10 uint16
                     px = typecast(raw(:)', 'uint16');
                     frames(:,:,k) = reshape(px, [double(Ww), double(Hh)])';
@@ -817,6 +819,19 @@ classdef ECamHDRClient < handle
                 t_up     = toc(t_up);
                 obj.reportRecv(n_packed, t_rd, t_up);
 
+            elseif dtype == 0x12
+                % RAW12 packed: server packs in groups of 2 pixels -> 3 bytes,
+                % padding a partial final group: n_bytes = ceil(H*W/2) * 3.
+                n_groups = ceil(double(H) * double(W) / 2);
+                n_packed = n_groups * 3;
+                t_rd     = tic;
+                raw      = obj.rdBytes(n_packed);
+                t_rd     = toc(t_rd);
+                t_up     = tic;
+                frame    = obj.unpackRaw12(uint8(raw(:)'), H, W);
+                t_up     = toc(t_up);
+                obj.reportRecv(n_packed, t_rd, t_up);
+
             else
                 error('ECamHDRClient:unknownDtype', ...
                     'Unknown frame dtype 0x%02X', dtype);
@@ -850,6 +865,23 @@ classdef ECamHDRClient < handle
             p3 = bitor(bitshift(uint16(pk(4,:)),2), bitand(bitshift(lo,-6), 3));
 
             all_px = [p0; p1; p2; p3];   % [4 x n_groups]
+            frame  = reshape(all_px(1:n_px), [w, h])';
+        end
+
+        function frame = unpackRaw12(~, packed, h, w)
+            %UNPACKRAW12  Decode RAW12 packed bytes → uint16 [H x W] 0-4095.
+            %  2 pixels packed into 3 bytes (matches C++ pack_raw12):
+            %    byte0=P0[11:4]  byte1=P1[11:4]
+            %    byte2=P0[3:0] | P1[3:0]<<4   (low nibbles, LE)
+            n_px     = double(h) * double(w);
+            n_groups = ceil(n_px / 2);
+            pk       = reshape(packed(1:n_groups*3), 3, n_groups);
+
+            lo = uint16(pk(3,:));
+            p0 = bitor(bitshift(uint16(pk(1,:)),4), bitand(lo,           15));
+            p1 = bitor(bitshift(uint16(pk(2,:)),4), bitand(bitshift(lo,-4), 15));
+
+            all_px = [p0; p1];           % [2 x n_groups]
             frame  = reshape(all_px(1:n_px), [w, h])';
         end
 

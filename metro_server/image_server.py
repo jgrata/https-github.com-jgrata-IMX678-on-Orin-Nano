@@ -24,7 +24,8 @@ DEFAULT_LOSSLESS    = True    # lossless-by-default; True => RAW10 packed
 
 # Frame wire dtypes (status 0x00 frame header: [0x00][H u32][W u32][dtype u8])
 DTYPE_U16      = 0x10   # uint16 unpacked  (16.6 MB / 4K frame)
-DTYPE_RAW10    = 0x11   # RAW10 bit-packed (9.5 MB / 4K frame, lossless)
+DTYPE_RAW10    = 0x11   # RAW10 bit-packed (10.4 MB / 4K frame, lossless)
+DTYPE_RAW12    = 0x12   # RAW12 bit-packed (12.4 MB / 4K frame, lossless)
 
 HDR_SAT_THRESHOLD  = 0.95
 HDR_EXPOSURE_RATIO = 4
@@ -463,20 +464,22 @@ class Camera:
         return self._scale(frame)
 
     def can_pack_in_cpp(self):
-        """Fast path is valid only for true 10-bit, non-HDR, lossless output —
-        exactly when the C++ RAW10 pack is bit-identical to the Python one.
-        8/12-bit need _scale(); HDR needs a merge; both require the uint16 frame."""
+        """Fast path is valid for native 10-bit (mode 1) or 12-bit (mode 0)
+        sensor output, non-HDR, lossless — raw_capture packs the NATIVE sensor
+        bits in C++ (RAW10 or RAW12), bit-identical to the MATLAB unpack. The
+        _scale() bit_depth knob and HDR merge need the uint16 frame instead."""
         return (USE_CPP_PACK and getattr(self, 'lossless', True)
-                and self.bit_depth == 10 and not self.hdr)
+                and not self.hdr and self.native_bpp in (10, 12))
 
     def capture_packed(self):
-        """Fast path: RAW10-packed bytes straight from raw_capture (C++ pack),
-        skipping NumPy pack_raw10. Returns (packed_bytes, h, w)."""
+        """Fast path: bit-packed bytes straight from raw_capture (C++ pack),
+        skipping NumPy pack. Returns (packed_bytes, h, w, bpp) — bpp is 10 or 12
+        so the caller sends the matching wire dtype (RAW10=0x11 / RAW12=0x12)."""
         packed, w, h, bpp, nf, ae, ag = self.rcp.capture(packed=True)
         with self._ae_lock:
             if ae > 0: self.actual_exp  = ae
             if ag > 0: self.actual_gain = ag / 1000.0
-        return packed, h, w
+        return packed, h, w, bpp
 
     def _scale(self, frame):
         bd = self.bit_depth
@@ -602,7 +605,7 @@ class Prefetcher(threading.Thread):
         super().__init__(daemon=True)
         self.camera  = camera
         self._cv     = threading.Condition()
-        self._latest = None      # (packed_bytes, h, w)
+        self._latest = None      # (packed_bytes, h, w, bpp)
         self._seq    = 0
         self.running = True
 
@@ -611,9 +614,9 @@ class Prefetcher(threading.Thread):
             try:
                 if not self.camera.can_pack_in_cpp():
                     time.sleep(0.05); continue
-                packed, h, w = self.camera.capture_packed()
+                packed, h, w, bpp = self.camera.capture_packed()
                 with self._cv:
-                    self._latest = (packed, h, w)
+                    self._latest = (packed, h, w, bpp)
                     self._seq   += 1
                     self._cv.notify_all()
             except Exception as e:
@@ -621,15 +624,15 @@ class Prefetcher(threading.Thread):
 
     def get_next(self, last_seq, timeout=10.0):
         """Block until a frame newer than last_seq is ready; return
-        (packed, h, w, seq). Guarantees each client gets a fresh frame."""
+        (packed, h, w, bpp, seq). Guarantees each client gets a fresh frame."""
         with self._cv:
             ok = self._cv.wait_for(
                 lambda: self._seq > last_seq and self._latest is not None,
                 timeout)
             if not ok:
                 raise RuntimeError("prefetch timeout")
-            packed, h, w = self._latest
-            return packed, h, w, self._seq
+            packed, h, w, bpp = self._latest
+            return packed, h, w, bpp, self._seq
 
 
 # ── ClientHandler ─────────────────────────────────────────────────────────────
@@ -683,15 +686,17 @@ class ClientHandler(threading.Thread):
             if pf is not None and self.camera.can_pack_in_cpp():
                 # Prefetched packed frame: the localhost fetch already overlapped
                 # the previous network send. Wait for one newer than we last sent.
-                packed, h, w, self._last_seq = pf.get_next(self._last_seq)
+                packed, h, w, bpp, self._last_seq = pf.get_next(self._last_seq)
                 t_cap  = time.monotonic()-t0
-                header = struct.pack('<BIIB', 0x00, h, w, DTYPE_RAW10)
+                dtype  = DTYPE_RAW12 if bpp == 12 else DTYPE_RAW10
+                header = struct.pack('<BIIB', 0x00, h, w, dtype)
                 send_exactly(self.conn, header + packed)
             elif self.camera.can_pack_in_cpp():
                 # Fast path, no prefetch: pack in C++, forward synchronously.
-                packed, h, w = self.camera.capture_packed()
+                packed, h, w, bpp = self.camera.capture_packed()
                 t_cap  = time.monotonic()-t0
-                header = struct.pack('<BIIB', 0x00, h, w, DTYPE_RAW10)
+                dtype  = DTYPE_RAW12 if bpp == 12 else DTYPE_RAW10
+                header = struct.pack('<BIIB', 0x00, h, w, dtype)
                 send_exactly(self.conn, header + packed)
             else:
                 frame = self.camera.capture_frame()

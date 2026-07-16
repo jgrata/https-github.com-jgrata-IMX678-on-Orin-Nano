@@ -886,6 +886,93 @@ classdef ECamHDRClient < handle
                 lvl, 100*lvl/fs, prnuOnly);
         end
 
+        % ── measurePTC ──────────────────────────────────────────────────────────
+        function ptc = measurePTC(obj, dark, gain, step)
+            %MEASUREPTC  Photon-transfer curve on a UNIFORM source.
+            %  Sweeps exposure (auto, from 450us up to saturation), grabs 2
+            %  frames per level, and per Bayer phase computes mean signal and
+            %  temporal variance via the 2-frame difference method (var(f1-f2)/2
+            %  cancels fixed-pattern noise). Fits the shot-noise region to get:
+            %  conversion gain K (e-/DN), read noise (DN & e-), full-well (e-),
+            %  and dynamic range (dB). Plots variance-vs-mean per phase.
+            %
+            %  ptc = cam.measurePTC(dark, [gain], [step])
+            %  dark : per-pixel dark from measureBlackLevel at the SAME gain
+            %  gain : fixed analog gain for the sweep (default 1.0)
+            %  step : exposure multiplier per level (default 1.4)
+            %
+            %  ** Point at a uniform source DIMMED so 450us reads ~5-10% FS, so
+            %     the sweep spans dark->saturation. Assumes a temporally stable
+            %     source (flicker inflates the variance). **
+            obj.requireConnected();
+            if nargin < 3 || isempty(gain), gain = 1.0; end
+            if nargin < 4 || isempty(step), step = 1.4; end
+            fs = 2^obj.p_bit_depth - 1;
+
+            oe = obj.p_exposure_ns; og = obj.p_gain; ov = obj.Verbose;
+            obj.Verbose = false;
+            obj.setParams('gain', double(gain));
+
+            ph = {'R',[1 1];'Gr',[1 2];'Gb',[2 1];'B',[2 2]};
+            exps = []; mn = []; vr = [];        % mn/vr rows=level, cols=phase
+            e = 450000; lvl = 0;
+            while e <= 400000000 && lvl < 40
+                obj.exposure_ns = round(e);
+                obj.waitExposureSettle(round(e));
+                obj.grab();                     % flush transitional frame
+                f1 = single(obj.grab());
+                f2 = single(obj.grab());
+                lvl = lvl + 1;
+                exps(lvl) = obj.actual_exposure_ns; %#ok<AGROW>
+                for p = 1:4
+                    r0 = ph{p,2}(1); c0 = ph{p,2}(2);
+                    a1 = f1(r0:2:end, c0:2:end);
+                    a2 = f2(r0:2:end, c0:2:end);
+                    d  = dark(r0:2:end, c0:2:end);
+                    mn(lvl,p) = mean((a1(:)+a2(:))/2 - d(:));  %#ok<AGROW> signal DN
+                    df = a1(:) - a2(:);
+                    vr(lvl,p) = var(df) / 2;                   %#ok<AGROW> temporal var
+                end
+                if median(f1(:)) >= 0.97*fs, break; end        % saturated
+                e = e * step;
+            end
+            obj.setParams('exposure_ns', oe, 'gain', og);
+            obj.Verbose = ov;
+
+            ptc = struct('exposure_ns', exps, 'gain', gain, 'fullscale', fs);
+            figure; hold on; co = lines(4);
+            for p = 1:4
+                m = mn(:,p); v = vr(:,p);
+                sel = m > 0.05*fs & m < 0.70*fs;               % shot-noise region
+                if nnz(sel) >= 2
+                    c     = polyfit(m(sel), v(sel), 1);        % v = c1*m + c2
+                    K     = 1/c(1);                            % e-/DN
+                    rn_dn = sqrt(max(c(2),0));
+                else
+                    K = NaN; rn_dn = NaN;
+                end
+                rn_e  = rn_dn * K;
+                fw_e  = K * max(m);                            % full well (e-)
+                dr_db = 20*log10(fw_e / max(rn_e, eps));
+                ptc.phase(p) = struct('name',ph{p,1}, 'mean',m(:)', 'var',v(:)', ...
+                    'K',K, 'read_noise_DN',rn_dn, 'read_noise_e',rn_e, ...
+                    'fullwell_e',fw_e, 'DR_dB',dr_db);
+                loglog(m, v, 'o-', 'Color', co(p,:), 'DisplayName', ph{p,1});
+                fprintf('[PTC] %-3s K=%.4f e-/DN  read=%.2f DN (%.1f e-)  FW=%.0f e-  DR=%.1f dB\n', ...
+                    ph{p,1}, K, rn_dn, rn_e, fw_e, dr_db);
+            end
+            set(gca,'XScale','log','YScale','log'); grid on;
+            xlabel('mean signal (DN)'); ylabel('temporal variance (DN^2)');
+            title(sprintf('Photon-transfer curve  (gain %.2fx, %d-bit)', ...
+                gain, obj.p_bit_depth));
+            legend('Location','northwest');
+            if numel(exps) < 5
+                warning('ECamHDRClient:ptcShort', ...
+                    'only %d usable levels — dim the source so 450us reads ~5-10%% FS', ...
+                    numel(exps));
+            end
+        end
+
     end % public
 
     % ═════════════════════════════════════════════════════════════════════════

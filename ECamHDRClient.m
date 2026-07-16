@@ -949,19 +949,11 @@ classdef ECamHDRClient < handle
 
         function set.sensormode(obj, v)
             obj.p_sensormode = v;
-            if obj.IsConnected
-                obj.setParams('sensormode', v);
-                % Native sensor modes deliver a fixed bit depth (mode 0/2 =
-                % 12-bit, mode 1/3 = 10-bit) and the lossless packed path emits
-                % exactly those native bits. Align bit_depth so capture()/
-                % showParams report the true output depth (else e.g. mode 0
-                % would still print "10-bit" while the data is 0-4095).
-                if ~isempty(fieldnames(obj.CameraInfo)) && ...
-                        isfield(obj.CameraInfo,'native_bpp') && ...
-                        obj.CameraInfo.native_bpp > 0
-                    obj.p_bit_depth = obj.CameraInfo.native_bpp;
-                end
-            end
+            if obj.IsConnected, obj.setParams('sensormode', v); end
+            % bit_depth tracks the sensor's native_bpp via syncFromServer once
+            % the (async) pipeline restart completes and the next getInfo runs
+            % (e.g. after your pause() + a refresh()/capture()). Reading it here
+            % would race the restart and grab the OLD mode's value.
         end
         function set.exposure_ns(obj, v)
             obj.p_exposure_ns = v;
@@ -1048,7 +1040,6 @@ classdef ECamHDRClient < handle
             end
             map = {'sensormode','p_sensormode'; ...
                    'fps',       'p_fps'; ...
-                   'bit_depth', 'p_bit_depth'; ...
                    'hdr_exp_ratio','p_hdr_exp_ratio'; ...
                    'sat_threshold','p_sat_threshold'; ...
                    'lossless',  'p_lossless'};
@@ -1056,6 +1047,16 @@ classdef ECamHDRClient < handle
                 if isfield(info, map{k,1})
                     obj.(map{k,2}) = info.(map{k,1});
                 end
+            end
+            % bit_depth reflects the ACTUAL data on the wire: the lossless
+            % packed path carries the sensor's NATIVE bits (native_bpp), so
+            % track that (mode 0 -> 12); only for lossless=false (scaled uint16)
+            % does the server's bit_depth scaling knob apply.
+            if isfield(info,'lossless') && info.lossless && ...
+                    isfield(info,'native_bpp') && info.native_bpp > 0
+                obj.p_bit_depth = info.native_bpp;
+            elseif isfield(info,'bit_depth')
+                obj.p_bit_depth = info.bit_depth;
             end
         end
 

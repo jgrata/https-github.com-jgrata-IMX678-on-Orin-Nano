@@ -780,27 +780,31 @@ classdef ECamHDRClient < handle
         end
 
         % ── measureBlackLevel ───────────────────────────────────────────────────
-        function [darkframe, stats] = measureBlackLevel(obj, nframes)
+        function [darkframe, stats] = measureBlackLevel(obj, nframes, gain)
             %MEASUREBLACKLEVEL  Empirical black level / dark frame for radiance.
             %  ** CAP THE LENS (or use a fully dark scene) before calling. **
-            %  Averages nframes at the shortest exposure and unity gain into a
-            %  per-pixel black-level image (removes the read pedestal AND fixed-
-            %  pattern offset — proper dark-frame subtraction). Pass the result
-            %  as `blacklevel` to reconstructRadiance (it subtracts per-pixel).
+            %  Averages nframes at the shortest exposure into a per-pixel
+            %  black-level image (removes the read pedestal AND fixed-pattern
+            %  offset). Pass the result as `blacklevel` to reconstructRadiance.
+            %
+            %  cam.measureBlackLevel([nframes],[gain])
+            %  IMPORTANT: the black level is GAIN-DEPENDENT on this sensor, so
+            %  measure it at the SAME gain you use for the bracket (default 1.0
+            %  — match captureBracket's gain).
             %
             %  Returns:
             %    darkframe : single [H x W]  — the dark reference to subtract
             %    stats     : per-Bayer-phase medians (.R .Gr .Gb .B) + .global
             %
-            %  Measured at min exposure, so it captures the exposure-independent
-            %  pedestal; dark current at long bracket exposures is assumed
-            %  negligible (add per-exposure darks if that proves otherwise).
-            %  Measured on RAW (ISP-agnostic) so it ports across ISPs.
+            %  Measured at min exposure (exposure-independent pedestal); dark
+            %  current at long bracket exposures is assumed negligible. RAW-based
+            %  -> ISP-agnostic, ports across ISPs.
             obj.requireConnected();
-            if nargin < 2 || isempty(nframes), nframes = 8; end
+            if nargin < 2 || isempty(nframes), nframes = 8;   end
+            if nargin < 3 || isempty(gain),    gain    = 1.0; end
             oe = obj.p_exposure_ns; og = obj.p_gain; ov = obj.Verbose;
             obj.Verbose = false;
-            obj.setParams('exposure_ns', 450000, 'gain', 1.0);   % min exp, unity gain
+            obj.setParams('exposure_ns', 450000, 'gain', double(gain));
             pause(0.5);
             obj.grab();                                          % flush transitional
             acc = zeros(double(obj.CameraInfo.height), double(obj.CameraInfo.width));
@@ -1183,29 +1187,34 @@ classdef ECamHDRClient < handle
             end
         end
 
-        function waitExposureSettle(obj, target_ns, timeout_s)
-            %WAITEXPOSURESETTLE  Block until the sensor's actual exposure reaches
-            %  target_ns (within 5%) or stabilizes (if clamped), or a timeout.
-            %  Timeout/poll scale with the exposure, since long exposures lower
-            %  fps (a frame period ~= the exposure time).
+        function ok = waitExposureSettle(obj, target_ns, timeout_s)
+            %WAITEXPOSURESETTLE  Block until the sensor's ACTUAL exposure reaches
+            %  target_ns (within 5%), or a timeout (exposure genuinely clamped
+            %  by the mode/range). Returns true if the target was reached.
+            %
+            %  A new exposure takes a few frames to appear; during that time the
+            %  OLD value is briefly stable, so we do NOT use a stability
+            %  shortcut (that caused a long leg to be captured at the previous
+            %  exposure). Instead: unconditionally flush a few frame periods,
+            %  then poll for the target. Poll/timeout scale with the exposure
+            %  since long exposures lower fps (frame period ~= exposure).
             target = double(target_ns);
+            fp     = max(0.03, target/1e9);              % new frame period
             if nargin < 3 || isempty(timeout_s)
-                timeout_s = max(2.0, 6 * target/1e9);   % ~6 frame periods
+                timeout_s = max(2.5, 10 * fp);
             end
-            tol = 0.05; t0 = tic; prev = -1; stable = 0;
+            pause(3 * fp);                                % let the change flush in
+            tol = 0.05; t0 = tic; ok = false;
             while toc(t0) < timeout_s
-                pause(max(0.05, target/1e9));            % ~one frame period
                 a = double(obj.actual_exposure_ns);      % live query
                 if a > 0 && abs(a - target) <= tol*max(target,1)
-                    return;                               % reached target
+                    ok = true; return;                    % reached target
                 end
-                if a > 0 && abs(a - prev) <= tol*max(a,1) % clamped but settled
-                    stable = stable + 1; if stable >= 2, return; end
-                else
-                    stable = 0;
-                end
-                prev = a;
+                pause(fp);
             end
+            warning('ECamHDRClient:expClamp', ...
+                'exposure did not reach %.2fms (actual %.2fms) — clamped?', ...
+                target/1e6, double(obj.actual_exposure_ns)/1e6);
         end
 
         function frame = unpackRaw10(~, packed, h, w)

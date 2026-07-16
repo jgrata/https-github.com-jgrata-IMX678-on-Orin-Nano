@@ -375,20 +375,24 @@ struct Session {
         IAutoControlSettings* iAC = interface_cast<IAutoControlSettings>(
             iReq->getAutoControlSettings());
 
+        /* Frame duration MUST be set BEFORE exposure: Argus clamps the exposure
+         * to the CURRENT frame duration at set-time, so a long exposure set
+         * while the period is still ~1/fps gets clamped. Extend the period
+         * first (fps drops), then set the exposure. */
         uint64_t fd = base_frame_dur_ns;
+        uint64_t e  = 0;
         if (exp_ns > 0) {
-            uint64_t e = std::max((uint64_t)exp_range.min(),
-                         std::min((uint64_t)exp_range.max(), exp_ns));
-            iSrc->setExposureTimeRange(Range<uint64_t>(e,e));
-            /* Exposure can't exceed the frame duration — extend the frame
-             * period for long exposures so the request actually takes effect
-             * (fps drops) instead of being silently clamped to ~1/fps. */
+            e = std::max((uint64_t)exp_range.min(),
+                std::min((uint64_t)exp_range.max(), exp_ns));
             if (e > fd) fd = e;
+        }
+        iSrc->setFrameDurationRange(Range<uint64_t>(fd, fd));
+        if (exp_ns > 0) {
+            iSrc->setExposureTimeRange(Range<uint64_t>(e,e));
         } else {
             /* auto exposure within the fps-derived frame period */
             iSrc->setExposureTimeRange(exp_range);
         }
-        iSrc->setFrameDurationRange(Range<uint64_t>(fd, fd));
 
         if (gain > 0.0f) {
             float g = std::max(gain_range.min(),
@@ -758,11 +762,14 @@ static bool list_modes()
             interface_cast<Ext::IDolWdrSensorMode>(modes[i]);
         if (dol) expcount = (int)dol->getExposureCount();
 
-        printf("  [%zu] %ux%u  type=%-14s  inBits=%u outBits=%u  maxfps=%.1f\n",
+        double minfps = fdr.max()>0 ? 1e9/(double)fdr.max() : 0.0;
+        printf("  [%zu] %ux%u  type=%-14s  inBits=%u outBits=%u  fps=[%.2f..%.1f]\n",
                i, r.width(), r.height(), mode_type_name(m->getSensorModeType()),
-               m->getInputBitDepth(), m->getOutputBitDepth(), maxfps);
-        printf("       exp=[%llu..%llu]ns  gain=[%.2f..%.2fx]  hdrRatio=[%.2f..%.2f]  exposures=%d\n",
+               m->getInputBitDepth(), m->getOutputBitDepth(), minfps, maxfps);
+        printf("       exp=[%llu..%llu]ns  frameDur=[%llu..%llu]ns (max exp %.1fms)  gain=[%.2f..%.2fx]  hdrRatio=[%.2f..%.2f]  exposures=%d\n",
                (unsigned long long)er.min(), (unsigned long long)er.max(),
+               (unsigned long long)fdr.min(), (unsigned long long)fdr.max(),
+               (double)std::min((uint64_t)er.max(), fdr.max())/1e6,
                gr.min(), gr.max(), hr.min(), hr.max(), expcount);
     }
     printf("\n[Modes] done\n");

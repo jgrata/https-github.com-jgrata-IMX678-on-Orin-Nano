@@ -174,6 +174,7 @@ classdef ECamHDRClient < handle
         % ── ping ──────────────────────────────────────────────────────────────
         function ping(obj)
             obj.requireConnected();
+            obj.flushInput();
             obj.sendCmd(obj.CMD_PING);
             resp = obj.recvResp();
             if ~strcmpi(strtrim(char(resp(:)')), 'PONG')
@@ -186,9 +187,19 @@ classdef ECamHDRClient < handle
         % ── getInfo ───────────────────────────────────────────────────────────
         function info = getInfo(obj)
             obj.requireConnected();
+            obj.flushInput();                    % drop any stale/pending bytes
             obj.sendCmd(obj.CMD_GET_INFO);
             data = obj.recvResp();
-            info = jsondecode(char(data(:)'));
+            try
+                info = jsondecode(char(data(:)'));
+            catch
+                % Desync: the response wasn't JSON (e.g. a stale 'OK'). Flush
+                % and retry once so the control socket realigns.
+                obj.flushInput();
+                obj.sendCmd(obj.CMD_GET_INFO);
+                data = obj.recvResp();
+                info = jsondecode(char(data(:)'));
+            end
         end
 
         % ── refresh ───────────────────────────────────────────────────────────
@@ -322,6 +333,7 @@ classdef ECamHDRClient < handle
                 return
             end
 
+            obj.flushInput();                    % realign before the transaction
             obj.sendCmd(obj.CMD_SET_PARAMS, uint8(jsonencode(params)));
             resp = obj.recvResp();
             if ~strcmpi(strtrim(char(resp(:)')), 'OK')

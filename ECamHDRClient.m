@@ -740,13 +740,15 @@ classdef ECamHDRClient < handle
         end
 
         % ── reconstructRadiance ─────────────────────────────────────────────────
-        function [rad, wsum] = reconstructRadiance(obj, frames, meta, blacklevel, satfrac)
+        function [rad, wsum] = reconstructRadiance(obj, frames, meta, blacklevel, satfrac, flatfield)
             %RECONSTRUCTRADIANCE  Combine an exposure bracket into a linear HDR
             %  radiance map (Debevec-style weighted average; RAW sensor data is
             %  already linear, so no camera response curve is needed).
             %
             %  [rad, wsum] = cam.reconstructRadiance(frames, meta)
-            %  [...] = cam.reconstructRadiance(frames, meta, blacklevel, satfrac)
+            %  [...] = cam.reconstructRadiance(frames, meta, blacklevel, satfrac, flatfield)
+            %  flatfield: optional per-pixel response map from measureFlatField;
+            %  the radiance is divided by it to remove PRNU/vignetting.
             %
             %  frames/meta come from captureBracket. For each exposure the
             %  per-pixel estimate is (DN - blacklevel) / (exposure_s * gain),
@@ -777,6 +779,9 @@ classdef ECamHDRClient < handle
                 wsum = wsum + w;
             end
             rad = rad ./ max(wsum, eps('single'));    % relative linear radiance
+            if nargin >= 6 && ~isempty(flatfield)     % flat-field correction
+                rad = rad ./ single(flatfield);
+            end
         end
 
         % ── measureBlackLevel ───────────────────────────────────────────────────
@@ -820,6 +825,65 @@ classdef ECamHDRClient < handle
                            'global', median(darkframe(:)));
             fprintf('[ECam] blacklevel (DN): R=%.1f Gr=%.1f Gb=%.1f B=%.1f  global=%.1f\n', ...
                 stats.R, stats.Gr, stats.Gb, stats.B, stats.global);
+        end
+
+        % ── measureFlatField ────────────────────────────────────────────────────
+        function flatmap = measureFlatField(obj, dark, nframes, exposure_ns, gain, prnuOnly)
+            %MEASUREFLATFIELD  Per-pixel flat-field (response non-uniformity) map.
+            %  Point the camera at a UNIFORM illumination source, then:
+            %    flat = cam.measureFlatField(dark)
+            %  Captures nframes, dark-subtracts, averages, and normalizes PER
+            %  BAYER PHASE to build a correction map (~1 mean). Pass it to
+            %  reconstructRadiance (flatfield arg): corrected = radiance ./ map.
+            %
+            %  cam.measureFlatField(dark,[nframes],[exposure_ns],[gain],[prnuOnly])
+            %
+            %  prnuOnly=false (default): removes ALL spatial non-uniformity in
+            %    the flat — sensor PRNU AND, if the lens is on, lens vignetting
+            %    (flattens THIS lens).
+            %  prnuOnly=true: high-passes each phase so only the high-frequency
+            %    component (column/pixel PRNU — the banding) is corrected, and
+            %    the smooth lens vignetting is left intact.
+            %
+            %  Aim for a mid flat level (~40-70% of full scale, unsaturated).
+            %  Measure at the gain you'll use for the bracket.
+            obj.requireConnected();
+            if nargin<3||isempty(nframes),     nframes=8;                 end
+            if nargin<4||isempty(exposure_ns), exposure_ns=obj.p_exposure_ns; end
+            if nargin<5||isempty(gain),        gain=obj.p_gain; if gain<=0, gain=1; end; end
+            if nargin<6||isempty(prnuOnly),    prnuOnly=false;            end
+
+            oe=obj.p_exposure_ns; og=obj.p_gain; ov=obj.Verbose; obj.Verbose=false;
+            obj.setParams('exposure_ns', round(exposure_ns), 'gain', double(gain));
+            obj.waitExposureSettle(round(exposure_ns));
+            obj.grab();
+            acc = zeros(double(obj.CameraInfo.height), double(obj.CameraInfo.width));
+            for k=1:nframes, acc = acc + double(obj.grab()); end
+            obj.setParams('exposure_ns', oe, 'gain', og); obj.Verbose=ov;
+
+            flat = single(acc/nframes) - single(dark);      % dark-subtracted signal
+            fs   = 2^obj.p_bit_depth - 1;
+            lvl  = median(flat(:));
+            if lvl < 0.10*fs || lvl > 0.90*fs
+                warning('ECamHDRClient:flatLevel', ...
+                    'flat median %.0f DN is %.0f%% of full scale — aim ~40-70%%', ...
+                    lvl, 100*lvl/fs);
+            end
+
+            flatmap = ones(size(flat), 'single');
+            ph = {[1 1],[1 2],[2 1],[2 2]};                 % R Gr Gb B phases
+            for p = 1:4
+                r0=ph{p}(1); c0=ph{p}(2);
+                sub = max(flat(r0:2:end, c0:2:end), eps('single'));
+                if prnuOnly
+                    m = sub ./ obj.boxlp(sub, 65);          % high-freq PRNU only
+                else
+                    m = sub ./ mean(sub(:));                % all spatial non-unif.
+                end
+                flatmap(r0:2:end, c0:2:end) = m;
+            end
+            fprintf('[ECam] flatfield: level %.0f DN (%.0f%% FS)  prnuOnly=%d\n', ...
+                lvl, 100*lvl/fs, prnuOnly);
         end
 
     end % public
@@ -1215,6 +1279,16 @@ classdef ECamHDRClient < handle
             warning('ECamHDRClient:expClamp', ...
                 'exposure did not reach %.2fms (actual %.2fms) — clamped?', ...
                 target/1e6, double(obj.actual_exposure_ns)/1e6);
+        end
+
+        function lp = boxlp(~, A, k)
+            %BOXLP  Separable box low-pass with edge normalization (toolbox-free
+            %  — uses conv2). Approximates the smooth (vignetting) component so
+            %  measureFlatField(prnuOnly=true) can isolate high-frequency PRNU.
+            h   = ones(1, k, 'single') / k;
+            num = conv2(h', h, A, 'same');
+            den = conv2(h', h, ones(size(A), 'single'), 'same');
+            lp  = num ./ den;
         end
 
         function frame = unpackRaw10(~, packed, h, w)

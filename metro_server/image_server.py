@@ -454,8 +454,10 @@ class Camera:
             pinned/1e6, gain_fixed))
 
     def capture_frame(self):
-        if self.hdr:
-            return self._capture_hdr()
+        # Native DOL HDR (mode 3) is combined by the sensor/ISP into a single
+        # WDR frame — serve it like any other native frame. (The old software
+        # _capture_hdr merge is deprecated; use the client's captureBracket for
+        # software HDR on modes 0/1/2.)
         pixels, w, h, bpp, nf, ae, ag = self.rcp.capture()
         with self._ae_lock:
             if ae > 0: self.actual_exp  = ae
@@ -464,12 +466,12 @@ class Camera:
         return self._scale(frame)
 
     def can_pack_in_cpp(self):
-        """Fast path is valid for native 10-bit (mode 1) or 12-bit (mode 0)
-        sensor output, non-HDR, lossless — raw_capture packs the NATIVE sensor
-        bits in C++ (RAW10 or RAW12), bit-identical to the MATLAB unpack. The
-        _scale() bit_depth knob and HDR merge need the uint16 frame instead."""
+        """Fast path is valid whenever raw_capture delivers native Bayer bits
+        (10 or 12) losslessly — modes 0/1/2 AND the native DOL mode 3 (its
+        sensor/ISP-combined WDR output is a single 10-bit Bayer frame, packable
+        as RAW10). Only lossless=false (scaled uint16) needs the slow path."""
         return (USE_CPP_PACK and getattr(self, 'lossless', True)
-                and not self.hdr and self.native_bpp in (10, 12))
+                and self.native_bpp in (10, 12))
 
     def capture_packed(self):
         """Fast path: bit-packed bytes straight from raw_capture (C++ pack),

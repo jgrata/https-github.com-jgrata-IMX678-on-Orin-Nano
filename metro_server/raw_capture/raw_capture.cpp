@@ -292,9 +292,25 @@ struct Session {
         BPP=iMode->getInputBitDepth();
 
         /* DOL/WDR modes output an INTERLEAVED multi-exposure frame at a larger
-         * "physical" resolution (line-info markers + VBP rows + N exposures).
-         * The EGL stream MUST be sized to the physical resolution or the
-         * producer never delivers a frame (EGL state stuck at EMPTY/0x3217). */
+         * "physical" resolution (line-info markers + VBP rows + N exposures),
+         * so we size the EGL stream to getPhysicalResolution() below.
+         *
+         * STATUS (2026-07-16): native DOL RAW capture does NOT work on this
+         * e-CAM86 / JetPack 6.1 BSP -- it is a tegra VI / e-con driver issue,
+         * NOT our code, NOT the MCU firmware, NOT the device tree:
+         *   - the sensor DOES stream DOL (30fps confirmed on the direct V4L2
+         *     path), so the MCU/sensor are fine;
+         *   - the device-tree mode-3 entry is correct (bayer_wdr_dol,
+         *     3856x4450, 2 exposures, 16x) and matches IDolWdrSensorMode;
+         *   - but this Argus RAW16 consumer, even sized to the physical
+         *     3856x4450, receives ZERO frames (producer never delivers); and
+         *   - direct V4L2 delivers frames flagged V4L2_BUF_FLAG_ERROR because
+         *     the node clamps to 3840x2160 (a 2160-row slice of the 4450-row
+         *     readout) -> frame-size mismatch.
+         * i.e. the tegra VI DOL-capture path never delivers the full frame.
+         * Filed with e-con; use software-bracket HDR (modes 0/1/2) meanwhile.
+         * (An earlier commit wrongly called this a "vendor MCU-firmware bug";
+         *  the MCU streams DOL fine -- the failure is in VI/driver capture.) */
         Ext::IDolWdrSensorMode* dol =
             interface_cast<Ext::IDolWdrSensorMode>(sm);
         if (dol) {

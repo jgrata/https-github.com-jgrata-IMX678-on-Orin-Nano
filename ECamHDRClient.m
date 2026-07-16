@@ -779,6 +779,45 @@ classdef ECamHDRClient < handle
             rad = rad ./ max(wsum, eps('single'));    % relative linear radiance
         end
 
+        % ── measureBlackLevel ───────────────────────────────────────────────────
+        function [darkframe, stats] = measureBlackLevel(obj, nframes)
+            %MEASUREBLACKLEVEL  Empirical black level / dark frame for radiance.
+            %  ** CAP THE LENS (or use a fully dark scene) before calling. **
+            %  Averages nframes at the shortest exposure and unity gain into a
+            %  per-pixel black-level image (removes the read pedestal AND fixed-
+            %  pattern offset — proper dark-frame subtraction). Pass the result
+            %  as `blacklevel` to reconstructRadiance (it subtracts per-pixel).
+            %
+            %  Returns:
+            %    darkframe : single [H x W]  — the dark reference to subtract
+            %    stats     : per-Bayer-phase medians (.R .Gr .Gb .B) + .global
+            %
+            %  Measured at min exposure, so it captures the exposure-independent
+            %  pedestal; dark current at long bracket exposures is assumed
+            %  negligible (add per-exposure darks if that proves otherwise).
+            %  Measured on RAW (ISP-agnostic) so it ports across ISPs.
+            obj.requireConnected();
+            if nargin < 2 || isempty(nframes), nframes = 8; end
+            oe = obj.p_exposure_ns; og = obj.p_gain; ov = obj.Verbose;
+            obj.Verbose = false;
+            obj.setParams('exposure_ns', 450000, 'gain', 1.0);   % min exp, unity gain
+            pause(0.5);
+            obj.grab();                                          % flush transitional
+            acc = zeros(double(obj.CameraInfo.height), double(obj.CameraInfo.width));
+            for k = 1:nframes, acc = acc + double(obj.grab()); end
+            darkframe = single(acc / nframes);
+            obj.setParams('exposure_ns', oe, 'gain', og);        % restore
+            obj.Verbose = ov;
+
+            R  = darkframe(1:2:end, 1:2:end);   Gr = darkframe(1:2:end, 2:2:end);
+            Gb = darkframe(2:2:end, 1:2:end);   B  = darkframe(2:2:end, 2:2:end);
+            stats = struct('R', median(R(:)),  'Gr', median(Gr(:)), ...
+                           'Gb', median(Gb(:)),'B',  median(B(:)), ...
+                           'global', median(darkframe(:)));
+            fprintf('[ECam] blacklevel (DN): R=%.1f Gr=%.1f Gb=%.1f B=%.1f  global=%.1f\n', ...
+                stats.R, stats.Gr, stats.Gb, stats.B, stats.global);
+        end
+
     end % public
 
     % ═════════════════════════════════════════════════════════════════════════

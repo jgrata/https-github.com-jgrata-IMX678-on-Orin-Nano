@@ -205,6 +205,11 @@ struct Session {
     IRequest*                  iReq       = nullptr;
     ISourceSettings*           iSrc       = nullptr;
     uint32_t                   W=0,H=0,BPP=0;
+    /* DOL/WDR interleaved-output layout (physical frame carries N exposures +
+     * line-info markers + vertical-blank rows; used to de-interleave later). */
+    bool                       is_dol = false;
+    uint32_t                   baseW=0, baseH=0;
+    uint32_t                   dol_expcount=1, dol_limarker=0, dol_vbp=0;
 
     /* Currently-applied exp/gain on the live request (for live updates). */
     uint64_t                   cur_exp_ns = 0;
@@ -280,9 +285,30 @@ struct Session {
 
         SensorMode  *sm   =modes[cfg.mode];
         ISensorMode *iMode=interface_cast<ISensorMode>(sm);
-        W  =iMode->getResolution().width();
-        H  =iMode->getResolution().height();
+        baseW = iMode->getResolution().width();
+        baseH = iMode->getResolution().height();
+        W  = baseW;
+        H  = baseH;
         BPP=iMode->getInputBitDepth();
+
+        /* DOL/WDR modes output an INTERLEAVED multi-exposure frame at a larger
+         * "physical" resolution (line-info markers + VBP rows + N exposures).
+         * The EGL stream MUST be sized to the physical resolution or the
+         * producer never delivers a frame (EGL state stuck at EMPTY/0x3217). */
+        Ext::IDolWdrSensorMode* dol =
+            interface_cast<Ext::IDolWdrSensorMode>(sm);
+        if (dol) {
+            Size2D<uint32_t> pr = dol->getPhysicalResolution();
+            W = pr.width(); H = pr.height();
+            is_dol       = true;
+            dol_expcount = dol->getExposureCount();
+            dol_limarker = dol->getLineInfoMarkerWidth();
+            std::vector<uint32_t> vbp;
+            dol->getVerticalBlankPeriodRowCount(&vbp);
+            dol_vbp = vbp.empty() ? 0 : vbp[0];
+            printf("[Session] DOL base=%ux%u physical=%ux%u exp=%u LImarker=%u VBP=%u\n",
+                   baseW, baseH, W, H, dol_expcount, dol_limarker, dol_vbp);
+        }
         printf("[Session] mode=%d  %ux%u  bpp=%u\n",cfg.mode,W,H,BPP);
         fflush(stdout);
 
@@ -771,6 +797,17 @@ static bool list_modes()
                (unsigned long long)fdr.min(), (unsigned long long)fdr.max(),
                (double)std::min((uint64_t)er.max(), fdr.max())/1e6,
                gr.min(), gr.max(), hr.min(), hr.max(), expcount);
+        if (dol) {
+            Size2D<uint32_t> pr = dol->getPhysicalResolution();
+            std::vector<uint32_t> vbp;
+            dol->getVerticalBlankPeriodRowCount(&vbp);
+            printf("       DOL: physRes=%ux%u  OBrows=%u  LImarker=%upx  margins L=%u R=%u  VBP=[",
+                   pr.width(), pr.height(), dol->getOpticalBlackRowCount(),
+                   dol->getLineInfoMarkerWidth(),
+                   dol->getLeftMarginWidth(), dol->getRightMarginWidth());
+            for (size_t j=0;j<vbp.size();j++) printf("%s%u", j?",":"", vbp[j]);
+            printf("]\n");
+        }
     }
     printf("\n[Modes] done\n");
     return true;

@@ -610,9 +610,15 @@ class Prefetcher(threading.Thread):
         self._latest = None      # (packed_bytes, h, w, bpp)
         self._seq    = 0
         self.running = True
+        self._pause  = threading.Event()   # set => stop grabbing
+        self._idle   = threading.Event()   # set => loop parked (no grab in flight)
 
     def run(self):
         while self.running:
+            if self._pause.is_set():
+                self._idle.set()           # signal we're parked
+                time.sleep(0.02); continue
+            self._idle.clear()
             try:
                 if not self.camera.can_pack_in_cpp():
                     time.sleep(0.05); continue
@@ -623,6 +629,16 @@ class Prefetcher(threading.Thread):
                     self._cv.notify_all()
             except Exception as e:
                 print("[Prefetch] " + str(e)); time.sleep(0.1)
+
+    def pause(self, timeout=3.0):
+        """Stop grabbing and block until any in-flight grab has finished, so an
+        exposure bracket can take exclusive control of the pipeline."""
+        self._pause.set()
+        self._idle.wait(timeout)
+
+    def resume(self):
+        self._pause.clear()
+        self._idle.clear()
 
     def get_next(self, last_seq, timeout=10.0):
         """Block until a frame newer than last_seq is ready; return

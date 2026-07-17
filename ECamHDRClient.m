@@ -77,12 +77,13 @@ classdef ECamHDRClient < handle
 
     % ── Constants ─────────────────────────────────────────────────────────────
     properties (Constant, Access = private)
-        CMD_CAPTURE    = uint32(1)
-        CMD_STREAM_ON  = uint32(2)
-        CMD_STREAM_OFF = uint32(3)
-        CMD_SET_PARAMS = uint32(4)
-        CMD_GET_INFO   = uint32(5)
-        CMD_PING       = uint32(6)
+        CMD_CAPTURE     = uint32(1)
+        CMD_STREAM_ON   = uint32(2)
+        CMD_STREAM_OFF  = uint32(3)
+        CMD_SET_PARAMS  = uint32(4)
+        CMD_GET_INFO    = uint32(5)
+        CMD_PING        = uint32(6)
+        CMD_CAPTURE_HDR = uint32(7)
 
         RECV_TIMEOUT_S  = 300    % 5 min — accommodates pipeline init
         CLEANUP_TIMEOUT = 2
@@ -749,6 +750,78 @@ classdef ECamHDRClient < handle
             end
 
             obj.setParams('exposure_ns', orig_exp, 'gain', orig_gain);  % restore
+        end
+
+        % ── captureHDROnboard ───────────────────────────────────────────────────
+        function [rad, meta] = captureHDROnboard(obj, exposures_ns, varargin)
+            %CAPTUREHDRONBOARD  Onboard exposure-bracket HDR: the SERVER captures
+            %  the bracket AND reconstructs the linear radiance (metro_server
+            %  hdr.py), returning a compact 16-bit linear container that this
+            %  method rescales to relative linear radiance. Unlike captureBracket
+            %  + reconstructRadiance (capture here, merge in MATLAB), both the
+            %  capture and the merge run on the Jetson — the portable evaluation
+            %  core that ports to IQ9. One round-trip.
+            %
+            %  [rad, meta] = cam.captureHDROnboard([e1 e2 ... eN])
+            %  [rad, meta] = cam.captureHDROnboard(exps, 'gain',1, 'satfrac',0.95,
+            %                    'blacklevel',0, 'preview',true)
+            %
+            %  rad  : double [H x W] relative linear radiance (Bayer mosaic).
+            %  meta : struct with .metas (per-leg ACTUAL exposure_ns/gain),
+            %         .coverage (per-leg + composite usable fractions),
+            %         .bit_depth .satfrac .capture_s .radiance.scale, and
+            %         .previewImage (uint8 [H/2 x W/2] tonemapped quicklook)
+            %         when 'preview' is true.
+            %
+            %  Note: the server takes exclusive control of the pipeline for the
+            %  duration (pauses the prefetcher), so this blocks other captures
+            %  until the bracket completes.
+            obj.requireConnected();
+            p = inputParser;
+            p.addParameter('gain',       1.0);
+            p.addParameter('satfrac',    0.95);
+            p.addParameter('blacklevel', 0.0);
+            p.addParameter('preview',    true, @(x)islogical(x)||isnumeric(x));
+            p.parse(varargin{:});
+
+            exps = round(double(exposures_ns(:)'));
+            if isempty(exps), error('ECamHDRClient:hdr','need >=1 exposure'); end
+            req = struct('exposures_ns', exps, ...
+                         'gain',        double(p.Results.gain), ...
+                         'satfrac',     double(p.Results.satfrac), ...
+                         'black_level', double(p.Results.blacklevel), ...
+                         'preview',     logical(p.Results.preview));
+
+            obj.flushInput();
+            obj.sendCmd(obj.CMD_CAPTURE_HDR, uint8(jsonencode(req)));
+
+            % Response: [status u8][json_len u32][json][radiance u16 LE][preview u8?]
+            sb = obj.rdBytes(1);
+            if sb(1) == 0xFF
+                lb  = obj.rdBytes(4); n = double(typecast(uint8(lb),'uint32'));
+                msg = ''; if n > 0, msg = char(obj.rdBytes(n)); end
+                error('ECamHDRClient:hdrError','Server HDR: %s', msg(:)');
+            end
+            if sb(1) ~= 0x00
+                error('ECamHDRClient:badStatus','HDR status 0x%02X', sb(1));
+            end
+            jl   = double(typecast(uint8(obj.rdBytes(4)),'uint32'));
+            meta = jsondecode(char(obj.rdBytes(jl)));
+
+            H = double(meta.shape(1)); W = double(meta.shape(2));
+            u16 = typecast(uint8(obj.rdBytes(double(meta.radiance.nbytes))), 'uint16');
+            rad = double(reshape(u16, [W, H])') / double(meta.radiance.scale);
+
+            if isstruct(meta.preview) && isfield(meta.preview,'nbytes')
+                pv = uint8(obj.rdBytes(double(meta.preview.nbytes)));
+                ph = double(meta.preview.shape(1)); pw = double(meta.preview.shape(2));
+                meta.previewImage = reshape(pv, [pw, ph])';
+            end
+            if obj.Verbose
+                fprintf('[ECam] onboard HDR: %d legs, coverage %.0f%%, %.2fs\n', ...
+                    numel(meta.metas), ...
+                    100*meta.coverage.composite_covered_frac, meta.capture_s);
+            end
         end
 
         % ── reconstructRadiance ─────────────────────────────────────────────────

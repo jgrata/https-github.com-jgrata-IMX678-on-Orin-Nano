@@ -8,6 +8,15 @@ import socket, struct, subprocess, numpy as np
 import threading, time, os, signal, sys, json, re
 import os
 
+# Onboard bracket-HDR (capture-shim contract + radiance merge). Guarded so a
+# missing/broken hdr.py degrades to "HDR command unavailable" rather than
+# preventing the whole server from starting.
+try:
+    import hdr as hdrmod
+except Exception as _hdr_e:
+    hdrmod = None
+    print("[Init] hdr module unavailable: " + str(_hdr_e))
+
 SERVER_HOST      = '0.0.0.0'
 SERVER_PORT      = 9000
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -37,12 +46,13 @@ SENSOR_MODES = {
     3: {'width':3840,'height':2160,'bpp':10,'hdr':True},
 }
 
-CMD_CAPTURE    = 0x01
-CMD_STREAM_ON  = 0x02
-CMD_STREAM_OFF = 0x03
-CMD_SET_PARAMS = 0x04
-CMD_GET_INFO   = 0x05
-CMD_PING       = 0x06
+CMD_CAPTURE     = 0x01
+CMD_STREAM_ON   = 0x02
+CMD_STREAM_OFF  = 0x03
+CMD_SET_PARAMS  = 0x04
+CMD_GET_INFO    = 0x05
+CMD_PING        = 0x06
+CMD_CAPTURE_HDR = 0x07   # onboard exposure-bracket HDR -> linear radiance
 
 
 def ensure_dir(p):
@@ -683,10 +693,11 @@ class ClientHandler(threading.Thread):
             CMD_PING:       lambda: self._resp(b'PONG'),
             CMD_GET_INFO:   lambda: self._resp(
                 json.dumps(self.camera.info()).encode()),
-            CMD_CAPTURE:    self._capture,
-            CMD_SET_PARAMS: lambda: self._set_params(pay),
-            CMD_STREAM_ON:  self._stream_on,
-            CMD_STREAM_OFF: self._stream_off,
+            CMD_CAPTURE:     self._capture,
+            CMD_SET_PARAMS:  lambda: self._set_params(pay),
+            CMD_STREAM_ON:   self._stream_on,
+            CMD_STREAM_OFF:  self._stream_off,
+            CMD_CAPTURE_HDR: lambda: self._capture_hdr(pay),
         }.get(cmd, lambda: self._err("unknown "+hex(cmd)))()
 
     def _set_params(self, pay):
@@ -725,6 +736,68 @@ class ClientHandler(threading.Thread):
                 t_cap, t_tot-t_cap, t_tot))
         except Exception as e:
             print("[Server] Capture error: "+str(e))
+            self._err(str(e))
+
+    def _capture_hdr(self, pay):
+        """Onboard exposure-bracket HDR. Payload is JSON:
+            {exposures_ns:[...], gain, satfrac, black_level, preview:bool}
+        Response (status 0x00):
+            [0x00][json_len u32][json][radiance u16 LE H*W][preview u8 ph*pw?]
+        json: {shape,[H,W], bit_depth, satfrac, capture_s,
+               radiance:{dtype:'u16', scale, nbytes},   # rad = u16 / scale
+               preview:{shape:[ph,pw], nbytes} | null,
+               metas:[{requested_ns,exposure_ns,gain}...], coverage:{...}}
+        Errors go back via the standard 0xFF frame."""
+        if hdrmod is None:
+            return self._err("hdr module unavailable on server")
+        try:
+            req = json.loads(pay.decode()) if pay else {}
+            exposures = req.get('exposures_ns')
+            if isinstance(exposures, (int, float)):
+                exposures = [exposures]          # jsonencode emits scalar for N=1
+            if not exposures:
+                raise ValueError("exposures_ns required")
+            gain    = float(req.get('gain', 1.0))
+            satfrac = float(req.get('satfrac', 0.95))
+            black   = float(req.get('black_level', 0.0))
+            want_pv = bool(req.get('preview', True))
+
+            cam = self.camera
+            backend = hdrmod.JetsonArgusBackend(
+                cam.rcp, cam.native_bpp, (cam.height, cam.width),
+                prefetcher=getattr(cam, 'prefetcher', None))
+            t0 = time.monotonic()
+            result = hdrmod.capture_bracket_hdr(
+                backend, exposures, gain=gain, satfrac=satfrac,
+                black_level=black, make_preview=want_pv, make_coverage=True)
+            dt = time.monotonic() - t0
+
+            u16, scale = hdrmod.radiance_to_u16(result['radiance'], hi_pct=99.99)
+            rad_bytes = u16.astype('<u2').tobytes()      # little-endian uint16
+            H, W = u16.shape
+            meta = {'shape': [H, W], 'bit_depth': result['bit_depth'],
+                    'satfrac': result['satfrac'], 'capture_s': round(dt, 3),
+                    'radiance': {'dtype': 'u16', 'scale': scale,
+                                 'nbytes': len(rad_bytes)},
+                    'metas': result['metas'], 'coverage': result.get('coverage')}
+            prev_bytes = b''
+            if want_pv and 'preview' in result:
+                pv = result['preview']; ph, pw = pv.shape
+                prev_bytes = pv.astype(np.uint8).tobytes()
+                meta['preview'] = {'shape': [ph, pw], 'nbytes': len(prev_bytes)}
+            else:
+                meta['preview'] = None
+
+            js = json.dumps(meta).encode()
+            send_exactly(self.conn,
+                         struct.pack('<BI', 0x00, len(js)) + js
+                         + rad_bytes + prev_bytes)
+            cov = (result.get('coverage') or {}).get('composite_covered_frac', 0)
+            print("[Server] HDR: {} legs cov={:.0f}% {:.1f}MB {:.2f}s".format(
+                len(exposures), 100 * cov,
+                (len(rad_bytes) + len(prev_bytes)) / 1e6, dt))
+        except Exception as e:
+            print("[Server] HDR error: " + str(e))
             self._err(str(e))
 
     def _stream_on(self):

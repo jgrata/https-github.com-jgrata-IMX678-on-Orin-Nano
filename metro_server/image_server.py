@@ -17,6 +17,12 @@ except Exception as _hdr_e:
     hdrmod = None
     print("[Init] hdr module unavailable: " + str(_hdr_e))
 
+try:
+    import metrics as metricsmod
+except Exception as _m_e:
+    metricsmod = None
+    print("[Init] metrics module unavailable: " + str(_m_e))
+
 SERVER_HOST      = '0.0.0.0'
 SERVER_PORT      = 9000
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -53,6 +59,7 @@ CMD_SET_PARAMS  = 0x04
 CMD_GET_INFO    = 0x05
 CMD_PING        = 0x06
 CMD_CAPTURE_HDR = 0x07   # onboard exposure-bracket HDR -> linear radiance
+CMD_METRICS     = 0x08   # onboard intrinsic sensor metrics (read noise/DR/...)
 
 
 def ensure_dir(p):
@@ -698,6 +705,7 @@ class ClientHandler(threading.Thread):
             CMD_STREAM_ON:   self._stream_on,
             CMD_STREAM_OFF:  self._stream_off,
             CMD_CAPTURE_HDR: lambda: self._capture_hdr(pay),
+            CMD_METRICS:     lambda: self._metrics(pay),
         }.get(cmd, lambda: self._err("unknown "+hex(cmd)))()
 
     def _set_params(self, pay):
@@ -801,6 +809,39 @@ class ClientHandler(threading.Thread):
                 (len(rad_bytes) + len(prev_bytes)) / 1e6, dt))
         except Exception as e:
             print("[Server] HDR error: " + str(e))
+            self._err(str(e))
+
+    def _metrics(self, pay):
+        """Onboard intrinsic sensor metrics from a fixed-exposure (dark) stack.
+        Payload JSON: {nframes, gain, exposure_ns}. Response is a JSON blob via
+        the standard status/length frame (metrics are small — no pixel payload):
+        {bit_depth, gain, exposure_ns, nframes, capture_s, headline{...},
+         phases{R,Gr,Gb,B,global: {black_dn, read_noise_dn, dsnu_dn,
+         saturation_dn, dynamic_range_stops, dynamic_range_db}}}.
+        For a certified read noise, CAP THE LENS before calling."""
+        if metricsmod is None or hdrmod is None:
+            return self._err("metrics module unavailable on server")
+        try:
+            req = json.loads(pay.decode()) if pay else {}
+            nframes = int(req.get('nframes', 16))
+            gain    = float(req.get('gain', 1.0))
+            exp     = int(req.get('exposure_ns', metricsmod.MIN_EXPOSURE_NS))
+            cam = self.camera
+            backend = hdrmod.JetsonArgusBackend(
+                cam.rcp, cam.native_bpp, (cam.height, cam.width),
+                prefetcher=getattr(cam, 'prefetcher', None))
+            t0 = time.monotonic()
+            rep = metricsmod.sensor_report(backend, nframes=nframes, gain=gain,
+                                           dark_exposure_ns=exp)
+            rep['capture_s'] = round(time.monotonic() - t0, 3)
+            self._resp(json.dumps(rep).encode())
+            h = rep['headline']
+            print("[Server] metrics: DR {:.1f} stops  rn {:.2f}DN  black {:.0f}DN"
+                  "  ({:.2f}s)".format(h['dynamic_range_stops'],
+                                       h['read_noise_dn'], h['black_dn'],
+                                       rep['capture_s']))
+        except Exception as e:
+            print("[Server] metrics error: " + str(e))
             self._err(str(e))
 
     def _stream_on(self):

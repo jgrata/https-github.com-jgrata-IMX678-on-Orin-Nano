@@ -84,6 +84,7 @@ classdef ECamHDRClient < handle
         CMD_GET_INFO    = uint32(5)
         CMD_PING        = uint32(6)
         CMD_CAPTURE_HDR = uint32(7)
+        CMD_METRICS     = uint32(8)
 
         RECV_TIMEOUT_S  = 300    % 5 min — accommodates pipeline init
         CLEANUP_TIMEOUT = 2
@@ -829,6 +830,47 @@ classdef ECamHDRClient < handle
                 fprintf('[ECam] onboard HDR: %d legs, coverage %.0f%%, %.2fs\n', ...
                     numel(meta.metas), ...
                     100*meta.coverage.composite_covered_frac, meta.capture_s);
+            end
+        end
+
+        % ── sensorMetrics ───────────────────────────────────────────────────────
+        function m = sensorMetrics(obj, nframes, varargin)
+            %SENSORMETRICS  Onboard intrinsic sensor metrics from a fixed-exposure
+            %  (dark) stack — the "available now" cross-sensor comparison figures,
+            %  computed on the Jetson (metro_server metrics.py): read noise, DSNU,
+            %  black level, saturation, and DYNAMIC RANGE (stops & dB), per Bayer
+            %  phase + global. No lab required.
+            %
+            %  m = cam.sensorMetrics()               % 16 frames, gain 1, min exp
+            %  m = cam.sensorMetrics(32, 'gain',1, 'exposure_ns',450000)
+            %
+            %  ** For a CERTIFIED read noise, CAP THE LENS first. ** Uncapped, it
+            %  uses the shortest exposure + a robust per-pixel median, which the
+            %  dark-scene majority dominates (a reasonable estimate, not certified).
+            %
+            %  Returns a struct: m.headline (.dynamic_range_stops/_db,
+            %  .read_noise_dn, .black_dn, .saturation_dn), m.phases.(R/Gr/Gb/B/
+            %  global), m.bit_depth, m.gain, m.exposure_ns, m.nframes, m.capture_s.
+            obj.requireConnected();
+            if nargin < 2 || isempty(nframes), nframes = 16; end
+            p = inputParser;
+            p.addParameter('gain',        1.0);
+            p.addParameter('exposure_ns', 450000);   % sensor min (read-noise stack)
+            p.parse(varargin{:});
+            req = struct('nframes',     round(double(nframes)), ...
+                         'gain',        double(p.Results.gain), ...
+                         'exposure_ns', round(double(p.Results.exposure_ns)));
+
+            obj.flushInput();
+            obj.sendCmd(obj.CMD_METRICS, uint8(jsonencode(req)));
+            data = obj.recvResp();                    % status/len frame -> JSON
+            m = jsondecode(char(data(:)'));
+            if obj.Verbose
+                h = m.headline;
+                fprintf(['[ECam] intrinsics (%d-bit, gain %.2f): DR %.1f stops ' ...
+                         '(%.1f dB)  read noise %.2f DN  black %.0f DN  (%.2fs)\n'], ...
+                    m.bit_depth, m.gain, h.dynamic_range_stops, ...
+                    h.dynamic_range_db, h.read_noise_dn, h.black_dn, m.capture_s);
             end
         end
 

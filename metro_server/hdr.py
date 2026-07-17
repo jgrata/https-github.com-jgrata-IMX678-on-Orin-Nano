@@ -83,6 +83,18 @@ def reconstruct_radiance(frames, exposures_ns, gains, full_scale,
     return np.nan_to_num(rad, nan=0.0, posinf=0.0, neginf=0.0), wsum
 
 
+def estimate_black_level(frames, exposures_ns, pct=1.0):
+    """Scalar black-level (pedestal) estimate: the low percentile of the
+    SHORTEST-exposure frame. The darkest pixels at the shortest exposure read
+    essentially the sensor pedestal, so this is a robust ISP-agnostic default
+    that stops an un-subtracted pedestal from inflating dark regions (which
+    otherwise makes shadows render *brighter* than highlights). For accurate
+    work, measure a dark frame (lens capped, at the bracket gain) and pass it."""
+    frames = np.asarray(frames)
+    k = int(np.argmin(exposures_ns))
+    return float(np.percentile(frames[k], pct))
+
+
 def bayer_to_luma(mono):
     """Average each 2x2 Bayer quad -> a half-resolution luma image [H/2, W/2].
     Removes the Bayer checkerboard for a clean grayscale quicklook. Sensor-
@@ -266,6 +278,13 @@ class JetsonArgusBackend(CaptureBackend):
             time.sleep(0.05)                      # let any in-flight grab finish
         orig_exp, orig_gain = self.rcp.exposure_ns, self.rcp.gain
         try:
+            # Warm up the persistent localhost channel first: set_expgain_live is
+            # a no-op while the rcp socket is unconnected (fresh/standalone rcp),
+            # which would otherwise leave the FIRST leg at the launch exposure.
+            try:
+                self._grab_native()
+            except Exception:
+                pass
             for k, e in enumerate(exps):
                 self.rcp.set_expgain_live(e, gain)    # exposure varies, gain pinned
                 if settle:
@@ -308,14 +327,19 @@ class JetsonArgusBackend(CaptureBackend):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def capture_bracket_hdr(backend, exposures_ns, gain=1.0, satfrac=0.95,
-                        black_level=0.0, flatfield=None, conv_gain=None,
+                        black_level='auto', flatfield=None, conv_gain=None,
                         settle=True, make_preview=True, make_coverage=True):
     """Capture an exposure bracket via `backend` and merge to linear radiance.
+
+    black_level: scalar DN, per-pixel dark ndarray, or 'auto' (default) to
+    estimate the pedestal from the shortest leg (see estimate_black_level).
+    Pass 0 explicitly to disable subtraction (not recommended — inflates shadows).
 
     Returns a dict:
         radiance   : float32 [H, W] relative linear radiance
         wsum       : float32 [H, W] summed weight (0 = uncovered)
         metas      : per-leg actual {requested_ns, exposure_ns, gain}
+        black_level_used : scalar DN used (or 'per-pixel')
         bit_depth, shape, satfrac
         preview    : uint8 [H/2, W/2] tonemapped luma (if make_preview)
         coverage   : per-leg + composite coverage stats (if make_coverage)
@@ -325,12 +349,16 @@ def capture_bracket_hdr(backend, exposures_ns, gain=1.0, satfrac=0.95,
     full = (1 << backend.bit_depth) - 1
     exps = [m['exposure_ns'] for m in metas]
     gains = [m['gain'] for m in metas]
+    if isinstance(black_level, str) and black_level.lower() == 'auto':
+        black_level = estimate_black_level(frames, exps)
     rad, wsum = reconstruct_radiance(frames, exps, gains, full,
                                      black_level=black_level, satfrac=satfrac,
                                      flatfield=flatfield)
     out = {'radiance': rad, 'wsum': wsum, 'metas': metas,
            'bit_depth': backend.bit_depth, 'shape': backend.shape,
-           'satfrac': satfrac}
+           'satfrac': satfrac,
+           'black_level_used': (float(black_level) if np.isscalar(black_level)
+                                else 'per-pixel')}
     if make_preview:
         out['preview'] = tonemap(rad)
     if make_coverage:

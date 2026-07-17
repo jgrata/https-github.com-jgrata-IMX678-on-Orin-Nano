@@ -759,7 +759,9 @@ class ClientHandler(threading.Thread):
                 raise ValueError("exposures_ns required")
             gain    = float(req.get('gain', 1.0))
             satfrac = float(req.get('satfrac', 0.95))
-            black   = float(req.get('black_level', 0.0))
+            black   = req.get('black_level', 'auto')   # 'auto' | scalar DN | 0
+            if not (isinstance(black, str) and black.lower() == 'auto'):
+                black = float(black)
             want_pv = bool(req.get('preview', True))
 
             cam = self.camera
@@ -777,6 +779,7 @@ class ClientHandler(threading.Thread):
             H, W = u16.shape
             meta = {'shape': [H, W], 'bit_depth': result['bit_depth'],
                     'satfrac': result['satfrac'], 'capture_s': round(dt, 3),
+                    'black_level_used': result.get('black_level_used'),
                     'radiance': {'dtype': 'u16', 'scale': scale,
                                  'nbytes': len(rad_bytes)},
                     'metas': result['metas'], 'coverage': result.get('coverage')}

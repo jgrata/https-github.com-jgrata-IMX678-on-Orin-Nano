@@ -764,7 +764,13 @@ classdef ECamHDRClient < handle
             %
             %  [rad, meta] = cam.captureHDROnboard([e1 e2 ... eN])
             %  [rad, meta] = cam.captureHDROnboard(exps, 'gain',1, 'satfrac',0.95,
-            %                    'blacklevel',0, 'preview',true)
+            %                    'blacklevel','auto', 'preview',true)
+            %
+            %  blacklevel: 'auto' (default) estimates the pedestal from the
+            %  shortest leg (prevents shadows from inflating brighter than
+            %  highlights); pass a scalar DN (e.g. a measured dark median) for
+            %  accuracy, or 0 to disable subtraction. meta.black_level_used
+            %  reports the value applied.
             %
             %  rad  : double [H x W] relative linear radiance (Bayer mosaic).
             %  meta : struct with .metas (per-leg ACTUAL exposure_ns/gain),
@@ -780,16 +786,18 @@ classdef ECamHDRClient < handle
             p = inputParser;
             p.addParameter('gain',       1.0);
             p.addParameter('satfrac',    0.95);
-            p.addParameter('blacklevel', 0.0);
+            p.addParameter('blacklevel', 'auto');   % 'auto' | scalar DN | 0
             p.addParameter('preview',    true, @(x)islogical(x)||isnumeric(x));
             p.parse(varargin{:});
 
             exps = round(double(exposures_ns(:)'));
             if isempty(exps), error('ECamHDRClient:hdr','need >=1 exposure'); end
+            bl = p.Results.blacklevel;              % pass 'auto' through or a number
+            if ischar(bl) || isstring(bl), bl = char(bl); else, bl = double(bl); end
             req = struct('exposures_ns', exps, ...
                          'gain',        double(p.Results.gain), ...
                          'satfrac',     double(p.Results.satfrac), ...
-                         'black_level', double(p.Results.blacklevel), ...
+                         'black_level', bl, ...
                          'preview',     logical(p.Results.preview));
 
             obj.flushInput();

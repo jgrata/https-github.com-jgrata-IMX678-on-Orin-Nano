@@ -773,6 +773,16 @@ classdef ECamHDRClient < handle
             %  accuracy, or 0 to disable subtraction. meta.black_level_used
             %  reports the value applied.
             %
+            %  Options for extra outputs (default off — they add wire payload):
+            %   'fullpreview',true : full-res 2160x3840 demosaiced+tonemapped RGB
+            %       (neutral: gray-world WB, no CCM) -> meta.fullPreviewImage
+            %       [H x W x 3] uint8.  ~25 MB.
+            %   'frames',true      : the per-leg 12-bit RAW Bayer frames
+            %       -> meta.rawFrames [H x W x N] uint16 (0..4095).  ~16.6 MB/leg.
+            %   'wb',true/false    : gray-world white balance for fullpreview.
+            %   'ccm',M            : optional measured 3x3 color-correction matrix
+            %       applied to fullpreview (cheap; leave empty for neutral eval).
+            %
             %  rad  : double [H x W] relative linear radiance (Bayer mosaic).
             %  meta : struct with .metas (per-leg ACTUAL exposure_ns/gain),
             %         .coverage (per-leg + composite usable fractions),
@@ -785,10 +795,14 @@ classdef ECamHDRClient < handle
             %  until the bracket completes.
             obj.requireConnected();
             p = inputParser;
-            p.addParameter('gain',       1.0);
-            p.addParameter('satfrac',    0.95);
-            p.addParameter('blacklevel', 'auto');   % 'auto' | scalar DN | 0
-            p.addParameter('preview',    true, @(x)islogical(x)||isnumeric(x));
+            p.addParameter('gain',        1.0);
+            p.addParameter('satfrac',     0.95);
+            p.addParameter('blacklevel',  'auto');   % 'auto' | scalar DN | 0
+            p.addParameter('preview',     true,  @(x)islogical(x)||isnumeric(x));
+            p.addParameter('fullpreview', false, @(x)islogical(x)||isnumeric(x));
+            p.addParameter('frames',      false, @(x)islogical(x)||isnumeric(x));
+            p.addParameter('wb',          true,  @(x)islogical(x)||isnumeric(x));
+            p.addParameter('ccm',         []);       % optional measured 3x3 CCM
             p.parse(varargin{:});
 
             exps = round(double(exposures_ns(:)'));
@@ -799,7 +813,11 @@ classdef ECamHDRClient < handle
                          'gain',        double(p.Results.gain), ...
                          'satfrac',     double(p.Results.satfrac), ...
                          'black_level', bl, ...
-                         'preview',     logical(p.Results.preview));
+                         'preview',     logical(p.Results.preview), ...
+                         'fullpreview', logical(p.Results.fullpreview), ...
+                         'frames',      logical(p.Results.frames), ...
+                         'wb',          logical(p.Results.wb));
+            if ~isempty(p.Results.ccm), req.ccm = double(p.Results.ccm); end
 
             obj.flushInput();
             obj.sendCmd(obj.CMD_CAPTURE_HDR, uint8(jsonencode(req)));
@@ -821,10 +839,24 @@ classdef ECamHDRClient < handle
             u16 = typecast(uint8(obj.rdBytes(double(meta.radiance.nbytes))), 'uint16');
             rad = double(reshape(u16, [W, H])') / double(meta.radiance.scale);
 
+            % Optional blobs, read in the SAME order the server appends them:
+            %   preview u8 [ph,pw] | fullpreview u8 [H,W,3] | frames u16 [N,H,W]
             if isstruct(meta.preview) && isfield(meta.preview,'nbytes')
                 pv = uint8(obj.rdBytes(double(meta.preview.nbytes)));
                 ph = double(meta.preview.shape(1)); pw = double(meta.preview.shape(2));
                 meta.previewImage = reshape(pv, [pw, ph])';
+            end
+            if isstruct(meta.fullpreview) && isfield(meta.fullpreview,'nbytes')
+                fpb = uint8(obj.rdBytes(double(meta.fullpreview.nbytes)));
+                sh  = double(meta.fullpreview.shape);        % [H W 3], C-order RGB
+                meta.fullPreviewImage = ...
+                    permute(reshape(fpb, [3, sh(2), sh(1)]), [3 2 1]);
+            end
+            if isstruct(meta.frames) && isfield(meta.frames,'nbytes')
+                frb = typecast(uint8(obj.rdBytes(double(meta.frames.nbytes))), 'uint16');
+                sh  = double(meta.frames.shape);             % [N H W], C-order
+                meta.rawFrames = ...
+                    permute(reshape(frb, [sh(3), sh(2), sh(1)]), [2 1 3]);  % -> [H W N] uint16
             end
             if obj.Verbose
                 fprintf('[ECam] onboard HDR: %d legs, coverage %.0f%%, %.2fs\n', ...

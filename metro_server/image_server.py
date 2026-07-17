@@ -770,7 +770,11 @@ class ClientHandler(threading.Thread):
             black   = req.get('black_level', 'auto')   # 'auto' | scalar DN | 0
             if not (isinstance(black, str) and black.lower() == 'auto'):
                 black = float(black)
-            want_pv = bool(req.get('preview', True))
+            want_pv   = bool(req.get('preview', True))
+            want_full = bool(req.get('fullpreview', False))   # full-res demosaic RGB
+            want_frm  = bool(req.get('frames', False))        # per-leg 12-bit RAW
+            wb        = bool(req.get('wb', True))
+            ccm       = req.get('ccm', None)                  # optional 3x3 list
 
             cam = self.camera
             backend = hdrmod.JetsonArgusBackend(
@@ -779,7 +783,9 @@ class ClientHandler(threading.Thread):
             t0 = time.monotonic()
             result = hdrmod.capture_bracket_hdr(
                 backend, exposures, gain=gain, satfrac=satfrac,
-                black_level=black, make_preview=want_pv, make_coverage=True)
+                black_level=black, make_preview=want_pv, make_coverage=True,
+                make_fullpreview=want_full, return_frames=want_frm,
+                wb=wb, ccm=ccm)
             dt = time.monotonic() - t0
 
             u16, scale = hdrmod.radiance_to_u16(result['radiance'], hi_pct=99.99)
@@ -791,22 +797,41 @@ class ClientHandler(threading.Thread):
                     'radiance': {'dtype': 'u16', 'scale': scale,
                                  'nbytes': len(rad_bytes)},
                     'metas': result['metas'], 'coverage': result.get('coverage')}
+            # Optional blobs, sent (in order) after the radiance:
+            #   preview u8 [ph,pw] | fullpreview u8 [H,W,3] | frames u16 [N,H,W]
+            blobs = [rad_bytes]
             prev_bytes = b''
             if want_pv and 'preview' in result:
                 pv = result['preview']; ph, pw = pv.shape
                 prev_bytes = pv.astype(np.uint8).tobytes()
                 meta['preview'] = {'shape': [ph, pw], 'nbytes': len(prev_bytes)}
+                blobs.append(prev_bytes)
             else:
                 meta['preview'] = None
+            if want_full and 'fullpreview' in result:
+                fp = result['fullpreview']                    # [H,W,3] uint8
+                fp_bytes = np.ascontiguousarray(fp, np.uint8).tobytes()
+                meta['fullpreview'] = {'shape': list(fp.shape),
+                                       'nbytes': len(fp_bytes)}
+                blobs.append(fp_bytes)
+            else:
+                meta['fullpreview'] = None
+            if want_frm and 'frames' in result:
+                fr = result['frames']                         # [N,H,W] uint16
+                fr_bytes = np.ascontiguousarray(fr, '<u2').tobytes()
+                meta['frames'] = {'shape': list(fr.shape), 'dtype': 'u16',
+                                  'nbytes': len(fr_bytes)}
+                blobs.append(fr_bytes)
+            else:
+                meta['frames'] = None
 
             js = json.dumps(meta).encode()
-            send_exactly(self.conn,
-                         struct.pack('<BI', 0x00, len(js)) + js
-                         + rad_bytes + prev_bytes)
+            payload = b''.join(blobs)
+            send_exactly(self.conn, struct.pack('<BI', 0x00, len(js)) + js + payload)
             cov = (result.get('coverage') or {}).get('composite_covered_frac', 0)
             print("[Server] HDR: {} legs cov={:.0f}% {:.1f}MB {:.2f}s".format(
                 len(exposures), 100 * cov,
-                (len(rad_bytes) + len(prev_bytes)) / 1e6, dt))
+                (len(js) + len(payload)) / 1e6, dt))
         except Exception as e:
             print("[Server] HDR error: " + str(e))
             self._err(str(e))

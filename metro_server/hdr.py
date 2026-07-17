@@ -123,6 +123,79 @@ def tonemap(rad, key=0.18, hi_pct=99.5, gamma=2.2):
     return (out * 255.0 + 0.5).astype(np.uint8)
 
 
+def _conv3(a, k):
+    """3x3 convolution via shifted adds (edge-padded) — no SciPy."""
+    ap = np.pad(a, 1, mode='edge')
+    out = np.zeros_like(a)
+    H, W = a.shape
+    for i in range(3):
+        for j in range(3):
+            if k[i][j]:
+                out += k[i][j] * ap[i:i + H, j:j + W]
+    return out
+
+
+def demosaic_bilinear(mosaic, pattern='RGGB'):
+    """Bilinear demosaic of a full-resolution Bayer radiance map -> RGB
+    [H, W, 3] float. Full-res (2160x3840), not binned. RGGB assumed (the
+    e-CAM86); other 2x2 CFAs just permute the phase offsets."""
+    m = np.asarray(mosaic, np.float32)
+    if pattern != 'RGGB':
+        raise NotImplementedError("only RGGB implemented")
+    R = np.zeros_like(m); G = np.zeros_like(m); B = np.zeros_like(m)
+    R[0::2, 0::2] = m[0::2, 0::2]                     # R
+    G[0::2, 1::2] = m[0::2, 1::2]                     # Gr
+    G[1::2, 0::2] = m[1::2, 0::2]                     # Gb
+    B[1::2, 1::2] = m[1::2, 1::2]                     # B
+    kRB = [[.25, .5, .25], [.5, 1., .5], [.25, .5, .25]]
+    kG = [[0, .25, 0], [.25, 1., .25], [0, .25, 0]]
+    return np.stack([_conv3(R, kRB), _conv3(G, kG), _conv3(B, kRB)], axis=-1)
+
+
+def white_balance(rgb, gains=None):
+    """Per-channel WB. gains=None -> gray-world (auto), else a 3-vector.
+    Neutral-ish default; NOT a calibrated illuminant correction."""
+    if gains is None:
+        mean = rgb.reshape(-1, 3).mean(0)
+        gains = mean.mean() / np.maximum(mean, 1e-9)
+    return rgb * np.asarray(gains, np.float32)
+
+
+def apply_ccm(rgb, ccm):
+    """Apply a 3x3 color-correction matrix (rgb @ ccm.T). Trivial cost; the CCM
+    itself must be CALIBRATED (color chart + known illuminant) — see notes."""
+    return rgb @ np.asarray(ccm, np.float32).T
+
+
+def tonemap_rgb(rgb, key=0.18, hi_pct=99.5, gamma=2.2):
+    """Fixed Reinhard tonemap of a linear RGB image -> uint8 [H, W, 3], applied
+    on luminance with chroma preserved (scale each channel by the luma
+    compression ratio)."""
+    rgb = np.maximum(np.asarray(rgb, np.float32), 0.0)
+    L = rgb @ np.array([0.25, 0.5, 0.25], np.float32)
+    eps = 1e-6
+    log_avg = np.exp(np.mean(np.log(L + eps)))
+    Ls = (key / (log_avg + eps)) * L
+    Ld = Ls / (1.0 + Ls)
+    out = rgb * (Ld / np.maximum(L, eps))[..., None]
+    hi = max(float(np.percentile(out, hi_pct)), eps)
+    out = np.clip(out / hi, 0.0, 1.0) ** (1.0 / gamma)
+    return (out * 255.0 + 0.5).astype(np.uint8)
+
+
+def full_preview(rad, pattern='RGGB', wb=True, ccm=None):
+    """Full-resolution demosaiced + tonemapped color render of a radiance map ->
+    uint8 [H, W, 3]. Neutral by default (gray-world WB, no CCM) so it stays
+    ISP-agnostic for cross-sensor comparison; pass a measured 3x3 `ccm` for
+    calibrated color (cheap to apply)."""
+    rgb = demosaic_bilinear(rad, pattern)
+    if wb:
+        rgb = white_balance(rgb)
+    if ccm is not None:
+        rgb = apply_ccm(rgb, ccm)
+    return tonemap_rgb(rgb)
+
+
 def radiance_to_u16(rad, hi_pct=99.9):
     """Pack a linear radiance map into a 16-bit linear container (compact,
     reversible). Returns (u16 [H, W], scale) where rad ~= u16 / scale.
@@ -363,7 +436,9 @@ class JetsonArgusBackend(CaptureBackend):
 
 def capture_bracket_hdr(backend, exposures_ns, gain=1.0, satfrac=0.95,
                         black_level='auto', flatfield=None, conv_gain=None,
-                        settle=True, make_preview=True, make_coverage=True):
+                        settle=True, make_preview=True, make_coverage=True,
+                        make_fullpreview=False, return_frames=False,
+                        wb=True, ccm=None):
     """Capture an exposure bracket via `backend` and merge to linear radiance.
 
     black_level: scalar DN, per-pixel dark ndarray, or 'auto' (default) to
@@ -395,9 +470,13 @@ def capture_bracket_hdr(backend, exposures_ns, gain=1.0, satfrac=0.95,
            'black_level_used': (float(black_level) if np.isscalar(black_level)
                                 else 'per-pixel')}
     if make_preview:
-        out['preview'] = tonemap(rad)
+        out['preview'] = tonemap(rad)                       # binned 8-bit luma
+    if make_fullpreview:
+        out['fullpreview'] = full_preview(rad, wb=wb, ccm=ccm)  # full-res RGB
     if make_coverage:
         out['coverage'] = coverage_stats(frames, full, satfrac, black_level)
+    if return_frames:
+        out['frames'] = frames                              # raw legs [N,H,W]
     return out
 
 

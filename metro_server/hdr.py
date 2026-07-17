@@ -167,6 +167,85 @@ def apply_ccm(rgb, ccm):
     return rgb @ np.asarray(ccm, np.float32).T
 
 
+# e-con vendor CCM, extracted from camera_overrides_*.isp
+# (colorCorrection.srgbMatrix, transposed so the stored rows become the applied
+# matrix's columns -> rows then sum to 1.0, i.e. a WB-neutral post-WB sRGB CCM).
+# Applied to white-balanced linear RGB (use with wb=True). It's tuned for the
+# vendor's assumed illuminant, so it's a strong reference, not a calibrated match
+# for arbitrary lighting.
+VENDOR_CCM = [[ 2.14254, -0.97461, -0.16793],
+              [-0.57795,  1.96805, -0.39010],
+              [ 0.04265, -1.56983,  2.52718]]
+
+# X-Rite ColorChecker Classic, 24 patches, row-major (row1 dark-skin..bluish-
+# green ... row4 white..black), standard sRGB 8-bit (BabelColor averages, D65).
+COLORCHECKER_SRGB = [
+    (115, 82, 68), (194, 150, 130), (98, 122, 157), (87, 108, 67),
+    (133, 128, 177), (103, 189, 170),
+    (214, 126, 44), (80, 91, 166), (193, 90, 99), (94, 60, 108),
+    (157, 188, 64), (224, 163, 46),
+    (56, 61, 150), (70, 148, 73), (175, 54, 60), (231, 199, 31),
+    (187, 86, 149), (8, 133, 161),
+    (243, 243, 242), (200, 200, 200), (160, 160, 160), (122, 122, 121),
+    (85, 85, 85), (52, 52, 52)]
+
+
+def _srgb_to_linear(c):
+    c = np.asarray(c, np.float64) / 255.0
+    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+
+def colorchecker_linear():
+    """The 24 ColorChecker references as LINEAR sRGB [24,3] in [0,1] — the target
+    the CCM maps linear sensor RGB onto."""
+    return _srgb_to_linear(COLORCHECKER_SRGB)
+
+
+def sample_chart(rgb, corners, rows=4, cols=6, frac=0.5):
+    """Sample the 24 patch means from a demosaiced image given the 4 OUTER
+    corners of the patch grid. corners = [TL, TR, BR, BL], each (row, col) in
+    pixels. Returns [24,3] row-major (matching COLORCHECKER order). Each patch
+    is a median over the central `frac` of its cell (robust to edges/glare)."""
+    c = np.asarray(corners, np.float64)              # [4,2] (row,col)
+    TL, TR, BR, BL = c[0], c[1], c[2], c[3]
+    H, W = rgb.shape[:2]
+    out = np.zeros((rows * cols, 3), np.float64)
+    idx = 0
+    for i in range(rows):
+        for j in range(cols):
+            v = (i + 0.5) / rows
+            u = (j + 0.5) / cols
+            top = TL * (1 - u) + TR * u
+            bot = BL * (1 - u) + BR * u
+            ctr = top * (1 - v) + bot * v            # (row,col) center
+            # window half-extents from the frac cell size
+            hh = int(max(2, frac * H / rows / 2))
+            hw = int(max(2, frac * W / cols / 2))
+            r0 = int(np.clip(ctr[0] - hh, 0, H - 1)); r1 = int(np.clip(ctr[0] + hh, 1, H))
+            c0 = int(np.clip(ctr[1] - hw, 0, W - 1)); c1 = int(np.clip(ctr[1] + hw, 1, W))
+            patch = rgb[r0:r1, c0:c1].reshape(-1, 3)
+            out[idx] = np.median(patch, axis=0)
+            idx += 1
+    return out
+
+
+def derive_ccm_from_image(rgb_linear, corners, ref=None):
+    """Solve a 3x3 CCM from an in-frame X-Rite chart. The matrix FOLDS white
+    balance + color (maps raw demosaiced linear sensor RGB -> linear sRGB), so
+    it is self-consistent for THIS scene's illuminant and applied directly:
+    full_preview(..., ccm=M) (no separate WB — the matrix handles it, which
+    neutralizes correctly even when gray-world WB is biased by a bright source).
+    Returns (ccm, rms_residual, patch_rgb). Accuracy needs precise `corners`."""
+    chart = sample_chart(rgb_linear, corners)          # [24,3] raw linear
+    Y = colorchecker_linear() if ref is None else np.asarray(ref, np.float64)
+    scale = float(Y.mean()) / max(float(chart.mean()), 1e-9)   # condition the fit
+    X = chart * scale
+    A, _, _, _ = np.linalg.lstsq(X, Y, rcond=None)     # Y ~= X @ A
+    resid = float(np.sqrt(np.mean((X @ A - Y) ** 2)))
+    M = scale * A.T                                     # apply_ccm(raw, M) = raw @ (scale*A)
+    return M.tolist(), resid, chart.tolist()
+
+
 def tonemap_rgb(rgb, key=0.18, hi_pct=99.5, gamma=2.2):
     """Fixed Reinhard tonemap of a linear RGB image -> uint8 [H, W, 3], applied
     on luminance with chroma preserved (scale each channel by the luma
@@ -189,10 +268,18 @@ def full_preview(rad, pattern='RGGB', wb=True, ccm=None):
     ISP-agnostic for cross-sensor comparison; pass a measured 3x3 `ccm` for
     calibrated color (cheap to apply)."""
     rgb = demosaic_bilinear(rad, pattern)
-    if wb:
-        rgb = white_balance(rgb)
-    if ccm is not None:
-        rgb = apply_ccm(rgb, ccm)
+    if ccm is None:
+        if wb:
+            rgb = white_balance(rgb)                 # neutral render (gray-world)
+    elif isinstance(ccm, str):
+        if ccm.lower() == 'vendor':
+            if wb:
+                rgb = white_balance(rgb)             # vendor CCM expects WB'd input
+            rgb = apply_ccm(rgb, VENDOR_CCM)
+        else:
+            raise ValueError("ccm string must be 'vendor'")
+    else:
+        rgb = apply_ccm(rgb, ccm)                    # derived/user 3x3 FOLDS WB
     return tonemap_rgb(rgb)
 
 

@@ -85,6 +85,7 @@ classdef ECamHDRClient < handle
         CMD_PING        = uint32(6)
         CMD_CAPTURE_HDR = uint32(7)
         CMD_METRICS     = uint32(8)
+        CMD_DERIVE_CCM  = uint32(9)
 
         RECV_TIMEOUT_S  = 300    % 5 min — accommodates pipeline init
         CLEANUP_TIMEOUT = 2
@@ -780,8 +781,9 @@ classdef ECamHDRClient < handle
             %   'frames',true      : the per-leg 12-bit RAW Bayer frames
             %       -> meta.rawFrames [H x W x N] uint16 (0..4095).  ~16.6 MB/leg.
             %   'wb',true/false    : gray-world white balance for fullpreview.
-            %   'ccm',M            : optional measured 3x3 color-correction matrix
-            %       applied to fullpreview (cheap; leave empty for neutral eval).
+            %   'ccm',M            : optional color correction for fullpreview —
+            %       a 3x3 matrix (e.g. from cam.deriveCCM), or 'vendor' for the
+            %       e-con ISP CCM. Empty = neutral (ISP-agnostic eval default).
             %
             %  rad  : double [H x W] relative linear radiance (Bayer mosaic).
             %  meta : struct with .metas (per-leg ACTUAL exposure_ns/gain),
@@ -817,7 +819,11 @@ classdef ECamHDRClient < handle
                          'fullpreview', logical(p.Results.fullpreview), ...
                          'frames',      logical(p.Results.frames), ...
                          'wb',          logical(p.Results.wb));
-            if ~isempty(p.Results.ccm), req.ccm = double(p.Results.ccm); end
+            cc = p.Results.ccm;                       % 3x3 matrix | 'vendor' | []
+            if ~isempty(cc)
+                if ischar(cc) || isstring(cc), req.ccm = char(cc);
+                else,                          req.ccm = double(cc); end
+            end
 
             obj.flushInput();
             obj.sendCmd(obj.CMD_CAPTURE_HDR, uint8(jsonencode(req)));
@@ -903,6 +909,51 @@ classdef ECamHDRClient < handle
                          '(%.1f dB)  read noise %.2f DN  black %.0f DN  (%.2fs)\n'], ...
                     m.bit_depth, m.gain, h.dynamic_range_stops, ...
                     h.dynamic_range_db, h.read_noise_dn, h.black_dn, m.capture_s);
+            end
+        end
+
+        % ── deriveCCM ───────────────────────────────────────────────────────────
+        function [ccm, info] = deriveCCM(obj, corners, varargin)
+            %DERIVECCM  Solve a 3x3 color-correction matrix from an in-frame
+            %  X-Rite ColorChecker (24 patches), onboard. The server captures an
+            %  HDR bracket, demosaics to linear RGB, samples the 24 patches at
+            %  the chart grid, and least-squares-fits sensor->linear-sRGB. The
+            %  returned matrix FOLDS white balance + color (self-consistent for
+            %  this scene's illuminant), so apply it directly:
+            %     [rad,meta] = cam.captureHDROnboard(exps,'fullpreview',true,'ccm',ccm)
+            %  (no separate WB needed — this neutralizes correctly even when
+            %  gray-world WB is biased by a bright source).
+            %
+            %  ccm = cam.deriveCCM(corners)
+            %  [ccm,info] = cam.deriveCCM(corners,'exposures',[...],'gain',1)
+            %
+            %  corners : 4x2 [row col] of the OUTER corners of the 6x4 patch grid,
+            %            ORDER = [top-left; top-right; bottom-right; bottom-left].
+            %            ** Must be PRECISE ** (e.g. click them on a captured
+            %            fullpreview); a loose fit shows up as a high info.residual.
+            %  info    : struct with .residual (RMS linear-sRGB fit error).
+            obj.requireConnected();
+            p = inputParser;
+            p.addParameter('exposures',  [2e6 8e6 32e6 128e6]);
+            p.addParameter('gain',       1.0);
+            p.addParameter('blacklevel', 'auto');
+            p.parse(varargin{:});
+            c = double(corners);
+            if ~isequal(size(c), [4 2])
+                error('ECamHDRClient:ccm', 'corners must be 4x2 [row col]');
+            end
+            bl = p.Results.blacklevel;
+            if ischar(bl) || isstring(bl), bl = char(bl); else, bl = double(bl); end
+            req = struct('exposures_ns', round(double(p.Results.exposures(:)')), ...
+                         'gain',         double(p.Results.gain), ...
+                         'black_level',  bl, 'corners', c);
+            obj.flushInput();
+            obj.sendCmd(obj.CMD_DERIVE_CCM, uint8(jsonencode(req)));
+            info = jsondecode(char(obj.recvResp()));
+            ccm  = info.ccm;                          % 3x3 (apply via 'ccm',ccm)
+            if obj.Verbose
+                fprintf('[ECam] derived CCM, RMS residual = %.4f (linear sRGB)\n', ...
+                    info.residual);
             end
         end
 

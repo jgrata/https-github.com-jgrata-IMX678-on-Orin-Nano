@@ -60,6 +60,7 @@ CMD_GET_INFO    = 0x05
 CMD_PING        = 0x06
 CMD_CAPTURE_HDR = 0x07   # onboard exposure-bracket HDR -> linear radiance
 CMD_METRICS     = 0x08   # onboard intrinsic sensor metrics (read noise/DR/...)
+CMD_DERIVE_CCM  = 0x09   # solve a 3x3 CCM from an in-frame X-Rite chart
 
 
 def ensure_dir(p):
@@ -706,6 +707,7 @@ class ClientHandler(threading.Thread):
             CMD_STREAM_OFF:  self._stream_off,
             CMD_CAPTURE_HDR: lambda: self._capture_hdr(pay),
             CMD_METRICS:     lambda: self._metrics(pay),
+            CMD_DERIVE_CCM:  lambda: self._derive_ccm(pay),
         }.get(cmd, lambda: self._err("unknown "+hex(cmd)))()
 
     def _set_params(self, pay):
@@ -834,6 +836,44 @@ class ClientHandler(threading.Thread):
                 (len(js) + len(payload)) / 1e6, dt))
         except Exception as e:
             print("[Server] HDR error: " + str(e))
+            self._err(str(e))
+
+    def _derive_ccm(self, pay):
+        """Solve a 3x3 CCM from an in-frame X-Rite ColorChecker. Payload JSON:
+        {corners:[[r,c]x4] (TL,TR,BR,BL), exposures_ns, gain, black_level}.
+        Captures an HDR bracket, demosaics to linear RGB, samples the 24 patches
+        at the chart grid, and least-squares-fits (after gray-world WB) to the
+        linear ColorChecker refs. Response JSON via the standard frame:
+        {ccm:[[3x3]], residual, wb_gains, n_patches}. Apply with
+        captureHDROnboard(...,'fullpreview',true,'ccm',ccm)."""
+        if hdrmod is None:
+            return self._err("hdr module unavailable on server")
+        try:
+            req = json.loads(pay.decode()) if pay else {}
+            corners = req.get('corners')
+            if not corners or len(corners) != 4:
+                raise ValueError("corners=[[r,c]x4] (TL,TR,BR,BL) required")
+            exposures = req.get('exposures_ns') or [2000000, 8000000, 32000000, 128000000]
+            if isinstance(exposures, (int, float)):
+                exposures = [exposures]
+            gain  = float(req.get('gain', 1.0))
+            black = req.get('black_level', 'auto')
+            if not (isinstance(black, str) and black.lower() == 'auto'):
+                black = float(black)
+            cam = self.camera
+            backend = hdrmod.JetsonArgusBackend(
+                cam.rcp, cam.native_bpp, (cam.height, cam.width),
+                prefetcher=getattr(cam, 'prefetcher', None))
+            result = hdrmod.capture_bracket_hdr(
+                backend, exposures, gain=gain, black_level=black,
+                make_preview=False, make_coverage=False)
+            rgb = hdrmod.demosaic_bilinear(result['radiance'])
+            ccm, resid, _ = hdrmod.derive_ccm_from_image(rgb, corners)
+            self._resp(json.dumps({'ccm': ccm, 'residual': resid,
+                                   'folds_wb': True, 'n_patches': 24}).encode())
+            print("[Server] derive_ccm: residual=%.4f" % resid)
+        except Exception as e:
+            print("[Server] derive_ccm error: " + str(e))
             self._err(str(e))
 
     def _metrics(self, pay):

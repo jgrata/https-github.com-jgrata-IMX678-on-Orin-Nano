@@ -213,6 +213,11 @@ class CaptureBackend:
         gain-dependent — measure at the bracket's gain."""
         raise NotImplementedError
 
+    def capture_repeated(self, n, exposure_ns, gain, conv_gain=None):
+        """Capture n RAW frames at a FIXED exposure/gain (for read-noise, PTC,
+        and other temporal statistics). Returns uint16 [n, H, W]."""
+        raise NotImplementedError
+
 
 class JetsonArgusBackend(CaptureBackend):
     """Jetson/e-CAM86 implementation of the capture-shim, over a
@@ -260,6 +265,41 @@ class JetsonArgusBackend(CaptureBackend):
             time.sleep(fp)
         return False
 
+    def _ensure_connected(self):
+        """Warm up the persistent localhost channel: set_expgain_live is a no-op
+        while the rcp socket is unconnected (fresh/standalone rcp), which would
+        otherwise leave the FIRST exposure at the launch value. One discarded
+        grab opens the channel so the first set_expgain_live actually applies."""
+        try:
+            self._grab_native()
+        except Exception:
+            pass
+
+    def capture_repeated(self, n, exposure_ns, gain, conv_gain=None):
+        if conv_gain is not None:
+            raise NotImplementedError(
+                "conversion-gain axis not supported on the e-CAM86/Argus backend")
+        H, W = self._shape
+        n = int(n)
+        frames = np.empty((n, H, W), np.uint16)
+        paused = self.pf is not None
+        if paused:
+            self.pf.pause(); time.sleep(0.05)
+        orig_exp, orig_gain = self.rcp.exposure_ns, self.rcp.gain
+        try:
+            self._ensure_connected()
+            self.rcp.set_expgain_live(int(exposure_ns), float(gain))
+            self._settle(int(exposure_ns))
+            self._grab_native()                    # flush transitional
+            for i in range(n):
+                fr, _, _ = self._grab_native()
+                frames[i] = fr
+        finally:
+            self.rcp.set_expgain_live(orig_exp, orig_gain)
+            if paused:
+                self.pf.resume()
+        return frames
+
     def capture_bracket(self, exposures_ns, gain, conv_gain=None, settle=True):
         if conv_gain is not None:
             raise NotImplementedError(
@@ -278,13 +318,7 @@ class JetsonArgusBackend(CaptureBackend):
             time.sleep(0.05)                      # let any in-flight grab finish
         orig_exp, orig_gain = self.rcp.exposure_ns, self.rcp.gain
         try:
-            # Warm up the persistent localhost channel first: set_expgain_live is
-            # a no-op while the rcp socket is unconnected (fresh/standalone rcp),
-            # which would otherwise leave the FIRST leg at the launch exposure.
-            try:
-                self._grab_native()
-            except Exception:
-                pass
+            self._ensure_connected()
             for k, e in enumerate(exps):
                 self.rcp.set_expgain_live(e, gain)    # exposure varies, gain pinned
                 if settle:
@@ -308,6 +342,7 @@ class JetsonArgusBackend(CaptureBackend):
             self.pf.pause(); time.sleep(0.05)
         orig_exp, orig_gain = self.rcp.exposure_ns, self.rcp.gain
         try:
+            self._ensure_connected()
             self.rcp.set_expgain_live(self.MIN_EXPOSURE_NS, float(gain))
             self._settle(self.MIN_EXPOSURE_NS)
             self._grab_native()                    # flush transitional

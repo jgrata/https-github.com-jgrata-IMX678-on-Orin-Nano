@@ -30,6 +30,11 @@ RAW_CAPTURE_BIN  = os.path.join(_HERE, 'raw_capture', 'raw_capture')
 RAW_CAPTURE_PORT = 9001
 CAPTURE_DIR      = '/tmp/ecam_captures'
 
+DARK_DIR         = os.path.join(_HERE, 'darks')  # persisted 2D darks, per (mode,gain)
+# e-con vendor optical black, from camera_overrides.isp (opticalBlack.manualBias),
+# per Bayer channel, in 10-bit DN. Scale by 2**(bpp-10) for the current mode.
+VENDOR_OPTICAL_BLACK_10B = 49.0
+
 DEFAULT_SENSOR_MODE = 1
 DEFAULT_FPS         = 30
 DEFAULT_EXPOSURE_NS = 33000000
@@ -66,6 +71,27 @@ CMD_MEASURE_DARK = 0x0A  # capture + cache a per-pixel dark frame (lens capped)
 
 def ensure_dir(p):
     os.makedirs(p, exist_ok=True)
+
+def _dark_path(mode, gain):
+    return os.path.join(DARK_DIR, 'dark_m%d_g%.3f.npy' % (int(mode), float(gain)))
+
+def save_dark(mode, gain, dark, meta):
+    """Persist a per-pixel 2D dark for (mode, gain) so it survives restarts."""
+    ensure_dir(DARK_DIR)
+    p = _dark_path(mode, gain)
+    np.save(p, dark.astype(np.float32))
+    with open(p[:-4] + '.json', 'w') as f:
+        json.dump(meta, f)
+
+def load_dark(mode, gain):
+    """Load a persisted 2D dark for (mode, gain), or (None, {}) if absent."""
+    p = _dark_path(mode, gain)
+    if not os.path.exists(p):
+        return None, {}
+    dark = np.load(p)
+    mp = p[:-4] + '.json'
+    meta = json.load(open(mp)) if os.path.exists(mp) else {}
+    return dark, meta
 
 def send_exactly(sock, data):
     total = 0; mv = memoryview(data)
@@ -785,14 +811,19 @@ class ClientHandler(threading.Thread):
             ccm       = req.get('ccm', None)                  # optional 3x3 list
 
             cam = self.camera
-            if black == 'measured':                     # use the cached per-pixel dark
+            if black == 'measured':                     # use the per-pixel dark
                 df = getattr(cam, 'dark_frame', None)
                 dm = getattr(cam, 'dark_meta', {})
-                if df is None:
-                    raise ValueError("no measured dark cached — call measureDark first")
-                if abs(dm.get('gain', -1) - gain) > 1e-6 or dm.get('bit_depth') != cam.native_bpp:
-                    raise ValueError("measured dark mismatch — measure it at the "
-                                     "bracket's gain and sensor mode")
+                match = (df is not None and abs(dm.get('gain', -1) - gain) <= 1e-6
+                         and dm.get('bit_depth') == cam.native_bpp)
+                if not match:                           # fall back to the persisted dark
+                    df, dm = load_dark(cam.sensor_mode, gain)
+                    match = (df is not None and dm.get('bit_depth') == cam.native_bpp)
+                    if match:
+                        cam.dark_frame = df; cam.dark_meta = dm
+                if not match:
+                    raise ValueError("no measured dark for this mode/gain — call "
+                                     "measureDark (lens capped) at this gain & mode")
                 black = df                              # per-pixel float32 [H,W]
             backend = hdrmod.JetsonArgusBackend(
                 cam.rcp, cam.native_bpp, (cam.height, cam.width),
@@ -910,15 +941,23 @@ class ClientHandler(threading.Thread):
             dark = backend.measure_black_level(nframes=nframes, gain=gain)  # float32 [H,W]
             cam.dark_frame = dark
             cam.dark_meta  = {'gain': gain, 'bit_depth': cam.native_bpp,
-                              'nframes': nframes}
+                              'mode': cam.sensor_mode, 'nframes': nframes}
+            save_dark(cam.sensor_mode, gain, dark, cam.dark_meta)   # persist for restarts
             ph = {'R': dark[0::2, 0::2], 'Gr': dark[0::2, 1::2],
                   'Gb': dark[1::2, 0::2], 'B': dark[1::2, 1::2]}
-            stats = {k: round(float(np.median(v)), 2) for k, v in ph.items()}
-            stats['global'] = round(float(np.median(dark)), 2)
+            med  = {k: round(float(np.median(v)), 2) for k, v in ph.items()}
+            med['global'] = round(float(np.median(dark)), 2)
+            dsnu = {k: round(float(np.std(v)), 2) for k, v in ph.items()}   # per-phase DSNU
+            vob = VENDOR_OPTICAL_BLACK_10B * (2 ** (cam.native_bpp - 10))    # vendor scalar, scaled
             self._resp(json.dumps({'gain': gain, 'bit_depth': cam.native_bpp,
-                                   'nframes': nframes, 'phases': stats}).encode())
-            print("[Server] measured dark: global {:.1f} DN (gain {:.2f}, {} frames)"
-                  .format(stats['global'], gain, nframes))
+                                   'mode': cam.sensor_mode, 'nframes': nframes,
+                                   'phases': med, 'dsnu': dsnu,
+                                   'vendor_optical_black': round(vob, 1),
+                                   'delta_vs_vendor': round(med['global'] - vob, 2),
+                                   'persisted': True}).encode())
+            print("[Server] measured dark: global {:.1f} DN (gain {:.2f}, mode {}) "
+                  "vs vendor {:.1f} DN; persisted".format(
+                      med['global'], gain, cam.sensor_mode, vob))
         except Exception as e:
             print("[Server] measure_dark error: " + str(e))
             self._err(str(e))
@@ -1037,6 +1076,18 @@ def main():
         exposure_ns = 0,
         gain        = 1.0,
         bit_depth   = DEFAULT_BIT_DEPTH)
+
+    # Preload a persisted 2D dark for the startup (mode, gain=1) if one exists, so
+    # black_level='measured' works immediately after a restart. Other (mode,gain)
+    # darks lazy-load on demand in _capture_hdr.
+    try:
+        _df, _dm = load_dark(DEFAULT_SENSOR_MODE, 1.0)
+        if _df is not None and _dm.get('bit_depth') == camera.native_bpp:
+            camera.dark_frame = _df; camera.dark_meta = _dm
+            print("[Init] loaded persisted 2D dark (mode %d, gain 1.0)"
+                  % DEFAULT_SENSOR_MODE)
+    except Exception as _e:
+        print("[Init] dark preload skipped: " + str(_e))
 
     # Startup AE convergence then freeze (see Camera.ae_settle).
     if rcp.is_alive() and rcp.ready:

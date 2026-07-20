@@ -1018,7 +1018,11 @@ classdef ECamHDRClient < handle
             %
             %  Measure at the SAME gain and sensor mode you'll bracket at (black
             %  level is gain- and mode-dependent) — captureHDROnboard errors on a
-            %  mismatch. st = per-Bayer-phase + global dark medians (DN).
+            %  mismatch. The dark is PERSISTED on the server per (mode,gain) and
+            %  auto-loaded on later 'measured' captures (survives restarts).
+            %  st fields: .phases (per-phase + global medians DN), .dsnu
+            %  (per-phase fixed-pattern std DN), .vendor_optical_black and
+            %  .delta_vs_vendor (compare to e-con's scalar optical black).
             obj.requireConnected();
             if nargin < 2 || isempty(nframes), nframes = 16;  end
             if nargin < 3 || isempty(gain),    gain    = 1.0; end
@@ -1027,9 +1031,12 @@ classdef ECamHDRClient < handle
             obj.sendCmd(obj.CMD_MEASURE_DARK, uint8(jsonencode(req)));
             st = jsondecode(char(obj.recvResp()));
             if obj.Verbose
-                fprintf(['[ECam] measured dark: global %.1f DN (gain %.2f, %d-bit, ' ...
-                         '%d frames) — cached; use ''blacklevel'',''measured''\n'], ...
-                    st.phases.global, st.gain, st.bit_depth, st.nframes);
+                fprintf(['[ECam] dark: global %.1f DN vs vendor %.1f (delta %+.1f); ' ...
+                         'DSNU R/Gr/Gb/B=%.1f/%.1f/%.1f/%.1f DN (gain %.2f, %d-bit, ' ...
+                         '%d frames) — persisted; use ''blacklevel'',''measured''\n'], ...
+                    st.phases.global, st.vendor_optical_black, st.delta_vs_vendor, ...
+                    st.dsnu.R, st.dsnu.Gr, st.dsnu.Gb, st.dsnu.B, ...
+                    st.gain, st.bit_depth, st.nframes);
             end
         end
 

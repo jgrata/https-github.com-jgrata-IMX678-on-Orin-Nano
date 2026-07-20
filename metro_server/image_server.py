@@ -61,6 +61,7 @@ CMD_PING        = 0x06
 CMD_CAPTURE_HDR = 0x07   # onboard exposure-bracket HDR -> linear radiance
 CMD_METRICS     = 0x08   # onboard intrinsic sensor metrics (read noise/DR/...)
 CMD_DERIVE_CCM  = 0x09   # solve a 3x3 CCM from an in-frame X-Rite chart
+CMD_MEASURE_DARK = 0x0A  # capture + cache a per-pixel dark frame (lens capped)
 
 
 def ensure_dir(p):
@@ -708,6 +709,7 @@ class ClientHandler(threading.Thread):
             CMD_CAPTURE_HDR: lambda: self._capture_hdr(pay),
             CMD_METRICS:     lambda: self._metrics(pay),
             CMD_DERIVE_CCM:  lambda: self._derive_ccm(pay),
+            CMD_MEASURE_DARK: lambda: self._measure_dark(pay),
         }.get(cmd, lambda: self._err("unknown "+hex(cmd)))()
 
     def _set_params(self, pay):
@@ -769,8 +771,12 @@ class ClientHandler(threading.Thread):
                 raise ValueError("exposures_ns required")
             gain    = float(req.get('gain', 1.0))
             satfrac = float(req.get('satfrac', 0.95))
-            black   = req.get('black_level', 'auto')   # 'auto' | scalar DN | 0
-            if not (isinstance(black, str) and black.lower() == 'auto'):
+            black   = req.get('black_level', 'auto')   # 'auto' | 'measured' | scalar DN | 0
+            if isinstance(black, str):
+                black = black.lower()
+                if black not in ('auto', 'measured'):
+                    raise ValueError("black_level string must be 'auto' or 'measured'")
+            else:
                 black = float(black)
             want_pv   = bool(req.get('preview', True))
             want_full = bool(req.get('fullpreview', False))   # full-res demosaic RGB
@@ -779,6 +785,15 @@ class ClientHandler(threading.Thread):
             ccm       = req.get('ccm', None)                  # optional 3x3 list
 
             cam = self.camera
+            if black == 'measured':                     # use the cached per-pixel dark
+                df = getattr(cam, 'dark_frame', None)
+                dm = getattr(cam, 'dark_meta', {})
+                if df is None:
+                    raise ValueError("no measured dark cached — call measureDark first")
+                if abs(dm.get('gain', -1) - gain) > 1e-6 or dm.get('bit_depth') != cam.native_bpp:
+                    raise ValueError("measured dark mismatch — measure it at the "
+                                     "bracket's gain and sensor mode")
+                black = df                              # per-pixel float32 [H,W]
             backend = hdrmod.JetsonArgusBackend(
                 cam.rcp, cam.native_bpp, (cam.height, cam.width),
                 prefetcher=getattr(cam, 'prefetcher', None))
@@ -874,6 +889,38 @@ class ClientHandler(threading.Thread):
             print("[Server] derive_ccm: residual=%.4f" % resid)
         except Exception as e:
             print("[Server] derive_ccm error: " + str(e))
+            self._err(str(e))
+
+    def _measure_dark(self, pay):
+        """Capture a per-pixel dark frame ONBOARD and cache it on the camera for
+        black_level='measured'. ** The operator must cap the lens / darken the
+        scene. ** Payload {nframes, gain}. Measured at min exposure; cached with
+        its gain + bit depth (black level is gain- and mode-dependent). Response
+        JSON: {gain, bit_depth, nframes, phases:{R,Gr,Gb,B,global} DN}."""
+        if hdrmod is None:
+            return self._err("hdr module unavailable on server")
+        try:
+            req = json.loads(pay.decode()) if pay else {}
+            nframes = int(req.get('nframes', 16))
+            gain    = float(req.get('gain', 1.0))
+            cam = self.camera
+            backend = hdrmod.JetsonArgusBackend(
+                cam.rcp, cam.native_bpp, (cam.height, cam.width),
+                prefetcher=getattr(cam, 'prefetcher', None))
+            dark = backend.measure_black_level(nframes=nframes, gain=gain)  # float32 [H,W]
+            cam.dark_frame = dark
+            cam.dark_meta  = {'gain': gain, 'bit_depth': cam.native_bpp,
+                              'nframes': nframes}
+            ph = {'R': dark[0::2, 0::2], 'Gr': dark[0::2, 1::2],
+                  'Gb': dark[1::2, 0::2], 'B': dark[1::2, 1::2]}
+            stats = {k: round(float(np.median(v)), 2) for k, v in ph.items()}
+            stats['global'] = round(float(np.median(dark)), 2)
+            self._resp(json.dumps({'gain': gain, 'bit_depth': cam.native_bpp,
+                                   'nframes': nframes, 'phases': stats}).encode())
+            print("[Server] measured dark: global {:.1f} DN (gain {:.2f}, {} frames)"
+                  .format(stats['global'], gain, nframes))
+        except Exception as e:
+            print("[Server] measure_dark error: " + str(e))
             self._err(str(e))
 
     def _metrics(self, pay):

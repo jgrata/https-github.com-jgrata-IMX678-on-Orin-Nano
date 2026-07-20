@@ -86,6 +86,7 @@ classdef ECamHDRClient < handle
         CMD_CAPTURE_HDR = uint32(7)
         CMD_METRICS     = uint32(8)
         CMD_DERIVE_CCM  = uint32(9)
+        CMD_MEASURE_DARK = uint32(10)
 
         RECV_TIMEOUT_S  = 300    % 5 min — accommodates pipeline init
         CLEANUP_TIMEOUT = 2
@@ -770,9 +771,10 @@ classdef ECamHDRClient < handle
             %
             %  blacklevel: 'auto' (default) estimates the pedestal from the
             %  shortest leg (prevents shadows from inflating brighter than
-            %  highlights); pass a scalar DN (e.g. a measured dark median) for
-            %  accuracy, or 0 to disable subtraction. meta.black_level_used
-            %  reports the value applied.
+            %  highlights); a scalar DN; 'measured' to use a per-pixel dark
+            %  cached by cam.measureDark (removes fixed-pattern DSNU too — best
+            %  for shadow-heavy scenes); or 0 to disable subtraction.
+            %  meta.black_level_used reports the value applied.
             %
             %  Options for extra outputs (default off — they add wire payload):
             %   'fullpreview',true : full-res 2160x3840 demosaiced+tonemapped RGB
@@ -954,6 +956,34 @@ classdef ECamHDRClient < handle
             if obj.Verbose
                 fprintf('[ECam] derived CCM, RMS residual = %.4f (linear sRGB)\n', ...
                     info.residual);
+            end
+        end
+
+        % ── measureDark ─────────────────────────────────────────────────────────
+        function st = measureDark(obj, nframes, gain)
+            %MEASUREDARK  Capture a per-pixel dark frame ONBOARD and cache it on
+            %  the server, for use as captureHDROnboard(...,'blacklevel','measured').
+            %  ** CAP THE LENS (or fully dark the scene) before calling. ** The
+            %  cached dark removes both the pedestal AND fixed-pattern DSNU (the
+            %  mottle a scalar black level leaves in lifted shadows); the random
+            %  read-noise grain remains (needs more light/exposure).
+            %
+            %  st = cam.measureDark([nframes],[gain])
+            %
+            %  Measure at the SAME gain and sensor mode you'll bracket at (black
+            %  level is gain- and mode-dependent) — captureHDROnboard errors on a
+            %  mismatch. st = per-Bayer-phase + global dark medians (DN).
+            obj.requireConnected();
+            if nargin < 2 || isempty(nframes), nframes = 16;  end
+            if nargin < 3 || isempty(gain),    gain    = 1.0; end
+            req = struct('nframes', round(double(nframes)), 'gain', double(gain));
+            obj.flushInput();
+            obj.sendCmd(obj.CMD_MEASURE_DARK, uint8(jsonencode(req)));
+            st = jsondecode(char(obj.recvResp()));
+            if obj.Verbose
+                fprintf(['[ECam] measured dark: global %.1f DN (gain %.2f, %d-bit, ' ...
+                         '%d frames) — cached; use ''blacklevel'',''measured''\n'], ...
+                    st.phases.global, st.gain, st.bit_depth, st.nframes);
             end
         end
 

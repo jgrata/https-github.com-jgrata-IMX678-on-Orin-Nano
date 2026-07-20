@@ -41,6 +41,14 @@ classdef ECamHDRClient < handle
         Verbose      (1,1) logical = true   % print per-capture status lines
     end
 
+    % ── Processing settings (defaults for captureImage / captureHDROnboard) ────
+    % Apply only to the PROCESSED paths; the raw DAQ (capture/grab/record*) is
+    % untouched and still returns raw Bayer.
+    properties
+        DarkCorrection = 'auto'   % 'auto' | 'measured' | 'off' | scalar DN
+        CCM            = []       % [] (none) | 'vendor' | 3x3 matrix
+    end
+
     % ── Dependent settable parameters ─────────────────────────────────────────
     properties (Dependent)
         sensormode
@@ -801,18 +809,23 @@ classdef ECamHDRClient < handle
             p = inputParser;
             p.addParameter('gain',        1.0);
             p.addParameter('satfrac',     0.95);
-            p.addParameter('blacklevel',  'auto');   % 'auto' | scalar DN | 0
+            p.addParameter('blacklevel',  obj.DarkCorrection); % default from setting
             p.addParameter('preview',     true,  @(x)islogical(x)||isnumeric(x));
             p.addParameter('fullpreview', false, @(x)islogical(x)||isnumeric(x));
             p.addParameter('frames',      false, @(x)islogical(x)||isnumeric(x));
             p.addParameter('wb',          true,  @(x)islogical(x)||isnumeric(x));
-            p.addParameter('ccm',         []);       % optional measured 3x3 CCM
+            p.addParameter('ccm',         obj.CCM);            % default from setting
             p.parse(varargin{:});
 
             exps = round(double(exposures_ns(:)'));
             if isempty(exps), error('ECamHDRClient:hdr','need >=1 exposure'); end
-            bl = p.Results.blacklevel;              % pass 'auto' through or a number
-            if ischar(bl) || isstring(bl), bl = char(bl); else, bl = double(bl); end
+            bl = p.Results.blacklevel;              % 'auto'|'measured'|'off'|number
+            if ischar(bl) || isstring(bl)
+                bl = char(bl);
+                if strcmpi(bl, 'off'), bl = 0; end % 'off' -> no dark subtraction
+            else
+                bl = double(bl);
+            end
             req = struct('exposures_ns', exps, ...
                          'gain',        double(p.Results.gain), ...
                          'satfrac',     double(p.Results.satfrac), ...
@@ -871,6 +884,39 @@ classdef ECamHDRClient < handle
                     numel(meta.metas), ...
                     100*meta.coverage.composite_covered_frac, meta.capture_s);
             end
+        end
+
+        % ── captureImage ────────────────────────────────────────────────────────
+        function [img, meta] = captureImage(obj, exposure_ns, varargin)
+            %CAPTUREIMAGE  Single-frame PROCESSED capture (modes 0-2): one
+            %  exposure through the same onboard engine as captureHDROnboard ->
+            %  dark-corrected, demosaiced, optional CCM. Dark correction and CCM
+            %  default to the cam.DarkCorrection / cam.CCM settings (so you set
+            %  them once and every capture applies them); override per-call.
+            %  This is the processed single-shot path; the raw DAQ (capture/grab)
+            %  is unchanged.
+            %
+            %  [img, meta] = cam.captureImage(exposure_ns)
+            %  [img, meta] = cam.captureImage(exposure_ns, 'gain',1, ...
+            %                    'blacklevel','measured', 'ccm','vendor')
+            %
+            %  img  : uint8 [H x W x 3] demosaiced, dark-corrected (+CCM) RGB.
+            %  meta : .linear (dark-corrected linear frame [H x W], Bayer mosaic),
+            %         .black_level_used, .metas(1).exposure_ns/.gain.
+            obj.requireConnected();
+            p = inputParser;
+            p.addParameter('gain',       1.0);
+            p.addParameter('blacklevel', obj.DarkCorrection);  % setting default
+            p.addParameter('ccm',        obj.CCM);             % setting default
+            p.addParameter('frames',     false, @(x)islogical(x)||isnumeric(x));
+            p.parse(varargin{:});
+            args = {'gain', p.Results.gain, 'blacklevel', p.Results.blacklevel, ...
+                    'ccm', p.Results.ccm, 'fullpreview', true, ...
+                    'frames', logical(p.Results.frames), 'preview', false};
+            [rad, meta] = obj.captureHDROnboard(round(double(exposure_ns)), args{:});
+            if isfield(meta, 'fullPreviewImage'), img = meta.fullPreviewImage;
+            else,                                 img = []; end
+            meta.linear = rad;
         end
 
         % ── sensorMetrics ───────────────────────────────────────────────────────

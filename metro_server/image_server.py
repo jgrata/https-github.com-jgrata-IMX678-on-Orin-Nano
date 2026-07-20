@@ -93,6 +93,14 @@ def load_dark(mode, gain):
     meta = json.load(open(mp)) if os.path.exists(mp) else {}
     return dark, meta
 
+def list_darks():
+    """Human-readable list of saved darks, e.g. ['m1 g1.000', ...]."""
+    try:
+        return ['%s' % f[5:-4].replace('_', ' ')
+                for f in sorted(os.listdir(DARK_DIR)) if f.endswith('.npy')]
+    except Exception:
+        return []
+
 def send_exactly(sock, data):
     total = 0; mv = memoryview(data)
     while total < len(data):
@@ -822,8 +830,12 @@ class ClientHandler(threading.Thread):
                     if match:
                         cam.dark_frame = df; cam.dark_meta = dm
                 if not match:
-                    raise ValueError("no measured dark for this mode/gain — call "
-                                     "measureDark (lens capped) at this gain & mode")
+                    raise ValueError(
+                        "no measured dark for mode %d gain %.3f — run measureDark "
+                        "(lens capped) at this mode+gain, or set DarkCorrection "
+                        "'auto'. Saved darks: %s" % (
+                            cam.sensor_mode, gain,
+                            ', '.join(list_darks()) if list_darks() else 'none'))
                 black = df                              # per-pixel float32 [H,W]
             backend = hdrmod.JetsonArgusBackend(
                 cam.rcp, cam.native_bpp, (cam.height, cam.width),

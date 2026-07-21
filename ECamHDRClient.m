@@ -45,8 +45,9 @@ classdef ECamHDRClient < handle
     % Apply only to the PROCESSED paths; the raw DAQ (capture/grab/record*) is
     % untouched and still returns raw Bayer.
     properties
-        DarkCorrection = 'auto'   % 'auto' | 'measured' | 'off' | scalar DN
-        CCM            = []       % [] (none) | 'vendor' | 3x3 matrix
+        DarkCorrection    = 'scalar' % 'scalar'(default) | 'auto' | 'measured' | 'off' | DN
+        HotPixelCorrection = 'on'    % 'on'(default) | 'off' — sparse defect-pixel repair
+        CCM               = []       % [] (none) | 'vendor' | 3x3 matrix
     end
 
     % ── Dependent settable parameters ─────────────────────────────────────────
@@ -95,6 +96,7 @@ classdef ECamHDRClient < handle
         CMD_METRICS     = uint32(8)
         CMD_DERIVE_CCM  = uint32(9)
         CMD_MEASURE_DARK = uint32(10)
+        CMD_BUILD_HOTMASK = uint32(11)
 
         RECV_TIMEOUT_S  = 300    % 5 min — accommodates pipeline init
         CLEANUP_TIMEOUT = 2
@@ -815,17 +817,21 @@ classdef ECamHDRClient < handle
             p.addParameter('frames',      false, @(x)islogical(x)||isnumeric(x));
             p.addParameter('wb',          true,  @(x)islogical(x)||isnumeric(x));
             p.addParameter('ccm',         obj.CCM);            % default from setting
+            p.addParameter('hotpix',      obj.HotPixelCorrection); % 'on'|'off'|logical
             p.parse(varargin{:});
 
             exps = round(double(exposures_ns(:)'));
             if isempty(exps), error('ECamHDRClient:hdr','need >=1 exposure'); end
-            bl = p.Results.blacklevel;              % 'auto'|'measured'|'off'|number
+            bl = p.Results.blacklevel;              % 'scalar'|'auto'|'measured'|'off'|number
             if ischar(bl) || isstring(bl)
                 bl = char(bl);
                 if strcmpi(bl, 'off'), bl = 0; end % 'off' -> no dark subtraction
             else
                 bl = double(bl);
             end
+            hp = p.Results.hotpix;                  % 'on'|'off'|logical|numeric
+            if ischar(hp) || isstring(hp), hp = strcmpi(char(hp), 'on');
+            else,                          hp = logical(hp); end
             req = struct('exposures_ns', exps, ...
                          'gain',        double(p.Results.gain), ...
                          'satfrac',     double(p.Results.satfrac), ...
@@ -833,7 +839,8 @@ classdef ECamHDRClient < handle
                          'preview',     logical(p.Results.preview), ...
                          'fullpreview', logical(p.Results.fullpreview), ...
                          'frames',      logical(p.Results.frames), ...
-                         'wb',          logical(p.Results.wb));
+                         'wb',          logical(p.Results.wb), ...
+                         'hotpix',      hp);
             cc = p.Results.ccm;                       % 3x3 matrix | 'vendor' | []
             if ~isempty(cc)
                 if ischar(cc) || isstring(cc), req.ccm = char(cc);
@@ -880,9 +887,10 @@ classdef ECamHDRClient < handle
                     permute(reshape(frb, [sh(3), sh(2), sh(1)]), [2 1 3]);  % -> [H W N] uint16
             end
             if obj.Verbose
-                fprintf('[ECam] onboard HDR: %d legs, coverage %.0f%%, %.2fs\n', ...
+                hpc = 0; if isfield(meta,'hotpix_corrected'), hpc = meta.hotpix_corrected; end
+                fprintf('[ECam] onboard HDR: %d legs, coverage %.0f%%, %.2fs (hotpix %d)\n', ...
                     numel(meta.metas), ...
-                    100*meta.coverage.composite_covered_frac, meta.capture_s);
+                    100*meta.coverage.composite_covered_frac, meta.capture_s, hpc);
             end
         end
 
@@ -908,10 +916,12 @@ classdef ECamHDRClient < handle
             p.addParameter('gain',       1.0);
             p.addParameter('blacklevel', obj.DarkCorrection);  % setting default
             p.addParameter('ccm',        obj.CCM);             % setting default
+            p.addParameter('hotpix',     obj.HotPixelCorrection); % setting default
             p.addParameter('frames',     false, @(x)islogical(x)||isnumeric(x));
             p.parse(varargin{:});
             args = {'gain', p.Results.gain, 'blacklevel', p.Results.blacklevel, ...
-                    'ccm', p.Results.ccm, 'fullpreview', true, ...
+                    'ccm', p.Results.ccm, 'hotpix', p.Results.hotpix, ...
+                    'fullpreview', true, ...
                     'frames', logical(p.Results.frames), 'preview', false};
             [rad, meta] = obj.captureHDROnboard(round(double(exposure_ns)), args{:});
             if isfield(meta, 'fullPreviewImage'), img = meta.fullPreviewImage;
@@ -1037,6 +1047,39 @@ classdef ECamHDRClient < handle
                     st.phases.global, st.vendor_optical_black, st.delta_vs_vendor, ...
                     st.dsnu.R, st.dsnu.Gr, st.dsnu.Gb, st.dsnu.B, ...
                     st.gain, st.bit_depth, st.nframes);
+            end
+        end
+
+        % ── buildHotMask ─────────────────────────────────────────────────────────
+        function st = buildHotMask(obj, gain, n_sigma)
+            %BUILDHOTMASK  Derive + cache a hot-pixel (defect) mask on the server
+            %  from a stored dark, for use with 'HotPixelCorrection','on' (the
+            %  default). Unlike a full 2D dark, the mask is GAIN-INDEPENDENT (one
+            %  mask serves every gain) and tiny (a sparse coordinate list): it
+            %  repairs the handful of true defect pixels by same-color neighbor
+            %  median, injecting no noise elsewhere. Measurement showed the diffuse
+            %  DSNU isn't worth subtracting (<=25% of read noise), but these
+            %  defects are — so this is the recommended dark handling.
+            %
+            %  st = cam.buildHotMask([gain],[n_sigma])
+            %
+            %  Requires a persisted dark for (current mode, gain) — measure one at
+            %  HIGH gain first (cam.measureDark(16,32), lens capped) for best
+            %  defect SNR. gain defaults to 32, n_sigma (detection threshold) to
+            %  16. The mask is PERSISTED per mode and auto-loaded on restart.
+            %  st fields: .count, .frac_pct, .n_sigma, .gain, .mode, .shape.
+            obj.requireConnected();
+            if nargin < 2 || isempty(gain),    gain    = 32.0; end
+            if nargin < 3 || isempty(n_sigma), n_sigma = 16.0; end
+            req = struct('gain', double(gain), 'n_sigma', double(n_sigma));
+            obj.flushInput();
+            obj.sendCmd(obj.CMD_BUILD_HOTMASK, uint8(jsonencode(req)));
+            st = jsondecode(char(obj.recvResp()));
+            if obj.Verbose
+                fprintf(['[ECam] hot-pixel mask: %d px (%.4f%%) for mode %d, ' ...
+                         'n_sigma %.0f (from gain %.0f dark) — persisted; ' ...
+                         'HotPixelCorrection ''on'' applies it\n'], ...
+                    st.count, st.frac_pct, st.mode, st.n_sigma, st.gain);
             end
         end
 

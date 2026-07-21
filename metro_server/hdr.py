@@ -95,6 +95,60 @@ def estimate_black_level(frames, exposures_ns, pct=1.0):
     return float(np.percentile(frames[k], pct))
 
 
+# ── hot-pixel (defect) mask ────────────────────────────────────────────────────
+# Measurement (2026-07-20) settled the dark: the diffuse per-pixel FPN is <=25%
+# of the read noise at every gain (subtracting a 2D dark is a wash — it injects
+# ~as much noise as the pattern it removes), but a handful of pixels are true,
+# temporally-stable, gain-persistent DEFECTS (offset/RTS, not dark current at
+# min exposure). Those we DO correct — with a sparse mask + same-color neighbor
+# median, which touches ONLY the bad pixels and injects no noise elsewhere.
+
+def build_hot_mask(dark, n_sigma=16.0, max_frac=0.01):
+    """Locate defect pixels in a per-pixel DARK frame (lens-capped mean).
+
+    Per Bayer phase (the 4 quad positions), flag pixels whose excess over the
+    phase median exceeds n_sigma robust sigmas (1.4826*MAD of that phase). Build
+    it from the HIGHEST-gain dark (best defect-excess vs read-noise); the mask is
+    gain- and (at fixed geometry) mode-independent, so one mask serves all gains.
+
+    Returns a bool mask [H, W]. If more than max_frac of pixels trip (a too-low
+    threshold), returns the mask anyway — the caller reports the count so the
+    threshold can be raised.
+    """
+    d = np.asarray(dark, np.float64)
+    H, W = d.shape
+    mask = np.zeros((H, W), bool)
+    for (r, c) in ((0, 0), (0, 1), (1, 0), (1, 1)):
+        sub = d[r::2, c::2]
+        med = np.median(sub)
+        sig = 1.4826 * np.median(np.abs(sub - med)) + 1e-9
+        mask[r::2, c::2] = (sub - med) > (n_sigma * sig)
+    return mask
+
+
+_HOT_OFFSETS = ((-2, 0), (2, 0), (0, -2), (0, 2), (-2, -2), (-2, 2), (2, -2), (2, 2))
+
+def correct_hot_pixels(frames, mask):
+    """Replace masked pixels with the median of their 8 SAME-PHASE (+-2 px)
+    neighbors (same CFA color). Accepts a single frame [H, W] or a stack
+    [N, H, W]; unmasked pixels pass through untouched (no global noise)."""
+    m = np.asarray(mask, bool)
+    single = (np.ndim(frames) == 2)
+    stack = frames[None] if single else np.asarray(frames)
+    ys, xs = np.nonzero(m)
+    if ys.size == 0:
+        return frames
+    out = stack.copy()
+    H, W = m.shape
+    yy = [np.clip(ys + dy, 0, H - 1) for (dy, _) in _HOT_OFFSETS]
+    xx = [np.clip(xs + dx, 0, W - 1) for (_, dx) in _HOT_OFFSETS]
+    for i in range(stack.shape[0]):
+        f = stack[i]
+        neigh = np.stack([f[yy[j], xx[j]] for j in range(len(_HOT_OFFSETS))], 0)
+        out[i][ys, xs] = np.median(neigh, axis=0).astype(f.dtype)
+    return out[0] if single else out
+
+
 def bayer_to_luma(mono):
     """Average each 2x2 Bayer quad -> a half-resolution luma image [H/2, W/2].
     Removes the Bayer checkerboard for a clean grayscale quicklook. Sensor-
@@ -525,7 +579,7 @@ def capture_bracket_hdr(backend, exposures_ns, gain=1.0, satfrac=0.95,
                         black_level='auto', flatfield=None, conv_gain=None,
                         settle=True, make_preview=True, make_coverage=True,
                         make_fullpreview=False, return_frames=False,
-                        wb=True, ccm=None):
+                        wb=True, ccm=None, hot_mask=None):
     """Capture an exposure bracket via `backend` and merge to linear radiance.
 
     black_level: scalar DN, per-pixel dark ndarray, or 'auto' (default) to
@@ -543,6 +597,8 @@ def capture_bracket_hdr(backend, exposures_ns, gain=1.0, satfrac=0.95,
     """
     frames, metas = backend.capture_bracket(exposures_ns, gain,
                                             conv_gain=conv_gain, settle=settle)
+    if hot_mask is not None:
+        frames = correct_hot_pixels(frames, hot_mask)   # defect-replace before merge
     full = (1 << backend.bit_depth) - 1
     exps = [m['exposure_ns'] for m in metas]
     gains = [m['gain'] for m in metas]
@@ -555,7 +611,9 @@ def capture_bracket_hdr(backend, exposures_ns, gain=1.0, satfrac=0.95,
            'bit_depth': backend.bit_depth, 'shape': backend.shape,
            'satfrac': satfrac,
            'black_level_used': (float(black_level) if np.isscalar(black_level)
-                                else 'per-pixel')}
+                                else 'per-pixel'),
+           'hotpix_corrected': (int(np.count_nonzero(hot_mask))
+                                if hot_mask is not None else 0)}
     if make_preview:
         out['preview'] = tonemap(rad)                       # binned 8-bit luma
     if make_fullpreview:

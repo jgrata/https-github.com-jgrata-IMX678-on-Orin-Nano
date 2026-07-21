@@ -67,6 +67,7 @@ CMD_CAPTURE_HDR = 0x07   # onboard exposure-bracket HDR -> linear radiance
 CMD_METRICS     = 0x08   # onboard intrinsic sensor metrics (read noise/DR/...)
 CMD_DERIVE_CCM  = 0x09   # solve a 3x3 CCM from an in-frame X-Rite chart
 CMD_MEASURE_DARK = 0x0A  # capture + cache a per-pixel dark frame (lens capped)
+CMD_BUILD_HOTMASK = 0x0B # derive + cache a hot-pixel (defect) mask from a dark
 
 
 def ensure_dir(p):
@@ -97,9 +98,39 @@ def list_darks():
     """Human-readable list of saved darks, e.g. ['m1 g1.000', ...]."""
     try:
         return ['%s' % f[5:-4].replace('_', ' ')
-                for f in sorted(os.listdir(DARK_DIR)) if f.endswith('.npy')]
+                for f in sorted(os.listdir(DARK_DIR))
+                if f.startswith('dark_') and f.endswith('.npy')]
     except Exception:
         return []
+
+# ── hot-pixel (defect) mask persistence ────────────────────────────────────────
+# Stored as a sparse coordinate list (int32 [K,2]) + json meta — a few KB, vs a
+# full 2D dark. One mask per mode (defects are gain-independent).
+def _hotmask_path(mode):
+    return os.path.join(DARK_DIR, 'hotmask_m%d.npy' % int(mode))
+
+def save_hotmask(mode, mask, meta):
+    ensure_dir(DARK_DIR)
+    p = _hotmask_path(mode)
+    ys, xs = np.nonzero(mask)
+    np.save(p, np.stack([ys, xs], 1).astype(np.int32))     # [K,2] coords
+    m = dict(meta); m['shape'] = [int(mask.shape[0]), int(mask.shape[1])]
+    m['count'] = int(ys.size)
+    with open(p[:-4] + '.json', 'w') as f:
+        json.dump(m, f)
+
+def load_hotmask(mode):
+    p = _hotmask_path(mode)
+    if not os.path.exists(p):
+        return None, {}
+    coords = np.load(p)
+    mp = p[:-4] + '.json'
+    meta = json.load(open(mp)) if os.path.exists(mp) else {}
+    shape = tuple(meta.get('shape', (0, 0)))
+    mask = np.zeros(shape, bool)
+    if coords.size:
+        mask[coords[:, 0], coords[:, 1]] = True
+    return mask, meta
 
 def send_exactly(sock, data):
     total = 0; mv = memoryview(data)
@@ -645,6 +676,7 @@ class Camera:
             'method':             'CUDA EGL RAW16 TRUE 10-bit (persistent session)',
             'note':               str(self.bit_depth)+'-bit RAW | ~0.5s/frame',
             'pipeline_running':   self.rcp.is_alive(),
+            'server_time':        time.time(),   # UTC epoch — client uses for entry timestamps
         }
 
 
@@ -744,6 +776,7 @@ class ClientHandler(threading.Thread):
             CMD_METRICS:     lambda: self._metrics(pay),
             CMD_DERIVE_CCM:  lambda: self._derive_ccm(pay),
             CMD_MEASURE_DARK: lambda: self._measure_dark(pay),
+            CMD_BUILD_HOTMASK: lambda: self._build_hotmask(pay),
         }.get(cmd, lambda: self._err("unknown "+hex(cmd)))()
 
     def _set_params(self, pay):
@@ -805,11 +838,11 @@ class ClientHandler(threading.Thread):
                 raise ValueError("exposures_ns required")
             gain    = float(req.get('gain', 1.0))
             satfrac = float(req.get('satfrac', 0.95))
-            black   = req.get('black_level', 'auto')   # 'auto' | 'measured' | scalar DN | 0
+            black   = req.get('black_level', 'auto')   # 'auto'|'scalar'|'measured'|DN|0
             if isinstance(black, str):
                 black = black.lower()
-                if black not in ('auto', 'measured'):
-                    raise ValueError("black_level string must be 'auto' or 'measured'")
+                if black not in ('auto', 'scalar', 'measured'):
+                    raise ValueError("black_level string must be 'auto', 'scalar' or 'measured'")
             else:
                 black = float(black)
             want_pv   = bool(req.get('preview', True))
@@ -817,8 +850,15 @@ class ClientHandler(threading.Thread):
             want_frm  = bool(req.get('frames', False))        # per-leg 12-bit RAW
             wb        = bool(req.get('wb', True))
             ccm       = req.get('ccm', None)                  # optional 3x3 list
+            hotpix    = bool(req.get('hotpix', False))        # defect-pixel correction
 
             cam = self.camera
+            if black == 'scalar':                       # single gain-flat pedestal
+                df, dm = load_dark(cam.sensor_mode, gain)
+                if df is not None and dm.get('bit_depth') == cam.native_bpp:
+                    black = float(np.median(df))        # measured global median
+                else:
+                    black = VENDOR_OPTICAL_BLACK_10B * (2 ** (cam.native_bpp - 10))
             if black == 'measured':                     # use the per-pixel dark
                 df = getattr(cam, 'dark_frame', None)
                 dm = getattr(cam, 'dark_meta', {})
@@ -837,6 +877,15 @@ class ClientHandler(threading.Thread):
                             cam.sensor_mode, gain,
                             ', '.join(list_darks()) if list_darks() else 'none'))
                 black = df                              # per-pixel float32 [H,W]
+            hot_mask = None                             # defect-pixel mask (gain-independent)
+            if hotpix:
+                hm = getattr(cam, 'hot_mask', None)
+                if hm is None or list(getattr(cam, 'hot_mask_meta', {}).get('shape', [])) \
+                        != [cam.height, cam.width]:
+                    hm, hmm = load_hotmask(cam.sensor_mode)
+                    if hm is not None:
+                        cam.hot_mask = hm; cam.hot_mask_meta = hmm
+                hot_mask = hm                           # None if never built -> no-op
             backend = hdrmod.JetsonArgusBackend(
                 cam.rcp, cam.native_bpp, (cam.height, cam.width),
                 prefetcher=getattr(cam, 'prefetcher', None))
@@ -845,7 +894,7 @@ class ClientHandler(threading.Thread):
                 backend, exposures, gain=gain, satfrac=satfrac,
                 black_level=black, make_preview=want_pv, make_coverage=True,
                 make_fullpreview=want_full, return_frames=want_frm,
-                wb=wb, ccm=ccm)
+                wb=wb, ccm=ccm, hot_mask=hot_mask)
             dt = time.monotonic() - t0
 
             u16, scale = hdrmod.radiance_to_u16(result['radiance'], hi_pct=99.99)
@@ -854,6 +903,7 @@ class ClientHandler(threading.Thread):
             meta = {'shape': [H, W], 'bit_depth': result['bit_depth'],
                     'satfrac': result['satfrac'], 'capture_s': round(dt, 3),
                     'black_level_used': result.get('black_level_used'),
+                    'hotpix_corrected': result.get('hotpix_corrected', 0),
                     'radiance': {'dtype': 'u16', 'scale': scale,
                                  'nbytes': len(rad_bytes)},
                     'metas': result['metas'], 'coverage': result.get('coverage')}
@@ -926,9 +976,12 @@ class ClientHandler(threading.Thread):
                 backend, exposures, gain=gain, black_level=black,
                 make_preview=False, make_coverage=False)
             rgb = hdrmod.demosaic_bilinear(result['radiance'])
-            ccm, resid, _ = hdrmod.derive_ccm_from_image(rgb, corners)
+            ccm, resid, patches = hdrmod.derive_ccm_from_image(rgb, corners)
             self._resp(json.dumps({'ccm': ccm, 'residual': resid,
-                                   'folds_wb': True, 'n_patches': 24}).encode())
+                                   'folds_wb': True, 'n_patches': 24,
+                                   'patches':   np.asarray(patches, float).tolist(),   # 24x3 raw linear
+                                   'reference': np.asarray(hdrmod.colorchecker_linear(), float).tolist()
+                                  }).encode())
             print("[Server] derive_ccm: residual=%.4f" % resid)
         except Exception as e:
             print("[Server] derive_ccm error: " + str(e))
@@ -972,6 +1025,45 @@ class ClientHandler(threading.Thread):
                       med['global'], gain, cam.sensor_mode, vob))
         except Exception as e:
             print("[Server] measure_dark error: " + str(e))
+            self._err(str(e))
+
+    def _build_hotmask(self, pay):
+        """Derive + cache a hot-pixel (defect) mask from a stored DARK frame.
+        Payload {gain (default 32 — highest gain = best defect SNR), n_sigma
+        (default 16)}. Uses the persisted dark for (current mode, gain); the mask
+        is gain-independent so it applies to every gain. Response JSON:
+        {count, frac_pct, n_sigma, gain, mode, shape, persisted}."""
+        if hdrmod is None:
+            return self._err("hdr module unavailable on server")
+        try:
+            req = json.loads(pay.decode()) if pay else {}
+            gain    = float(req.get('gain', 32.0))
+            n_sigma = float(req.get('n_sigma', 16.0))
+            cam = self.camera
+            df, dm = load_dark(cam.sensor_mode, gain)
+            if df is None:
+                raise ValueError(
+                    "no dark for mode %d gain %.3f to build a hot mask from — run "
+                    "measureDark (lens capped) at high gain first. Saved darks: %s" % (
+                        cam.sensor_mode, gain,
+                        ', '.join(list_darks()) if list_darks() else 'none'))
+            mask = hdrmod.build_hot_mask(df, n_sigma=n_sigma)
+            meta = {'gain': gain, 'n_sigma': n_sigma, 'mode': cam.sensor_mode,
+                    'bit_depth': cam.native_bpp}
+            save_hotmask(cam.sensor_mode, mask, meta)
+            cam.hot_mask = mask
+            cam.hot_mask_meta = dict(meta, count=int(mask.sum()),
+                                     shape=[int(mask.shape[0]), int(mask.shape[1])])
+            k = int(mask.sum())
+            self._resp(json.dumps({'count': k, 'frac_pct': round(100.0 * k / mask.size, 4),
+                                   'n_sigma': n_sigma, 'gain': gain,
+                                   'mode': cam.sensor_mode,
+                                   'shape': [int(mask.shape[0]), int(mask.shape[1])],
+                                   'persisted': True}).encode())
+            print("[Server] hot mask: %d px (mode %d, n_sigma %.0f, from gain %.1f dark)"
+                  % (k, cam.sensor_mode, n_sigma, gain))
+        except Exception as e:
+            print("[Server] build_hotmask error: " + str(e))
             self._err(str(e))
 
     def _metrics(self, pay):
@@ -1100,6 +1192,17 @@ def main():
                   % DEFAULT_SENSOR_MODE)
     except Exception as _e:
         print("[Init] dark preload skipped: " + str(_e))
+
+    # Preload the hot-pixel (defect) mask for the startup mode, if built. The
+    # mask is gain-independent, so this one covers every gain.
+    try:
+        _hm, _hmm = load_hotmask(DEFAULT_SENSOR_MODE)
+        if _hm is not None:
+            camera.hot_mask = _hm; camera.hot_mask_meta = _hmm
+            print("[Init] loaded hot-pixel mask (mode %d, %d px)"
+                  % (DEFAULT_SENSOR_MODE, int(_hmm.get('count', _hm.sum()))))
+    except Exception as _e:
+        print("[Init] hotmask preload skipped: " + str(_e))
 
     # Startup AE convergence then freeze (see Camera.ae_settle).
     if rcp.is_alive() and rcp.ready:

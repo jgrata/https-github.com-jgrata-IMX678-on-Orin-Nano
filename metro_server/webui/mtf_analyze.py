@@ -99,9 +99,12 @@ def _mtf50(freq, m):
     return float("nan")
 
 
-def _b64png(bgr):
-    ok, buf = cv2.imencode(".png", bgr)
-    return "data:image/png;base64," + base64.b64encode(buf.tobytes()).decode()
+def _b64jpg(bgr, width=900, quality=80):
+    h, w = bgr.shape[:2]
+    if w > width:
+        bgr = cv2.resize(bgr, (width, max(1, int(h * width / w))), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, int(quality)])
+    return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()
 
 
 _DEFAULTS = dict(min_pct=0.3, max_pct=8.0, delta=5, max_var=0.25, min_div=0.2,
@@ -167,5 +170,5 @@ def analyze(frame, maxv, params=None):
         "n_squares": len(sq), "n_edges": len(edges),
         "units": ustr, "nyquist": round(nyq, 4), "pixel": pixel, "osf": osf,
         "black_level": float(bl), "clip_frac": float((frame >= maxv).mean()),
-        "edges": edges, "overlay_png": _b64png(disp),
+        "edges": edges, "overlay_png": _b64jpg(disp),
     }

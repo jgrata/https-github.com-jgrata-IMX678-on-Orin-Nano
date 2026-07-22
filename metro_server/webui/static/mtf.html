@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MTF / focus assist — Metro Camera Web UI</title>
+<style>
+  :root { --bg:#15171c; --panel:#1e2128; --ink:#e6e8ec; --mut:#9aa3b2;
+          --acc:#4ea1ff; --line:#2c303a; --ok:#5fd08a; --warn:#e6c15f; --bad:#e46a6a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; }
+  header { padding:10px 16px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; }
+  header h1 { font-size:15px; margin:0; font-weight:600; }
+  header a { color:var(--acc); text-decoration:none; font-size:13px; }
+  header .status { margin-left:auto; color:var(--mut); font-size:12px; }
+  .wrap { display:flex; gap:14px; padding:14px; align-items:flex-start; flex-wrap:wrap; }
+  .col { display:flex; flex-direction:column; gap:14px; }
+  .col.left { flex:1 1 560px; min-width:320px; } .col.right { flex:0 0 320px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 14px; }
+  .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut); margin:0 0 10px; }
+  img.frame, canvas { width:100%; border-radius:6px; background:#0c0e12; display:block; border:1px solid var(--line); }
+  label { display:block; font-size:11.5px; color:var(--mut); margin:7px 0 3px; }
+  input, select { width:100%; background:#12141a; color:var(--ink); border:1px solid var(--line);
+                  border-radius:6px; padding:6px 8px; font:inherit; }
+  .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .grid2 { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+  button { margin-top:10px; width:100%; background:var(--acc); color:#08213d; border:0;
+           border-radius:6px; padding:9px; font-weight:600; cursor:pointer; }
+  button.sec { background:#2a2f3a; color:var(--ink); }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th,td { padding:3px 4px; text-align:right; font-variant-numeric:tabular-nums; }
+  th { color:var(--mut); font-weight:500; border-bottom:1px solid var(--line); }
+  td.l, th.l { text-align:left; }
+  .hint { font-size:11px; color:var(--mut); margin-top:6px; }
+  .seg { display:flex; gap:0; border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+  .seg label { flex:1; margin:0; text-align:center; padding:6px 0; cursor:pointer; color:var(--mut); }
+  .seg input { display:none; }
+  .seg input:checked + span { background:var(--acc); color:#08213d; display:block; }
+  .seg span { display:block; padding:6px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MTF / focus assist</h1>
+  <a href="/">&larr; live view</a> <a href="/colorchecker">ColorChecker</a>
+  <div class="status" id="status">ready</div>
+</header>
+
+<div class="wrap">
+  <div class="col left">
+    <div class="card">
+      <h2>Live</h2>
+      <img class="frame" id="live" src="/stream.mjpg?width=760" alt="live">
+      <div class="grid3" style="margin-top:8px">
+        <div><label>Exposure (ms)</label><input id="exp_ms" type="number" step="0.1"></div>
+        <div><label>Gain (×)</label><input id="gain" type="number" step="0.1"></div>
+        <div style="align-self:end"><button class="sec" id="applyEG" style="margin:0">Apply exp/gain</button></div>
+      </div>
+      <button id="measure">Measure MTF</button>
+      <div class="hint">Point at slanted squares/edges; adjust focus to maximise MTF50. Watch clipping.</div>
+    </div>
+    <div class="card" id="ovCard" style="display:none">
+      <h2>Detected edges (MTF50 labels)</h2>
+      <img class="frame" id="overlay" alt="overlay">
+    </div>
+    <div class="card">
+      <h2>MTF curves</h2>
+      <canvas id="plot" width="640" height="320"></canvas>
+      <div class="hint" id="plotinfo">measure to plot</div>
+    </div>
+  </div>
+
+  <div class="col right">
+    <div class="card">
+      <h2>Optics / scale</h2>
+      <div class="grid3">
+        <div><label>Pixel pitch (µm)</label><input id="pitch" type="number" step="0.1" value="2.0"></div>
+        <div><label>EFL (mm)</label><input id="efl" type="number" step="0.1" value="8.0"></div>
+        <div><label>OSF</label><input id="osf" type="number" step="1" value="4"></div>
+      </div>
+      <label>X-axis units</label>
+      <div class="seg">
+        <label><input type="radio" name="units" value="mm" checked><span>cyc/mm</span></label>
+        <label><input type="radio" name="units" value="deg"><span>cyc/deg</span></label>
+      </div>
+      <div class="hint">deg uses atan(pitch/EFL). Nyquist = 1/(2·pixel).</div>
+    </div>
+    <div class="card">
+      <h2>Square finder (MSER)</h2>
+      <div class="grid2">
+        <div><label>Min area %</label><input id="minpct" type="number" step="0.1" value="0.3"></div>
+        <div><label>Max area %</label><input id="maxpct" type="number" step="0.5" value="8"></div>
+        <div><label>Delta</label><input id="delta" type="number" step="1" value="5"></div>
+        <div><label>Max variation</label><input id="maxvar" type="number" step="0.05" value="0.25"></div>
+        <div><label>Min aspect</label><input id="minar" type="number" step="0.05" value="0.6"></div>
+        <div><label>Along / Across</label><input id="along" type="number" step="0.05" value="0.7"></div>
+      </div>
+    </div>
+    <div class="card" id="tblCard" style="display:none">
+      <h2>Per-edge MTF</h2>
+      <table><thead><tr><th class="l">sq·edge</th><th>MTF50 (<span class="u">cyc/mm</span>)</th>
+        <th>MTF@Nyq</th></tr></thead><tbody id="tbl"></tbody></table>
+      <div class="hint" id="meta"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const COLORS = ["#4ea1ff","#5fd08a","#e6c15f","#e46a6a","#b98cff","#57d6d6","#ff9f4e","#8fd14f"];
+function setStatus(t,c){ const s=$("status"); s.textContent=t; s.className="status "+(c||""); }
+
+async function refreshInfo(){
+  try{ const d=await (await fetch("/api/info")).json(); if(d.error) return;
+    if(document.activeElement!==$("exp_ms")) $("exp_ms").value=(d.exposure_ns/1e6).toFixed(2);
+    if(document.activeElement!==$("gain"))   $("gain").value=(+d.gain).toFixed(2);
+  }catch(e){}
+}
+$("applyEG").onclick = async () => { setStatus("applying…");
+  await fetch("/api/params",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({exposure_ns:Math.round(parseFloat($("exp_ms").value)*1e6),gain:parseFloat($("gain").value)})});
+  setStatus("applied","ok"); refreshInfo();
+};
+
+function params(){
+  return { pitch_um:+$("pitch").value, efl_mm:+$("efl").value, osf:+$("osf").value,
+    units:document.querySelector('input[name=units]:checked').value,
+    min_pct:+$("minpct").value, max_pct:+$("maxpct").value, delta:+$("delta").value,
+    max_var:+$("maxvar").value, min_ar:+$("minar").value,
+    along:+$("along").value, across:0.3 };
+}
+
+let LAST=null;
+$("measure").onclick = async () => {
+  setStatus("capturing + finding edges…","warn"); $("measure").disabled=true;
+  let d; try{ d=await (await fetch("/api/mtf",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(params())})).json(); }
+  catch(e){ setStatus("failed: "+e.message,"bad"); $("measure").disabled=false; return; }
+  $("measure").disabled=false;
+  if(d.error){ setStatus("error: "+d.error,"bad"); return; }
+  LAST=d; render(d);
+  setStatus(`${d.n_squares} squares · ${d.n_edges} edges · clip ${(d.clip_frac*100).toFixed(1)}%`,
+            d.clip_frac>0.005?"warn":"ok");
+};
+
+function render(d){
+  $("overlay").src=d.overlay_png; $("ovCard").style.display="";
+  document.querySelectorAll(".u").forEach(e=>e.textContent=d.units);
+  $("tblCard").style.display="";
+  const rows = d.edges.map((e,i)=>`<tr><td class="l"><span style="color:${COLORS[e.square%COLORS.length]}">&#9632;</span> ${e.square}·${e.edge}</td>`
+    + `<td>${e.mtf50==null?"–":e.mtf50.toFixed(3)}</td><td>${e.mtf_nyq.toFixed(3)}</td></tr>`).join("");
+  $("tbl").innerHTML = rows || `<tr><td colspan="3" class="l">no edges found — adjust MSER params</td></tr>`;
+  $("meta").textContent = `Nyquist ${d.nyquist} ${d.units} · osf ${d.osf} · black ${d.black_level} DN`;
+  drawPlot(d);
+}
+
+function drawPlot(d){
+  const c=$("plot"), ctx=c.getContext("2d"); const W=c.width,H=c.height;
+  const L=44,Rp=10,T=10,B=28; ctx.clearRect(0,0,W,H);
+  const x=f=>L+(f/d.nyquist)*(W-L-Rp), y=m=>T+(1-m)*(H-T-B);
+  // grid
+  ctx.strokeStyle="#2c303a"; ctx.fillStyle="#9aa3b2"; ctx.font="10px system-ui"; ctx.lineWidth=1;
+  for(let m=0;m<=1;m+=0.25){ ctx.beginPath(); ctx.moveTo(L,y(m)); ctx.lineTo(W-Rp,y(m)); ctx.stroke();
+    ctx.fillText(m.toFixed(2),6,y(m)+3); }
+  for(let k=0;k<=4;k++){ const f=d.nyquist*k/4; ctx.beginPath(); ctx.moveTo(x(f),T); ctx.lineTo(x(f),H-B); ctx.stroke();
+    ctx.fillText(f.toFixed(f<1?2:0),x(f)-8,H-14); }
+  // MTF50 reference line
+  ctx.strokeStyle="#3a3f4a"; ctx.setLineDash([3,3]); ctx.beginPath(); ctx.moveTo(L,y(0.5)); ctx.lineTo(W-Rp,y(0.5)); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillText("MTF "+d.units, W/2-20, H-2);
+  // curves
+  d.edges.forEach(e=>{ ctx.strokeStyle=COLORS[e.square%COLORS.length]; ctx.lineWidth=1.4; ctx.beginPath();
+    e.freq.forEach((f,i)=>{ const px=x(f),py=y(Math.max(0,Math.min(1,e.mtf[i]))); i?ctx.lineTo(px,py):ctx.moveTo(px,py); });
+    ctx.stroke(); });
+  $("plotinfo").textContent = d.edges.length ? `${d.edges.length} edge curves (0 → Nyquist ${d.nyquist} ${d.units})` : "no edges";
+}
+
+refreshInfo(); setInterval(refreshInfo,4000);
+</script>
+</body>
+</html>

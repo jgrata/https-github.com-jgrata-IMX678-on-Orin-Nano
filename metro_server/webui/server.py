@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # webui/
 from camera_client import CameraClient  # noqa: E402
 import imaging  # noqa: E402
 import colorchecker  # noqa: E402
+import mtf_analyze  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 IMG_HOST = os.environ.get("IMG_HOST", "127.0.0.1")
@@ -113,6 +114,26 @@ async def api_colorchecker(request: Request):
         with _client() as c:
             frame, maxv = c.capture()
         return colorchecker.analyze(frame, maxv, black_level=bl)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.get("/mtf", response_class=HTMLResponse)
+def mtf_page():
+    with open(os.path.join(HERE, "static", "mtf.html"), encoding="utf-8") as f:
+        return f.read()
+
+
+@app.post("/api/mtf")
+async def api_mtf(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        with _client() as c:
+            frame, maxv = c.capture()
+        return mtf_analyze.analyze(frame, maxv, body)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
 

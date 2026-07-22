@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Metro Camera — Web UI (skeleton)</title>
+<style>
+  :root { --bg:#15171c; --panel:#1e2128; --ink:#e6e8ec; --mut:#9aa3b2;
+          --acc:#4ea1ff; --line:#2c303a; --ok:#5fd08a; --warn:#e6c15f; --bad:#e46a6a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; }
+  header { padding:10px 16px; border-bottom:1px solid var(--line);
+           display:flex; align-items:center; gap:12px; }
+  header h1 { font-size:15px; margin:0; font-weight:600; }
+  header .status { margin-left:auto; color:var(--mut); font-size:12px; }
+  .wrap { display:flex; gap:14px; padding:14px; align-items:flex-start; flex-wrap:wrap; }
+  .view { flex:1 1 620px; min-width:320px; }
+  .view img { width:100%; border-radius:8px; background:#000; display:block;
+              border:1px solid var(--line); }
+  .side { flex:0 0 320px; display:flex; flex-direction:column; gap:14px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 14px; }
+  .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em;
+             color:var(--mut); margin:0 0 10px; }
+  label { display:block; font-size:12px; color:var(--mut); margin:8px 0 3px; }
+  input, select { width:100%; background:#12141a; color:var(--ink);
+                  border:1px solid var(--line); border-radius:6px; padding:6px 8px; font:inherit; }
+  .row { display:flex; gap:8px; } .row > * { flex:1; }
+  button { margin-top:10px; width:100%; background:var(--acc); color:#08213d; border:0;
+           border-radius:6px; padding:8px; font-weight:600; cursor:pointer; }
+  button.sec { background:#2a2f3a; color:var(--ink); }
+  button:active { transform:translateY(1px); }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  td { padding:2px 0; } td.k { color:var(--mut); } td.v { text-align:right; font-variant-numeric:tabular-nums; }
+  canvas { width:100%; height:120px; display:block; background:#12141a;
+           border:1px solid var(--line); border-radius:6px; }
+  .hint { font-size:11px; color:var(--mut); margin-top:6px; }
+  .pill { font-size:11px; padding:1px 7px; border-radius:10px; background:#2a2f3a; color:var(--mut); }
+  .pill.ok{color:var(--ok)} .pill.warn{color:var(--warn)} .pill.bad{color:var(--bad)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Metro Camera — Web UI <span class="pill">skeleton</span></h1>
+  <div class="status" id="status">connecting…</div>
+</header>
+
+<div class="wrap">
+  <div class="view">
+    <img id="live" alt="live view" src="/stream.mjpg?width=960">
+    <div class="hint">Live MJPEG via image_server.py (localhost). The MATLAB client and PC
+      data path remain available concurrently.</div>
+  </div>
+
+  <div class="side">
+    <div class="card">
+      <h2>Exposure / Gain (live)</h2>
+      <div class="row">
+        <div><label>Exposure (ms)</label><input id="exp_ms" type="number" step="0.1" min="0"></div>
+        <div><label>Gain (×)</label><input id="gain" type="number" step="0.1" min="1"></div>
+      </div>
+      <button id="applyEG">Apply exposure / gain</button>
+    </div>
+
+    <div class="card">
+      <h2>Sensor mode (restarts pipeline)</h2>
+      <label>Mode</label>
+      <select id="mode">
+        <option value="0">0 — 4K 12-bit</option>
+        <option value="1">1 — 4K 10-bit</option>
+        <option value="2">2 — 1080p 12-bit</option>
+        <option value="3">3 — 4K 10-bit HDR</option>
+      </select>
+      <label>FPS</label><input id="fps" type="number" step="1" min="1">
+      <button id="applyMode" class="sec">Set mode / fps</button>
+    </div>
+
+    <div class="card">
+      <h2>Histogram (raw)</h2>
+      <canvas id="hist" width="300" height="120"></canvas>
+      <div class="hint" id="histinfo">—</div>
+    </div>
+
+    <div class="card">
+      <h2>Info</h2>
+      <table id="info"><tbody></tbody></table>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+function setStatus(t, cls){ const s=$("status"); s.textContent=t; s.className="status "+(cls||""); }
+
+async function refreshInfo(){
+  try{
+    const r = await fetch("/api/info"); const d = await r.json();
+    if(d.error){ setStatus("image_server: "+d.error,"bad"); return; }
+    const rows = [
+      ["sensor", d.sensor],["mode", d.sensormode],
+      ["resolution", d.width+"×"+d.height],["bit depth", d.bit_depth+" (native "+d.native_bpp+")"],
+      ["fps", d.fps],["exposure", (d.exposure_ns/1e6).toFixed(2)+" ms"],
+      ["gain", (+d.gain).toFixed(2)+"×"],["actual exp", (d.actual_exposure_ns/1e6).toFixed(2)+" ms"],
+      ["actual gain", (+d.actual_gain).toFixed(2)+"×"],["bayer", d.bayer],
+      ["pipeline", d.pipeline_running ? "running" : "down"],
+    ];
+    $("info").querySelector("tbody").innerHTML =
+      rows.map(([k,v])=>`<tr><td class="k">${k}</td><td class="v">${v}</td></tr>`).join("");
+    // seed controls (only if not focused, so typing isn't clobbered)
+    if(document.activeElement!==$("exp_ms")) $("exp_ms").value = (d.exposure_ns/1e6).toFixed(2);
+    if(document.activeElement!==$("gain"))   $("gain").value   = (+d.gain).toFixed(2);
+    if(document.activeElement!==$("mode"))   $("mode").value   = d.sensormode;
+    if(document.activeElement!==$("fps"))    $("fps").value    = d.fps;
+    setStatus("connected", "ok");
+  }catch(e){ setStatus("no backend: "+e.message, "bad"); }
+}
+
+async function apply(params, btn){
+  const old = btn.textContent; btn.disabled=true; btn.textContent="applying…";
+  try{
+    const r = await fetch("/api/params", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(params)});
+    await r.json();
+  }catch(e){ setStatus("apply failed: "+e.message,"bad"); }
+  btn.disabled=false; btn.textContent=old;
+  refreshInfo();
+}
+
+$("applyEG").onclick = () => apply({
+  exposure_ns: Math.round(parseFloat($("exp_ms").value)*1e6),
+  gain: parseFloat($("gain").value) }, $("applyEG"));
+
+$("applyMode").onclick = () => {
+  setStatus("restarting pipeline…","warn");
+  // reload the stream after a mode change (resolution changes)
+  apply({ sensormode: parseInt($("mode").value), fps: parseInt($("fps").value) }, $("applyMode"))
+    .then(()=> setTimeout(()=>{ $("live").src = "/stream.mjpg?width=960&t="+Date.now(); }, 1500));
+};
+
+function drawHist(d){
+  const c=$("hist"), ctx=c.getContext("2d");
+  const W=c.width, H=c.height; ctx.clearRect(0,0,W,H);
+  if(!d || !d.counts){ return; }
+  const n=d.counts.length, mx=Math.max(1,...d.counts);
+  const bw=W/n;
+  ctx.fillStyle="#4ea1ff";
+  for(let i=0;i<n;i++){
+    const h=(Math.log1p(d.counts[i])/Math.log1p(mx))*(H-2);
+    ctx.fillRect(i*bw, H-h, Math.max(1,bw-0.3), h);
+  }
+  const clip = (d.clip_frac*100);
+  const cls = clip>1 ? "bad" : (clip>0.05 ? "warn":"ok");
+  $("histinfo").innerHTML = `p50 ${d.p50.toFixed(0)} · p99 ${d.p99.toFixed(0)} / ${d.maxv.toFixed(0)}`
+    + ` · <span class="pill ${cls}">clip ${clip.toFixed(2)}%</span>`;
+}
+async function refreshHist(){
+  try{ const r=await fetch("/api/histogram"); const d=await r.json(); if(!d.error) drawHist(d); }catch(e){}
+}
+
+refreshInfo(); refreshHist();
+setInterval(refreshInfo, 3000);
+setInterval(refreshHist, 2500);
+</script>
+</body>
+</html>

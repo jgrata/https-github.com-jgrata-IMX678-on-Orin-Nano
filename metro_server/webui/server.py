@@ -20,6 +20,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingRes
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # webui/
 from camera_client import CameraClient  # noqa: E402
 import imaging  # noqa: E402
+import colorchecker  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 IMG_HOST = os.environ.get("IMG_HOST", "127.0.0.1")
@@ -93,6 +94,27 @@ def _mjpeg_generator(width):
                 break
             yield (boundary + b"\r\nContent-Type: image/jpeg\r\nContent-Length: "
                    + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n")
+
+
+@app.get("/colorchecker", response_class=HTMLResponse)
+def colorchecker_page():
+    with open(os.path.join(HERE, "static", "colorchecker.html"), encoding="utf-8") as f:
+        return f.read()
+
+
+@app.post("/api/colorchecker")
+async def api_colorchecker(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    bl = body.get("black_level")
+    try:
+        with _client() as c:
+            frame, maxv = c.capture()
+        return colorchecker.analyze(frame, maxv, black_level=bl)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
 
 
 @app.get("/stream.mjpg")

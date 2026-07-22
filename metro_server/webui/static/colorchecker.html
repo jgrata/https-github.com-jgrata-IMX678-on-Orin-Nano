@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ColorChecker — Metro Camera Web UI</title>
+<style>
+  :root { --bg:#15171c; --panel:#1e2128; --ink:#e6e8ec; --mut:#9aa3b2;
+          --acc:#4ea1ff; --line:#2c303a; --ok:#5fd08a; --warn:#e6c15f; --bad:#e46a6a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; }
+  header { padding:10px 16px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; }
+  header h1 { font-size:15px; margin:0; font-weight:600; }
+  header a { color:var(--acc); text-decoration:none; font-size:13px; }
+  header .status { margin-left:auto; color:var(--mut); font-size:12px; }
+  .wrap { display:flex; gap:14px; padding:14px; align-items:flex-start; flex-wrap:wrap; }
+  .col { display:flex; flex-direction:column; gap:14px; }
+  .col.left { flex:1 1 560px; min-width:320px; }
+  .col.right { flex:0 0 340px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 14px; }
+  .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut); margin:0 0 10px; }
+  img.frame { width:100%; border-radius:6px; background:#000; display:block; border:1px solid var(--line); }
+  label { display:block; font-size:12px; color:var(--mut); margin:8px 0 3px; }
+  input { width:100%; background:#12141a; color:var(--ink); border:1px solid var(--line);
+          border-radius:6px; padding:6px 8px; font:inherit; }
+  .row { display:flex; gap:8px; } .row > * { flex:1; }
+  button { margin-top:10px; width:100%; background:var(--acc); color:#08213d; border:0;
+           border-radius:6px; padding:9px; font-weight:600; cursor:pointer; }
+  button.sec { background:#2a2f3a; color:var(--ink); }
+  button:active { transform:translateY(1px); }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  td { padding:2px 0; } td.k { color:var(--mut); } td.v { text-align:right; font-variant-numeric:tabular-nums; }
+  .legend { display:flex; gap:14px; font-size:12px; color:var(--mut); margin-top:8px; align-items:center; }
+  .chip { display:inline-block; width:22px; height:12px; border-radius:2px; vertical-align:middle; margin-right:5px; }
+  .big { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .pill { font-size:11px; padding:1px 7px; border-radius:10px; background:#2a2f3a; color:var(--mut); }
+  .pill.ok{color:var(--ok)} .pill.warn{color:var(--warn)} .pill.bad{color:var(--bad)}
+  pre { background:#12141a; border:1px solid var(--line); border-radius:6px; padding:8px;
+        font-size:12px; overflow-x:auto; margin:6px 0 0; }
+  .patchgrid { display:grid; grid-template-columns:repeat(2,1fr); gap:2px 12px; font-size:11.5px; }
+  .patchgrid .pr { display:flex; justify-content:space-between; padding:1px 0; }
+  .hint { font-size:11px; color:var(--mut); margin-top:6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ColorChecker measurement</h1>
+  <a href="/">&larr; live view</a>
+  <div class="status" id="status">ready</div>
+</header>
+
+<div class="wrap">
+  <div class="col left">
+    <div class="card">
+      <h2>Aim / expose</h2>
+      <img class="frame" id="live" src="/stream.mjpg?width=760" alt="live">
+      <div class="row" style="margin-top:8px">
+        <div><label>Exposure (ms)</label><input id="exp_ms" type="number" step="0.1" min="0"></div>
+        <div><label>Gain (×)</label><input id="gain" type="number" step="0.1" min="1"></div>
+        <div><label>Black level (DN)</label><input id="bl" type="number" step="1" placeholder="auto"></div>
+      </div>
+      <button class="sec" id="applyEG">Apply exposure / gain</button>
+      <button id="measure">Measure ColorChecker</button>
+      <div class="hint">Tip: for accurate colour, drop exposure until <b>clip ≈ 0%</b> and avoid specular
+        glint from the light source on the glossy patches.</div>
+    </div>
+
+    <div class="card" id="overlayCard" style="display:none">
+      <h2>Detection</h2>
+      <img class="frame" id="overlay" alt="detection overlay">
+    </div>
+  </div>
+
+  <div class="col right">
+    <div class="card" id="resultCard" style="display:none">
+      <h2>Result</h2>
+      <div>current (vendor CCM) &nbsp; <span class="big" id="deVend">–</span> <span class="pill">mean ΔE76</span></div>
+      <div style="margin-top:6px">with derived CCM &nbsp; <span class="big" id="deDer">–</span>
+        <span class="pill" id="deDerMax"></span></div>
+      <table style="margin-top:10px"><tbody id="meta"></tbody></table>
+    </div>
+
+    <div class="card" id="swatchCard" style="display:none">
+      <h2>Patches (chart layout)</h2>
+      <img class="frame" id="swatch" alt="measured vs reference swatches">
+      <div class="legend">
+        <span><span class="chip" style="background:#c86"></span>left half = <b>measured + CCM</b></span>
+        <span><span class="chip" style="background:#6a8"></span>right half = <b>reference</b></span>
+      </div>
+      <div class="hint">Each cell is one patch: your camera's measured colour (left) beside the true
+        reference (right). If they match, colour is accurate.</div>
+    </div>
+
+    <div class="card" id="ccmCard" style="display:none">
+      <h2>Derived CCM (raw linear → linear sRGB)</h2>
+      <pre id="ccm"></pre>
+      <button class="sec" id="copyCCM">Copy CCM</button>
+    </div>
+
+    <div class="card" id="patchCard" style="display:none">
+      <h2>Per-patch ΔE (derived)</h2>
+      <div class="patchgrid" id="patches"></div>
+      <div class="hint">green &lt;3 · amber 3–6 · red &gt;6</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+function setStatus(t, cls){ const s=$("status"); s.textContent=t; s.className="status "+(cls||""); }
+function deCol(v){ return v<3?"var(--ok)":(v<6?"var(--warn)":"var(--bad)"); }
+
+async function refreshInfo(){
+  try{
+    const d = await (await fetch("/api/info")).json();
+    if(d.error) return;
+    if(document.activeElement!==$("exp_ms")) $("exp_ms").value=(d.exposure_ns/1e6).toFixed(2);
+    if(document.activeElement!==$("gain"))   $("gain").value=(+d.gain).toFixed(2);
+  }catch(e){}
+}
+$("applyEG").onclick = async () => {
+  setStatus("applying…");
+  await fetch("/api/params",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({exposure_ns:Math.round(parseFloat($("exp_ms").value)*1e6),
+                         gain:parseFloat($("gain").value)})});
+  setStatus("applied — let it settle a moment","ok"); refreshInfo();
+};
+
+$("measure").onclick = async () => {
+  setStatus("capturing + detecting…","warn"); $("measure").disabled=true;
+  const body = {}; const bl=$("bl").value; if(bl!=="") body.black_level=parseFloat(bl);
+  let d;
+  try{ d = await (await fetch("/api/colorchecker",{method:"POST",
+        headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)})).json(); }
+  catch(e){ setStatus("request failed: "+e.message,"bad"); $("measure").disabled=false; return; }
+  $("measure").disabled=false;
+  if(d.error){ setStatus("error: "+d.error,"bad"); return; }
+  if(!d.detected){ setStatus("chart NOT detected (clip "+(d.clip_frac*100).toFixed(1)+"%) — reframe/expose","bad"); return; }
+  render(d);
+  setStatus("measured","ok");
+};
+
+function render(d){
+  $("overlay").src = d.overlay_png; $("overlayCard").style.display="";
+  $("swatch").src  = d.swatch_png;  $("swatchCard").style.display="";
+  $("resultCard").style.display=""; $("ccmCard").style.display=""; $("patchCard").style.display="";
+  $("deVend").textContent = d.dE_vendor_mean.toFixed(2); $("deVend").style.color = deCol(d.dE_vendor_mean);
+  $("deDer").textContent  = d.dE_derived_mean.toFixed(2); $("deDer").style.color = deCol(d.dE_derived_mean);
+  $("deDerMax").textContent = "max "+d.dE_derived_max.toFixed(1);
+  const clip=(d.clip_frac*100), clipCls = clip>0.5?"bad":(clip>0.05?"warn":"ok");
+  $("meta").innerHTML = [
+    ["illuminant", `${d.illum_name} (~${Math.round(d.illum_cct)} K)`],
+    ["clipping", `<span class="pill ${clipCls}">${clip.toFixed(2)}%</span>`],
+    ["white:black", d.white_black_ratio.toFixed(1)+":1"],
+    ["black level", d.black_level.toFixed(0)+" DN"],
+    ["orientation", d.orientation],
+    ["detect cost", d.cost.toFixed(4)],
+    ["fit residual", d.resid.toFixed(4)],
+  ].map(([k,v])=>`<tr><td class="k">${k}</td><td class="v">${v}</td></tr>`).join("");
+  $("ccm").textContent = d.ccm.map(r=>r.map(x=>x.toFixed(4).padStart(9)).join("  ")).join("\n");
+  $("patches").innerHTML = d.dE_derived.map((v,i)=>
+    `<div class="pr"><span>${i+1}. ${d.patch_names[i]}</span>`
+    + `<span style="color:${deCol(v)};font-variant-numeric:tabular-nums">${v.toFixed(1)}</span></div>`).join("");
+}
+$("copyCCM").onclick = () => { navigator.clipboard.writeText($("ccm").textContent);
+  setStatus("CCM copied","ok"); };
+
+refreshInfo(); setInterval(refreshInfo, 4000);
+</script>
+</body>
+</html>

@@ -39,3 +39,6 @@ codegen/
 *.sbproj.backup
 *.sbproj.bak
 metro_server/__pycache__/
+metro_server/tests/__pycache__/
+# regenerable MTF regression reference (produced by gen_ref.m)
+metro_server/tests/jslant_ref.mat

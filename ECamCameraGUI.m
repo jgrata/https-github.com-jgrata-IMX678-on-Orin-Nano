@@ -429,8 +429,8 @@ classdef ECamCameraGUI < handle
             % the narrow panel; free-text lines WordWrap. Explicit Layout so the
             % buttons always render (a spanning auto-placed child hides them).
             p3 = uipanel(gl,'Title','Result (dE = CIELAB error)');
-            g3 = uigridlayout(p3,[7 3]); g3.ColumnWidth={'fit','1x','1x'};
-            g3.RowHeight={'fit','fit','fit','fit','fit','fit','fit'}; g3.RowSpacing=4;
+            g3 = uigridlayout(p3,[8 3]); g3.ColumnWidth={'fit','1x','1x'};
+            g3.RowHeight={'fit','fit','fit','fit','fit','fit','fit','fit'}; g3.RowSpacing=4;
             kc = [0.68 0.74 0.85];                                   % key-label colour
             kN=uilabel(g3,'Text','displayed dE','FontColor',kc, ...
                 'Tooltip','dE of the currently DISPLAYED render (with the Display CCM shown in the status band).'); kN.Layout.Row=1; kN.Layout.Column=1;
@@ -456,6 +456,15 @@ classdef ECamCameraGUI < handle
             b3.Layout.Row=6; b3.Layout.Column=1;
             app.h.ccStatus=uilabel(g3,'Text','pick a chart and Measure','FontColor',[0.7 0.8 1.0],'WordWrap','on');
             app.h.ccStatus.Layout.Row=7; app.h.ccStatus.Layout.Column=[1 3];
+            bDn=uibutton(g3,'Text','Show none','ButtonPushedFcn',@(~,~)app.colorRenderCCM('none'), ...
+                'Tooltip','Re-render the current capture with gray-world WB only (no CCM). Instant — same pixels, CCM swapped.');
+            bDn.Layout.Row=8; bDn.Layout.Column=1;
+            bDv=uibutton(g3,'Text','Show vendor','ButtonPushedFcn',@(~,~)app.colorRenderCCM('vendor'), ...
+                'Tooltip','Re-render the current capture with the VENDOR CCM — revert from a derived-CCM display.');
+            bDv.Layout.Row=8; bDv.Layout.Column=2;
+            bDd=uibutton(g3,'Text','Show derived','ButtonPushedFcn',@(~,~)app.colorRenderCCM('derived'), ...
+                'Tooltip','Re-render with the DERIVED CCM. Note: a chart-fit CCM extrapolates poorly outside the chart gamut (bright metal/specular can go magenta).');
+            bDd.Layout.Row=8; bDd.Layout.Column=3;
             % History
             p4 = uipanel(gl,'Title','ColorChecker history');
             g4 = uigridlayout(p4,[2 4]); g4.ColumnWidth={'fit','1x','fit','1x'}; g4.RowHeight={'fit','fit'};
@@ -1183,6 +1192,61 @@ classdef ECamCameraGUI < handle
             [rad, meta] = app.cam.captureHDROnboard(exps, 'gain', g, 'fullpreview', true, 'preview', false);
             app.ColorRad = rad;                              % linear radiance for ROI sampling
             if isfield(meta,'fullPreviewImage'), app.showRGB(meta.fullPreviewImage); end
+        end
+        function colorRenderCCM(app, which)
+            %COLORRENDERCCM  Re-render the LAST captured chart radiance with a chosen
+            %  display CCM (none/vendor/derived) — instant, same pixels, no capture.
+            %  Also commits cam.CCM so future server renders match. Lets you flip
+            %  back to vendor after a derived-CCM display corrupts out-of-gamut areas.
+            if isempty(app.ColorRad)
+                app.setColorStatus('Capture/Measure a chart first (no radiance to re-render).',[1 .6 .3]); return
+            end
+            switch which
+                case 'derived'
+                    if isempty(app.ColorLast) || ~isfield(app.ColorLast,'ccm') || ...
+                            ~isnumeric(app.ColorLast.ccm) || isempty(app.ColorLast.ccm)
+                        app.setColorStatus('No derived CCM yet — run Measure or k-fold first.',[1 .6 .3]); return
+                    end
+                    app.cam.CCM = app.ColorLast.ccm;
+                case 'vendor', app.cam.CCM = 'vendor';
+                otherwise,     app.cam.CCM = [];
+            end
+            app.showRGB(app.renderRadiance(app.ColorRad, app.cam.CCM));
+            try                                            % keep the Camera-tab radio in sync
+                nm = 'none';
+                if ischar(app.cam.CCM), nm = 'vendor';
+                elseif isnumeric(app.cam.CCM) && ~isempty(app.cam.CCM), nm = 'derived'; end
+                rb = findall(app.h.ccmGroup,'Type','uiradiobutton','Text',nm);
+                if ~isempty(rb), app.h.ccmGroup.SelectedObject = rb(1); end
+            catch
+            end
+            app.setColorStatus(sprintf('Display CCM -> %s (re-rendered current capture).', app.ccmStateStr()),[0.6 0.9 0.6]);
+        end
+        function rgb8 = renderRadiance(app, rad, ccm)
+            % Fast client render matching the server's neutral/vendor/derived logic
+            % (2x2 RGGB bin -> WB or CCM -> robust normalise + gamma). Display only.
+            [H,W]=size(rad); He=2*floor(H/2); We=2*floor(W/2); f=double(rad(1:He,1:We));
+            R=f(1:2:end,1:2:end); Gr=f(1:2:end,2:2:end); Gb=f(2:2:end,1:2:end); B=f(2:2:end,2:2:end);
+            rgb=cat(3,R,0.5*(Gr+Gb),B);
+            if isempty(ccm)                              % none: gray-world WB
+                rgb = app.grayWorld(rgb);
+            elseif ischar(ccm) || isstring(ccm)          % vendor: WB then vendor CCM
+                rgb = app.applyCCMimg(app.grayWorld(rgb), app.VENDOR_CCM);
+            else                                         % derived 3x3 (folds WB)
+                rgb = app.applyCCMimg(rgb, ccm);
+            end
+            rgb = max(rgb,0);
+            v = sort(rgb(:)); n = v(max(1,round(numel(v)*0.995)));   % 99.5 pct (no Stats tbx)
+            img = min(rgb / max(n,eps), 1) .^ (1/2.2);
+            rgb8 = uint8(img*255);
+        end
+        function rgb = grayWorld(~, rgb)
+            mu = squeeze(mean(mean(rgb,1),2));
+            rgb(:,:,1)=rgb(:,:,1)*mu(2)/max(mu(1),eps);
+            rgb(:,:,3)=rgb(:,:,3)*mu(2)/max(mu(3),eps);
+        end
+        function out = applyCCMimg(~, rgb, ccm)
+            sz=size(rgb); out=reshape(reshape(rgb,[],3)*ccm', sz);
         end
         function colorKfold(app)
             %COLORKFOLD  Rigorous N-capture measure with leave-one-capture-out

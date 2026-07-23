@@ -127,6 +127,71 @@ def _swatch_image(after_lin, ref_lin, cell=54, gap=3):
     return _b64png(img)
 
 
+def _de2000(lab1, lab2):
+    """CIEDE2000 colour difference (kL=kC=kH=1), vectorized over N patches.
+    Perceptually uniform -- the metric to trust over plain ΔE76, which over-weights
+    chroma/blue error and misrepresents perceived accuracy."""
+    lab1 = np.asarray(lab1, float); lab2 = np.asarray(lab2, float)
+    L1, a1, b1 = lab1[:, 0], lab1[:, 1], lab1[:, 2]
+    L2, a2, b2 = lab2[:, 0], lab2[:, 1], lab2[:, 2]
+    C1 = np.hypot(a1, b1); C2 = np.hypot(a2, b2)
+    Cbar = (C1 + C2) / 2.0
+    G = 0.5 * (1 - np.sqrt(Cbar ** 7 / (Cbar ** 7 + 25.0 ** 7)))
+    a1p = (1 + G) * a1; a2p = (1 + G) * a2
+    C1p = np.hypot(a1p, b1); C2p = np.hypot(a2p, b2)
+    h1p = np.degrees(np.arctan2(b1, a1p)) % 360.0
+    h2p = np.degrees(np.arctan2(b2, a2p)) % 360.0
+    dLp = L2 - L1
+    dCp = C2p - C1p
+    dhp = h2p - h1p
+    dhp = np.where(dhp > 180, dhp - 360, dhp)
+    dhp = np.where(dhp < -180, dhp + 360, dhp)
+    dhp = np.where(C1p * C2p == 0, 0.0, dhp)
+    dHp = 2 * np.sqrt(C1p * C2p) * np.sin(np.radians(dhp) / 2.0)
+    Lbarp = (L1 + L2) / 2.0
+    Cbarp = (C1p + C2p) / 2.0
+    hsum = h1p + h2p; hdiff = np.abs(h1p - h2p)
+    hbarp = np.where(C1p * C2p == 0, hsum,
+             np.where(hdiff <= 180, hsum / 2.0,
+              np.where(hsum < 360, (hsum + 360) / 2.0, (hsum - 360) / 2.0)))
+    T = (1 - 0.17 * np.cos(np.radians(hbarp - 30))
+         + 0.24 * np.cos(np.radians(2 * hbarp))
+         + 0.32 * np.cos(np.radians(3 * hbarp + 6))
+         - 0.20 * np.cos(np.radians(4 * hbarp - 63)))
+    dTheta = 30 * np.exp(-(((hbarp - 275) / 25.0) ** 2))
+    RC = 2 * np.sqrt(Cbarp ** 7 / (Cbarp ** 7 + 25.0 ** 7))
+    SL = 1 + (0.015 * (Lbarp - 50) ** 2) / np.sqrt(20 + (Lbarp - 50) ** 2)
+    SC = 1 + 0.045 * Cbarp
+    SH = 1 + 0.015 * Cbarp * T
+    RT = -np.sin(np.radians(2 * dTheta)) * RC
+    return np.sqrt((dLp / SL) ** 2 + (dCp / SC) ** 2 + (dHp / SH) ** 2
+                   + RT * (dCp / SC) * (dHp / SH))
+
+
+def _fit_ccm(chart, ref):
+    """Scale-conditioned least-squares raw-linear -> linear-sRGB CCM. Returns M
+    with apply = rgb @ M.T."""
+    sc = ref.mean() / max(chart.mean(), 1e-9)
+    A, *_ = np.linalg.lstsq(chart * sc, ref, rcond=None)
+    return sc * A.T
+
+
+def _loo_de2000(chart, ref, ref_lab):
+    """Leave-one-out cross-validated ΔE00 for the derived CCM: each patch is
+    predicted by a CCM fit on the OTHER 23, so it measures generalization, not
+    self-fit. This is the honest number to compare against vendor (which never
+    saw the data). Resubstitution ΔE (fit==test) is always optimistic."""
+    n = len(chart)
+    de = np.zeros(n)
+    keep = np.arange(n)
+    for i in range(n):
+        m = keep != i
+        M = _fit_ccm(chart[m], ref[m])
+        pred = chart[i] @ np.asarray(M).T
+        de[i] = _de2000(_lin2lab(pred[None, :]), ref_lab[i:i + 1])[0]
+    return de
+
+
 def meter_levels(frame, maxv, black_level=None):
     """Detect the chart and return the brightest patch-channel and darkest patch,
     as fractions of full signal (black-level subtracted). Orientation-independent:
@@ -179,16 +244,17 @@ def analyze(frame, maxv, black_level=None):
     order = perm.tolist()
     chart = chart[perm]
 
-    sc = ref.mean() / max(chart.mean(), 1e-9)
-    A, *_ = np.linalg.lstsq(chart * sc, ref, rcond=None)
-    M = sc * A.T
-    resid = float(np.sqrt(np.mean((chart * sc @ A - ref) ** 2)))
+    # derived CCM fit on all 24 patches (resubstitution) -> optimistic ΔE00
+    M = _fit_ccm(chart, ref)
     after = chart @ np.asarray(M).T
-    dE_derived = np.linalg.norm(_lin2lab(after) - ref_lab, axis=1)
-
+    dE_derived = _de2000(_lin2lab(after), ref_lab)
+    resid = float(np.sqrt(np.mean((np.clip(after, 0, 1) - ref) ** 2)))   # clip-consistent
+    # leave-one-out cross-validated ΔE00 -> the HONEST generalization number
+    dE_xval = _loo_de2000(chart, ref, ref_lab)
+    # vendor CCM (no fit -> unbiased); gray-world scale to compare on equal footing
     s3 = ref.mean(0) / np.maximum(chart.mean(0), 1e-9)
     vend = np.asarray(chart * s3) @ np.asarray(hdr.VENDOR_CCM).T
-    dE_vendor = np.linalg.norm(_lin2lab(vend) - ref_lab, axis=1)
+    dE_vendor = _de2000(_lin2lab(vend), ref_lab)
 
     cct, illum = _illuminant(np.mean(chart[18:21], axis=0))
 
@@ -199,6 +265,7 @@ def analyze(frame, maxv, black_level=None):
 
     return {
         "detected": True,
+        "metric": "CIEDE2000",
         "black_level": float(black_level),
         "cost": float(cc.getCost()),
         "orientation": orient,
@@ -206,11 +273,16 @@ def analyze(frame, maxv, black_level=None):
         "clip_frac": float((frame >= maxv).mean()),
         "illum_cct": cct,
         "illum_name": illum,
+        # vendor CCM (unbiased) vs derived: report BOTH the optimistic self-fit and
+        # the honest cross-validated ΔE00. Compare vendor vs xval to judge "does ours win".
         "dE_vendor_mean": float(dE_vendor.mean()),
         "dE_vendor_max": float(dE_vendor.max()),
-        "dE_derived_mean": float(dE_derived.mean()),
+        "dE_derived_mean": float(dE_derived.mean()),      # resubstitution (fit==test, optimistic)
         "dE_derived_max": float(dE_derived.max()),
-        "dE_derived": dE_derived.round(3).tolist(),
+        "dE_xval_mean": float(dE_xval.mean()),            # leave-one-out (honest)
+        "dE_xval_max": float(dE_xval.max()),
+        "derived_beats_vendor": bool(dE_xval.mean() < dE_vendor.mean()),
+        "dE_derived": dE_xval.round(3).tolist(),          # per-patch = cross-validated
         "dE_vendor": dE_vendor.round(3).tolist(),
         "patch_names": PATCH_NAMES,
         "ccm": np.asarray(M).round(5).tolist(),

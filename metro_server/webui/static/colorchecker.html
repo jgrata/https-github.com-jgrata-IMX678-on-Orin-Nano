@@ -75,11 +75,13 @@
 
   <div class="col right">
     <div class="card" id="resultCard" style="display:none">
-      <h2>Result</h2>
-      <div>current (vendor CCM) &nbsp; <span class="big" id="deVend">–</span> <span class="pill">mean ΔE76</span></div>
-      <div style="margin-top:6px">with derived CCM &nbsp; <span class="big" id="deDer">–</span>
+      <h2>Result <span class="pill" id="metricPill">CIEDE2000</span></h2>
+      <div>vendor CCM &nbsp; <span class="big" id="deVend">–</span> <span class="pill">mean ΔE00</span></div>
+      <div style="margin-top:6px">derived CCM (cross-val) &nbsp; <span class="big" id="deDer">–</span>
         <span class="pill" id="deDerMax"></span></div>
-      <table style="margin-top:10px"><tbody id="meta"></tbody></table>
+      <div id="verdict" style="margin-top:6px;font-weight:600">–</div>
+      <div class="hint" id="fitNote"></div>
+      <table style="margin-top:8px"><tbody id="meta"></tbody></table>
     </div>
 
     <div class="card" id="swatchCard" style="display:none">
@@ -100,7 +102,7 @@
     </div>
 
     <div class="card" id="patchCard" style="display:none">
-      <h2>Per-patch ΔE (derived)</h2>
+      <h2>Per-patch ΔE00 (derived, cross-val)</h2>
       <div class="patchgrid" id="patches"></div>
       <div class="hint">green &lt;3 · amber 3–6 · red &gt;6</div>
     </div>
@@ -165,9 +167,23 @@ function render(d){
   $("overlay").src = d.overlay_png; $("overlayCard").style.display="";
   $("swatch").src  = d.swatch_png;  $("swatchCard").style.display="";
   $("resultCard").style.display=""; $("ccmCard").style.display=""; $("patchCard").style.display="";
+  if(d.metric) $("metricPill").textContent = d.metric;
+  const xv = (d.dE_xval_mean!=null) ? d.dE_xval_mean : d.dE_derived_mean;   // honest number
+  const xvMax = (d.dE_xval_max!=null) ? d.dE_xval_max : d.dE_derived_max;
   $("deVend").textContent = d.dE_vendor_mean.toFixed(2); $("deVend").style.color = deCol(d.dE_vendor_mean);
-  $("deDer").textContent  = d.dE_derived_mean.toFixed(2); $("deDer").style.color = deCol(d.dE_derived_mean);
-  $("deDerMax").textContent = "max "+d.dE_derived_max.toFixed(1);
+  $("deDer").textContent  = xv.toFixed(2); $("deDer").style.color = deCol(xv);
+  $("deDerMax").textContent = "max "+xvMax.toFixed(1);
+  // verdict: compare unbiased vendor vs cross-validated derived
+  if(d.derived_beats_vendor!=null){
+    const win = d.derived_beats_vendor, delta=(d.dE_vendor_mean-xv);
+    $("verdict").textContent = win
+      ? `derived CCM wins by ${delta.toFixed(2)} ΔE00 (cross-validated)`
+      : `vendor CCM is as good or better (Δ ${Math.abs(delta).toFixed(2)})`;
+    $("verdict").style.color = win ? "var(--ok)" : "var(--warn)";
+  }
+  $("fitNote").textContent = (d.dE_derived_mean!=null)
+    ? `self-fit ${d.dE_derived_mean.toFixed(2)} (optimistic) vs cross-val ${xv.toFixed(2)} (reported); gap = overfit`
+    : "";
   const clip=(d.clip_frac*100), clipCls = clip>0.5?"bad":(clip>0.05?"warn":"ok");
   $("meta").innerHTML = [
     ["illuminant", `${d.illum_name} (~${Math.round(d.illum_cct)} K)`],

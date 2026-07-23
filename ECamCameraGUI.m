@@ -477,30 +477,38 @@ classdef ECamCameraGUI < handle
             bt=uibutton(g4,'Text','This measurement','ButtonPushedFcn',@(~,~)app.doColorThis(), ...
                 'Tooltip','Copy just the current measurement (colours, dE, CCM, config) to the base workspace.');
             bt.Layout.Row=2; bt.Layout.Column=[3 4];
-            % Rigorous (N-capture k-fold) — CIEDE2000, cross-validated vendor-vs-derived
-            p5 = uipanel(gl,'Title','Rigorous k-fold (CIEDE2000, cross-validated)');
-            g5 = uigridlayout(p5,[4 4]); g5.ColumnWidth={'fit','1x','fit','1x'};
-            g5.RowHeight={'fit','fit','fit','fit'}; g5.RowSpacing=4;
-            lN=uilabel(g5,'Text','N captures'); lN.Layout.Row=1; lN.Layout.Column=1;
+            % Capture setup + rigorous k-fold (CIEDE2000, cross-validated)
+            p5 = uipanel(gl,'Title','Capture setup + rigorous k-fold (CIEDE2000)');
+            g5 = uigridlayout(p5,[5 4]); g5.ColumnWidth={'fit','1x','fit','1x'};
+            g5.RowHeight={'fit','fit','fit','fit','fit'}; g5.RowSpacing=4;
+            bMet=uibutton(g5,'Text','Auto-expose (meter chart)','ButtonPushedFcn',@(~,~)app.colorAutoExpose(), ...
+                'Tooltip',['Meter the chart''s own patches: drop exposure until the brightest patch channel is ' ...
+                'unclipped, then set an HDR bracket (brightest ~90% FS, darkest ~35% FS). Sets Exposures.']);
+            bMet.Layout.Row=1; bMet.Layout.Column=[1 2];
+            bDk=uibutton(g5,'Text','Check dark (cap lens)','ButtonPushedFcn',@(~,~)app.colorDarkCheck(), ...
+                'Tooltip',['CAP THE LENS first. Captures a short + long dark and tests light-tightness ' ...
+                '(exposure-invariant mean, uniform, ~pedestal) before trusting a measured black level.']);
+            bDk.Layout.Row=1; bDk.Layout.Column=[3 4];
+            lN=uilabel(g5,'Text','N captures'); lN.Layout.Row=2; lN.Layout.Column=1;
             app.h.ccN=uieditfield(g5,'numeric','Value',3,'Limits',[2 30],'RoundFractionalValues',true);
-            app.h.ccN.Layout.Row=1; app.h.ccN.Layout.Column=2;
-            lRt=uilabel(g5,'Text','Route'); lRt.Layout.Row=1; lRt.Layout.Column=3;
+            app.h.ccN.Layout.Row=2; app.h.ccN.Layout.Column=2;
+            lRt=uilabel(g5,'Text','Route'); lRt.Layout.Row=2; lRt.Layout.Column=3;
             app.h.ccRoute=uidropdown(g5,'Items',{'repeats','poses','intensity'},'Value','repeats', ...
                 'Tooltip',['repeats = same framing (noise/repeatability); poses = reposition/rotate the ' ...
                 'chart between captures (placement/glare); intensity = change illuminant level between ' ...
                 'captures (sensor linearity / CCM intensity-invariance).']);
-            app.h.ccRoute.Layout.Row=1; app.h.ccRoute.Layout.Column=4;
-            lM=uilabel(g5,'Text','CCM model'); lM.Layout.Row=2; lM.Layout.Column=1;
+            app.h.ccRoute.Layout.Row=2; app.h.ccRoute.Layout.Column=4;
+            lM=uilabel(g5,'Text','CCM model'); lM.Layout.Row=3; lM.Layout.Column=1;
             app.h.ccModel=uidropdown(g5,'Items',{'3x3 linear','+ root-poly deg2','+ root-poly deg3'}, ...
                 'Value','3x3 linear','Tooltip','Root-poly is analysis only (compare xval to the 3x3); the exported CCM stays 3x3.');
-            app.h.ccModel.Layout.Row=2; app.h.ccModel.Layout.Column=2;
+            app.h.ccModel.Layout.Row=3; app.h.ccModel.Layout.Column=2;
             app.h.ccKfoldBtn=uibutton(g5,'Text','Run k-fold','ButtonPushedFcn',@(~,~)app.colorKfold(), ...
                 'Tooltip','Acquire N captures, fit + leave-one-capture-out cross-validate, and report vendor vs derived ΔE00.');
-            app.h.ccKfoldBtn.Layout.Row=2; app.h.ccKfoldBtn.Layout.Column=[3 4];
+            app.h.ccKfoldBtn.Layout.Row=3; app.h.ccKfoldBtn.Layout.Column=[3 4];
             app.h.ccKfoldRes=uilabel(g5,'Text','—','WordWrap','on','FontWeight','bold');
-            app.h.ccKfoldRes.Layout.Row=3; app.h.ccKfoldRes.Layout.Column=[1 4];
+            app.h.ccKfoldRes.Layout.Row=4; app.h.ccKfoldRes.Layout.Column=[1 4];
             app.h.ccKfoldVerdict=uilabel(g5,'Text','','WordWrap','on','FontColor',[0.7 0.8 1.0]);
-            app.h.ccKfoldVerdict.Layout.Row=4; app.h.ccKfoldVerdict.Layout.Column=[1 4];
+            app.h.ccKfoldVerdict.Layout.Row=5; app.h.ccKfoldVerdict.Layout.Column=[1 4];
             % Swatch comparison (measured top / reference bottom)
             app.h.swatchAx = uiaxes(gl); app.h.swatchAx.XTick=[]; app.h.swatchAx.YTick=[];
             title(app.h.swatchAx,'24 patches: top = measured+CCM, bottom = reference','Color','w');
@@ -1247,6 +1255,102 @@ classdef ECamCameraGUI < handle
         end
         function out = applyCCMimg(~, rgb, ccm)
             sz=size(rgb); out=reshape(reshape(rgb,[],3)*ccm', sz);
+        end
+        function colorAutoExpose(app)
+            if ~app.cam.IsConnected, uialert(app.Fig,'Connect first.','Auto-expose'); return; end
+            app.stopLive();
+            app.withBusy('metering chart...', @() app.colorAutoExposeRun());
+        end
+        function colorAutoExposeRun(app)
+            % Closed loop: drop exposure until the brightest patch channel is
+            % unclipped, then set an HDR bracket (ColorAnalysis.meterBracket) that
+            % puts the brightest ~90% FS (short leg) and darkest ~35% FS (long leg).
+            maxv = 2^double(app.cam.native_bpp) - 1; black = 200; if maxv < 2000, black = 50; end
+            curExp = double(app.cam.exposure_ns); hi = 1; lo = 0.01; ok = false;
+            for it = 1:5
+                raw = double(app.cam.grab());
+                [rgbLin, rgb8] = app.binLinearAndPreview(raw, maxv, black);
+                [chart, sc] = app.detectChartObj(rgb8);
+                if isempty(chart)
+                    app.setColorStatus('meter: chart not detected — frame the chart and retry.',[1 .6 .3]); return
+                end
+                rois = vertcat(chart.ColorROIs.ROI) / sc;
+                [hi, lo] = app.meterLevels(rgbLin, rois); ok = true;
+                if hi >= 0.97 && curExp > 1e5
+                    curExp = max(round(curExp*0.5), 1e5); app.cam.exposure_ns = curExp; pause(0.8); continue
+                end
+                break
+            end
+            if ~ok, return; end
+            [~, ~, legs, ratio] = ColorAnalysis.meterBracket(hi, lo, curExp);
+            legsMs = legs/1e6;
+            app.h.ccExps.Value = char(strjoin(compose('%.3g', legsMs), ', '));
+            app.setColorStatus(sprintf('metered: chart DR %.0f:1 -> bracket %.1f:1, exposures set: %s ms', ...
+                hi/max(lo,1e-6), ratio, char(strjoin(compose('%.3g',legsMs), ', '))), [0.6 0.9 0.6]);
+        end
+        function [rgbLin, rgb8] = binLinearAndPreview(~, raw, maxv, black)
+            [H,W] = size(raw); He=2*floor(H/2); We=2*floor(W/2);
+            f = max(double(raw(1:He,1:We)) - black, 0);
+            R=f(1:2:end,1:2:end); Gr=f(1:2:end,2:2:end); Gb=f(2:2:end,1:2:end); B=f(2:2:end,2:2:end);
+            rgbLin = cat(3,R,0.5*(Gr+Gb),B) / (maxv - black);
+            w = rgbLin; mu = squeeze(mean(mean(w,1),2));
+            w(:,:,1)=w(:,:,1)*mu(2)/max(mu(1),eps); w(:,:,3)=w(:,:,3)*mu(2)/max(mu(3),eps);
+            v = sort(w(:)); n = v(max(1,round(numel(v)*0.995)));
+            rgb8 = uint8(min(w/max(n,eps),1).^(1/2.2)*255);
+        end
+        function [hi, lo] = meterLevels(~, rgbLin, rois)
+            % Sample central 50% of each ROI (in rgbLin's half-res coords). hi = the
+            % brightest single channel (clip risk); lo = the darkest patch mean.
+            [H,W,~] = size(rgbLin); n = size(rois,1); pm = nan(n,3);
+            for k = 1:n
+                x=rois(k,1); y=rois(k,2); w=rois(k,3); h=rois(k,4);
+                x0=max(round(x+0.25*w),1); x1=min(round(x+0.75*w),W);
+                y0=max(round(y+0.25*h),1); y1=min(round(y+0.75*h),H);
+                if x1<x0 || y1<y0, continue; end
+                pat = rgbLin(y0:y1, x0:x1, :);
+                pm(k,:) = [median(reshape(pat(:,:,1),[],1)) median(reshape(pat(:,:,2),[],1)) ...
+                           median(reshape(pat(:,:,3),[],1))];
+            end
+            pm = pm(~any(isnan(pm),2),:);
+            if isempty(pm), hi=1; lo=0.01; return; end
+            hi = max(pm(:)); lo = min(mean(pm,2));
+        end
+        function colorDarkCheck(app)
+            if ~app.cam.IsConnected, uialert(app.Fig,'Connect first.','Dark check'); return; end
+            app.stopLive();
+            sel = uiconfirm(app.Fig,'Cap the lens now, then Continue.','Dark check', ...
+                'Options',{'Continue','Cancel'},'DefaultOption',1,'CancelOption',2);
+            if strcmp(sel,'Cancel'), return; end
+            app.withBusy('dark check (short + long exposure)...', @() app.colorDarkCheckRun());
+        end
+        function colorDarkCheckRun(app)
+            maxv = 2^double(app.cam.native_bpp) - 1; ped = 200; if maxv < 2000, ped = 50; end
+            orig = double(app.cam.exposure_ns);
+            ss = app.darkStats(0.2e6); ll = app.darkStats(30e6);
+            app.cam.exposure_ns = round(orig);
+            leak = ll.mean - ss.mean;
+            uniform   = ll.blockspread < 8 && abs(ll.gradV) < 4 && abs(ll.gradH) < 4;
+            invariant = leak < 2;
+            r = {};
+            if ~invariant, r{end+1} = sprintf('mean rises %.1f DN (0.2->30 ms, %.3f DN/ms) — light accumulating', leak, leak/29.8); end %#ok<AGROW>
+            if ~uniform,   r{end+1} = sprintf('non-uniform (block spread %.1f, grad %.1f/%.1f) — directional leak', ll.blockspread, ll.gradV, ll.gradH); end %#ok<AGROW>
+            if abs(ss.mean-ped) > 6, r{end+1} = sprintf('mean %.1f vs pedestal %.0f', ss.mean, ped); end %#ok<AGROW>
+            if ~(invariant && uniform)
+                app.setColorStatus(sprintf('DARK CHECK: possible LEAK — use the scalar pedestal, not a measured dark.  %s', strjoin(r,'; ')), [0.92 0.30 0.22]);
+            else
+                app.setColorStatus(sprintf('DARK CHECK: light-tight — leak %.2f DN over ramp, mean %.1f≈pedestal %.0f, std %.1f, uniform.  Measured dark is trustworthy.', leak, ss.mean, ped, ll.std), [0.35 0.80 0.40]);
+            end
+        end
+        function s = darkStats(app, expNs)
+            app.cam.exposure_ns = round(expNs); pause(1.0); app.cam.grab();   % settle + discard a frame
+            f = double(app.cam.grab());
+            He=2*floor(size(f,1)/2); We=2*floor(size(f,2)/2); f = f(1:He,1:We);
+            s.mean = mean(f(:)); s.std = std(f(:));
+            bh = floor(He/8); bw = floor(We/8); bl = zeros(8,8);
+            for i=1:8, for j=1:8, bl(i,j) = mean(f((i-1)*bh+(1:bh), (j-1)*bw+(1:bw)), 'all'); end, end
+            s.blockspread = max(bl(:)) - min(bl(:));
+            s.gradV = mean(f(1:floor(He/2),:),'all') - mean(f(floor(He/2)+1:end,:),'all');
+            s.gradH = mean(f(:,1:floor(We/2)),'all') - mean(f(:,floor(We/2)+1:end),'all');
         end
         function colorKfold(app)
             %COLORKFOLD  Rigorous N-capture measure with leave-one-capture-out

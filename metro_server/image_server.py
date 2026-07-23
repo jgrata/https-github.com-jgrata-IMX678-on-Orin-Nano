@@ -68,6 +68,8 @@ CMD_METRICS     = 0x08   # onboard intrinsic sensor metrics (read noise/DR/...)
 CMD_DERIVE_CCM  = 0x09   # solve a 3x3 CCM from an in-frame X-Rite chart
 CMD_MEASURE_DARK = 0x0A  # capture + cache a per-pixel dark frame (lens capped)
 CMD_BUILD_HOTMASK = 0x0B # derive + cache a hot-pixel (defect) mask from a dark
+CMD_RELEASE_CAM = 0x0C   # pause prefetch + stop raw_capture -> free Argus (for ISP mode)
+CMD_REACQUIRE_CAM = 0x0D # restart raw_capture + resume prefetch (back to RAW mode)
 
 
 def ensure_dir(p):
@@ -462,6 +464,7 @@ class Camera:
                  bit_depth=DEFAULT_BIT_DEPTH,
                  lossless=DEFAULT_LOSSLESS):
         self.rcp         = rcp
+        self.released    = False        # True when Argus handed off to ISP mode
         self.sensor_mode = sensor_mode
         self.fps         = fps
         self.exposure_ns = exposure_ns
@@ -676,6 +679,7 @@ class Camera:
             'method':             'CUDA EGL RAW16 TRUE 10-bit (persistent session)',
             'note':               str(self.bit_depth)+'-bit RAW | ~0.5s/frame',
             'pipeline_running':   self.rcp.is_alive(),
+            'camera_released':    self.released,
             'server_time':        time.time(),   # UTC epoch — client uses for entry timestamps
         }
 
@@ -777,7 +781,42 @@ class ClientHandler(threading.Thread):
             CMD_DERIVE_CCM:  lambda: self._derive_ccm(pay),
             CMD_MEASURE_DARK: lambda: self._measure_dark(pay),
             CMD_BUILD_HOTMASK: lambda: self._build_hotmask(pay),
+            CMD_RELEASE_CAM:  self._release_cam,
+            CMD_REACQUIRE_CAM: self._reacquire_cam,
         }.get(cmd, lambda: self._err("unknown "+hex(cmd)))()
+
+    def _release_cam(self):
+        # Free Argus so an ISP-mode consumer (nvarguscamerasrc) can take the
+        # camera: pause the prefetcher and stop raw_capture. Idempotent.
+        try:
+            cam = self.camera
+            pf = getattr(cam, 'prefetcher', None)
+            if pf is not None:
+                pf.pause()
+            if cam.rcp.is_alive():
+                cam.rcp.stop()
+            cam.released = True
+            print("[Server] camera RELEASED (Argus free for ISP mode)")
+            self._resp(b'OK')
+        except Exception as e:
+            self._err(str(e))
+
+    def _reacquire_cam(self):
+        # Re-take the camera on the RAW path: restart raw_capture (~7s Argus init)
+        # and resume the prefetcher. Idempotent.
+        try:
+            cam = self.camera
+            if not cam.rcp.is_alive():
+                if not cam.rcp.start():
+                    self._err("raw_capture failed to restart"); return
+            pf = getattr(cam, 'prefetcher', None)
+            if pf is not None:
+                pf.resume()
+            cam.released = False
+            print("[Server] camera REACQUIRED (RAW mode)")
+            self._resp(b'OK')
+        except Exception as e:
+            self._err(str(e))
 
     def _set_params(self, pay):
         try:

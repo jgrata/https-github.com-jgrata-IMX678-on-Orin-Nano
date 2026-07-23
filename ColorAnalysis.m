@@ -50,6 +50,24 @@ classdef ColorAnalysis
             lab = reshape(rgb2lab(lin2rgb(reshape(lin,[],1,3))), [], 3);
         end
 
+        function ref = colorcheckerLinear()
+            %COLORCHECKERLINEAR  X-Rite ColorChecker Classic 24 patches as linear
+            %   sRGB [24x3] in [0,1] (BabelColor sRGB averages, D65), row-major
+            %   dark-skin first -- the fixed reference for k-fold across captures.
+            srgb = [115 82 68; 194 150 130; 98 122 157; 87 108 67; 133 128 177; 103 189 170;
+                    214 126 44; 80 91 166; 193 90 99; 94 60 108; 157 188 64; 224 163 46;
+                    56 61 150; 70 148 73; 175 54 60; 231 199 31; 187 86 149; 8 133 161;
+                    243 243 242; 200 200 200; 160 160 160; 122 122 121; 85 85 85; 52 52 52] / 255;
+            ref = ColorAnalysis.srgbToLinear(srgb);
+        end
+
+        function lin = srgbToLinear(c)
+            lin = zeros(size(c));
+            m = c <= 0.04045;
+            lin(m)  = c(m) / 12.92;
+            lin(~m) = ((c(~m) + 0.055) / 1.055) .^ 2.4;
+        end
+
         function M = fitCCM(meas, ref)
             %FITCCM  scale-conditioned 3x3, apply as rgb*M' (== GUI lsqCCM).
             sc = mean(ref(:))/max(mean(meas(:)),1e-9);

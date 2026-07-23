@@ -46,6 +46,7 @@ classdef ECamCameraGUI < handle
         ColorHist = struct([])      % ColorChecker measurement history (last N seconds)
         ColorLast = struct([])      % most recent ColorChecker result (for CCM export)
         ColorRad  = []              % last chart capture's linear radiance [H W] (for ROI sampling)
+        ColorKfold = struct([])     % last rigorous N-capture k-fold result (ColorAnalysis)
     end
 
     properties (Constant, Access = private)
@@ -359,7 +360,7 @@ classdef ECamCameraGUI < handle
         end
 
         function buildColorTab(app, tab)
-            gl = uigridlayout(tab,[5 1]); gl.RowHeight={'fit','fit','fit','fit','1x'}; gl.Scrollable='on';
+            gl = uigridlayout(tab,[6 1]); gl.RowHeight={'fit','fit','fit','fit','fit','1x'}; gl.Scrollable='on';
             % Acquire
             p1 = uipanel(gl,'Title','Acquire ColorChecker');
             g1 = uigridlayout(p1,[3 4]); g1.ColumnWidth={'fit','1x','fit','1x'};
@@ -424,6 +425,30 @@ classdef ECamCameraGUI < handle
             bt=uibutton(g4,'Text','This measurement','ButtonPushedFcn',@(~,~)app.doColorThis(), ...
                 'Tooltip','Copy just the current measurement (colours, dE, CCM, config) to the base workspace.');
             bt.Layout.Row=2; bt.Layout.Column=[3 4];
+            % Rigorous (N-capture k-fold) — CIEDE2000, cross-validated vendor-vs-derived
+            p5 = uipanel(gl,'Title','Rigorous k-fold (CIEDE2000, cross-validated)');
+            g5 = uigridlayout(p5,[4 4]); g5.ColumnWidth={'fit','1x','fit','1x'};
+            g5.RowHeight={'fit','fit','fit','fit'}; g5.RowSpacing=4;
+            lN=uilabel(g5,'Text','N captures'); lN.Layout.Row=1; lN.Layout.Column=1;
+            app.h.ccN=uieditfield(g5,'numeric','Value',3,'Limits',[2 30],'RoundFractionalValues',true);
+            app.h.ccN.Layout.Row=1; app.h.ccN.Layout.Column=2;
+            lRt=uilabel(g5,'Text','Route'); lRt.Layout.Row=1; lRt.Layout.Column=3;
+            app.h.ccRoute=uidropdown(g5,'Items',{'repeats','poses','intensity'},'Value','repeats', ...
+                'Tooltip',['repeats = same framing (noise/repeatability); poses = reposition/rotate the ' ...
+                'chart between captures (placement/glare); intensity = change illuminant level between ' ...
+                'captures (sensor linearity / CCM intensity-invariance).']);
+            app.h.ccRoute.Layout.Row=1; app.h.ccRoute.Layout.Column=4;
+            lM=uilabel(g5,'Text','CCM model'); lM.Layout.Row=2; lM.Layout.Column=1;
+            app.h.ccModel=uidropdown(g5,'Items',{'3x3 linear','+ root-poly deg2','+ root-poly deg3'}, ...
+                'Value','3x3 linear','Tooltip','Root-poly is analysis only (compare xval to the 3x3); the exported CCM stays 3x3.');
+            app.h.ccModel.Layout.Row=2; app.h.ccModel.Layout.Column=2;
+            app.h.ccKfoldBtn=uibutton(g5,'Text','Run k-fold','ButtonPushedFcn',@(~,~)app.colorKfold(), ...
+                'Tooltip','Acquire N captures, fit + leave-one-capture-out cross-validate, and report vendor vs derived ΔE00.');
+            app.h.ccKfoldBtn.Layout.Row=2; app.h.ccKfoldBtn.Layout.Column=[3 4];
+            app.h.ccKfoldRes=uilabel(g5,'Text','—','WordWrap','on','FontWeight','bold');
+            app.h.ccKfoldRes.Layout.Row=3; app.h.ccKfoldRes.Layout.Column=[1 4];
+            app.h.ccKfoldVerdict=uilabel(g5,'Text','','WordWrap','on','FontColor',[0.7 0.8 1.0]);
+            app.h.ccKfoldVerdict.Layout.Row=4; app.h.ccKfoldVerdict.Layout.Column=[1 4];
             % Swatch comparison (measured top / reference bottom)
             app.h.swatchAx = uiaxes(gl); app.h.swatchAx.XTick=[]; app.h.swatchAx.YTick=[];
             title(app.h.swatchAx,'24 patches: top = measured+CCM, bottom = reference','Color','w');
@@ -1114,6 +1139,85 @@ classdef ECamCameraGUI < handle
             [rad, meta] = app.cam.captureHDROnboard(exps, 'gain', g, 'fullpreview', true, 'preview', false);
             app.ColorRad = rad;                              % linear radiance for ROI sampling
             if isfield(meta,'fullPreviewImage'), app.showRGB(meta.fullPreviewImage); end
+        end
+        function colorKfold(app)
+            %COLORKFOLD  Rigorous N-capture measure with leave-one-capture-out
+            %  cross-validation (CIEDE2000). Reuses the proven one-shot capture/
+            %  detect/sample path per capture; all colour math via ColorAnalysis.
+            %  Route: repeats (noise) | poses (reposition) | intensity (illuminant).
+            if ~app.cam.IsConnected, uialert(app.Fig,'Connect first.','k-fold'); return; end
+            app.stopLive();
+            exps = str2double(strsplit(app.h.ccExps.Value,',')) * 1e6; exps = exps(~isnan(exps));
+            if isempty(exps), uialert(app.Fig,'Enter exposures in ms.','k-fold'); return; end
+            if strcmp(app.h.ccMode.SelectedObject.Text,'Single'), exps = exps(1); end
+            N = round(app.h.ccN.Value); route = app.h.ccRoute.Value;
+            g = app.h.ccGain.Value; model = app.h.ccModel.Value;
+            refC = ColorAnalysis.colorcheckerLinear();
+            measAll = []; foldId = []; ok = 0;
+            for k = 1:N
+                if k > 1 && ~strcmp(route,'repeats')
+                    if strcmp(route,'poses'), what = 'Reposition / rotate the chart';
+                    else,                     what = 'Change the illuminant intensity'; end
+                    sel = uiconfirm(app.Fig, sprintf('Capture %d of %d: %s, then Continue.', k, N, what), ...
+                        'k-fold', 'Options',{'Continue','Stop'}, 'DefaultOption',1, 'CancelOption',2);
+                    if strcmp(sel,'Stop'), break; end
+                end
+                app.setColorStatus(sprintf('k-fold capture %d/%d...', k, N),[1 1 0]); drawnow;
+                try
+                    app.colorCapture(exps, g);
+                    if isempty(app.ColorRad) || isempty(app.LastRGB), continue; end
+                    [chart, sc] = app.detectChartObj(app.LastRGB);
+                    if isempty(chart)
+                        app.setColorStatus(sprintf('capture %d: chart not detected — skipped', k),[1 .6 .3]); continue
+                    end
+                    rois = vertcat(chart.ColorROIs.ROI) / sc;
+                    if size(rois,1) ~= 24, continue; end
+                    meas = app.sampleROIsBayer(app.ColorRad, rois);        % 24x3 linear (ROI order)
+                    [~, measC, ~] = app.fitCCMoriented(meas, refC);        % orient to canonical order
+                    measAll = [measAll; measC]; foldId = [foldId; k*ones(24,1)]; ok = ok + 1; %#ok<AGROW>
+                catch e
+                    app.setColorStatus(sprintf('capture %d error: %s', k, e.message),[1 .4 .3]);
+                end
+            end
+            if ok < 2
+                app.setColorStatus(sprintf('k-fold needs >=2 good captures (got %d)', ok),[1 .4 .3]); return
+            end
+            refAll = repmat(refC, ok, 1);
+            isRP = contains(model,'root-poly'); degree = 2 + double(contains(model,'deg3'));
+            [deFitLin, deXvalLin] = ColorAnalysis.crossValDE(measAll, refAll, 'linear', [], foldId);
+            deFitRP = []; deXvalRP = [];
+            if isRP
+                [deFitRP, deXvalRP] = ColorAnalysis.crossValDE(measAll, refAll, 'rootpoly', degree, foldId);
+            end
+            s3 = mean(refAll) ./ max(mean(measAll),1e-9);              % per-channel gray-world
+            vend = (measAll .* s3) * app.VENDOR_CCM';
+            deVend = ColorAnalysis.deltaE2000(ColorAnalysis.linToLab(min(max(vend,0),1)), ...
+                                              ColorAnalysis.linToLab(refAll));
+            R = struct('nCaptures',ok, 'route',route, 'model',model, 'degree',degree, ...
+                'deVendor',deVend, 'deFitLin',deFitLin, 'deXvalLin',deXvalLin, ...
+                'deFitRP',deFitRP, 'deXvalRP',deXvalRP, ...
+                'measAll',measAll, 'refAll',refAll, 'foldId',foldId);
+            app.ColorKfold = R; app.colorKfoldDisplay(R);
+        end
+        function colorKfoldDisplay(app, R)
+            v = mean(R.deVendor); xl = mean(R.deXvalLin); fl = mean(R.deFitLin);
+            txt = sprintf('%d captures (%s) — ΔE00 mean:  vendor %.2f  |  3×3 xval %.2f (fit %.2f)', ...
+                R.nCaptures, R.route, v, xl, fl);
+            best = xl; bestName = 'derived 3×3';
+            if ~isempty(R.deXvalRP)
+                xr = mean(R.deXvalRP); fr = mean(R.deFitRP);
+                txt = [txt sprintf('  |  root-poly deg%d xval %.2f (fit %.2f)', R.degree, xr, fr)];
+                if xr < best, best = xr; bestName = sprintf('root-poly deg%d', R.degree); end
+            end
+            app.h.ccKfoldRes.Text = txt;
+            if best < v
+                app.h.ccKfoldVerdict.Text = sprintf('%s wins vs vendor by %.2f ΔE00 (cross-validated).', bestName, v-best);
+                app.h.ccKfoldVerdict.FontColor = [0.35 0.80 0.40];
+            else
+                app.h.ccKfoldVerdict.Text = sprintf('vendor is as good or better (by %.2f) — derived does not generalize past it.', best-v);
+                app.h.ccKfoldVerdict.FontColor = [0.90 0.80 0.20];
+            end
+            app.setColorStatus(sprintf('k-fold done: best derived %.2f vs vendor %.2f ΔE00', best, v), [0.6 0.9 0.6]);
         end
         function colorRun(app, corners, exps, g)
             [~, info] = app.cam.deriveCCM(corners, 'exposures', exps, 'gain', g);

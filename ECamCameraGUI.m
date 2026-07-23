@@ -109,15 +109,56 @@ classdef ECamCameraGUI < handle
             try, app.Fig.WindowButtonMotionFcn = @(~,~) app.onHover(); catch, end  % hover highlight
             app.buildMenus();
 
-            g = uigridlayout(app.Fig, [3 2]);
-            g.RowHeight    = {46, '1x', 150};
+            g = uigridlayout(app.Fig, [4 2]);
+            g.RowHeight    = {46, '1x', 40, 150};
             g.ColumnWidth  = {400, '1x'};
+            g.RowSpacing   = 8;
             g.BackgroundColor = [0.13 0.13 0.15];
 
             app.buildTopBar(g);        % row1, spans both cols
             app.buildControlTabs(g);   % row2 col1
             app.buildPreview(g);       % row2 col2
-            app.buildHistogram(g);     % row3, spans both cols
+            app.buildStatusBand(g);    % row3, spans both cols (large status + CCM badge)
+            app.buildHistogram(g);     % row4, spans both cols
+        end
+
+        function buildStatusBand(app, g)
+            % Large, always-visible status line (progress + results) + a persistent
+            % badge showing which CCM the DISPLAYED image is rendered with. Sits in
+            % the gap between the preview/panels and the histogram.
+            p = uipanel(g,'BorderType','none','BackgroundColor',[0.10 0.10 0.12]);
+            p.Layout.Row = 3; p.Layout.Column = [1 2];
+            gb = uigridlayout(p,[1 2]); gb.ColumnWidth={'1x','fit'};
+            gb.Padding=[12 2 12 2]; gb.BackgroundColor=[0.10 0.10 0.12];
+            app.h.statusBand = uilabel(gb,'Text','ready','FontSize',16,'FontWeight','bold', ...
+                'FontColor',[0.85 0.90 1.0],'VerticalAlignment','center');
+            app.h.statusBand.Layout.Row=1; app.h.statusBand.Layout.Column=1;
+            app.h.ccmBadge = uilabel(gb,'Text','Display CCM: —','FontSize',14,'FontWeight','bold', ...
+                'FontColor',[0.75 0.82 0.95],'HorizontalAlignment','right','VerticalAlignment','center');
+            app.h.ccmBadge.Layout.Row=1; app.h.ccmBadge.Layout.Column=2;
+        end
+        function setStatus(app, msg, col)
+            if nargin<3 || isempty(col), col=[0.85 0.90 1.0]; end
+            if isfield(app.h,'statusBand') && isvalid(app.h.statusBand)
+                app.h.statusBand.Text = msg; app.h.statusBand.FontColor = col;
+            end
+            drawnow limitrate;
+        end
+        function s = ccmStateStr(app)
+            s = '—';
+            try
+                c = app.cam.CCM;
+                if ischar(c) || isstring(c),          s = 'vendor';
+                elseif isnumeric(c) && ~isempty(c),   s = 'derived 3x3';
+                else,                                 s = 'none (gray-world WB)';
+                end
+            catch
+            end
+        end
+        function updateCCMBadge(app)
+            if isfield(app.h,'ccmBadge') && isvalid(app.h.ccmBadge)
+                app.h.ccmBadge.Text = ['Display CCM: ' app.ccmStateStr()];
+            end
         end
 
         function buildMenus(app)
@@ -391,9 +432,11 @@ classdef ECamCameraGUI < handle
             g3 = uigridlayout(p3,[7 3]); g3.ColumnWidth={'fit','1x','1x'};
             g3.RowHeight={'fit','fit','fit','fit','fit','fit','fit'}; g3.RowSpacing=4;
             kc = [0.68 0.74 0.85];                                   % key-label colour
-            kN=uilabel(g3,'Text','dE current','FontColor',kc); kN.Layout.Row=1; kN.Layout.Column=1;
+            kN=uilabel(g3,'Text','displayed dE','FontColor',kc, ...
+                'Tooltip','dE of the currently DISPLAYED render (with the Display CCM shown in the status band).'); kN.Layout.Row=1; kN.Layout.Column=1;
             app.h.ccDEnow=uilabel(g3,'Text','—','FontWeight','bold'); app.h.ccDEnow.Layout.Row=1; app.h.ccDEnow.Layout.Column=[2 3];
-            kW=uilabel(g3,'Text','dE with CCM','FontColor',kc); kW.Layout.Row=2; kW.Layout.Column=1;
+            kW=uilabel(g3,'Text','derived-CCM dE','FontColor',kc, ...
+                'Tooltip','dE if the freshly-DERIVED 3x3 were applied to the RAW sensor data (from this measurement).'); kW.Layout.Row=2; kW.Layout.Column=1;
             app.h.ccDEccm=uilabel(g3,'Text','—','FontWeight','bold'); app.h.ccDEccm.Layout.Row=2; app.h.ccDEccm.Layout.Column=[2 3];
             kR=uilabel(g3,'Text','residual','FontColor',kc); kR.Layout.Row=3; kR.Layout.Column=1;
             app.h.ccResid=uilabel(g3,'Text','—'); app.h.ccResid.Layout.Row=3; app.h.ccResid.Layout.Column=[2 3];
@@ -486,7 +529,7 @@ classdef ECamCameraGUI < handle
 
         function buildHistogram(app, g)
             p = uipanel(g,'BackgroundColor',[0.13 0.13 0.15],'BorderType','none');
-            p.Layout.Row = 3; p.Layout.Column = [1 2];
+            p.Layout.Row = 4; p.Layout.Column = [1 2];
             gl = uigridlayout(p,[1 2]); gl.ColumnWidth={'1x',300};
             app.h.hax = uiaxes(gl); title(app.h.hax,'histogram');
             app.h.stats = uilabel(gl,'Text','min/max/mean/sat: —','FontColor','w', ...
@@ -591,6 +634,7 @@ classdef ECamCameraGUI < handle
                         uialert(app.Fig,'No derived CCM yet — run Tools > ColorChecker.','CCM');
                     end
             end
+            app.updateCCMBadge();
         end
     end
 
@@ -1209,7 +1253,7 @@ classdef ECamCameraGUI < handle
                 txt = [txt sprintf('  |  root-poly deg%d xval %.2f (fit %.2f)', R.degree, xr, fr)];
                 if xr < best, best = xr; bestName = sprintf('root-poly deg%d', R.degree); end
             end
-            app.h.ccKfoldRes.Text = txt;
+            app.h.ccKfoldRes.Text = [txt '   [computed from RAW sensor data — independent of the Display CCM / Apply CCM]'];
             if best < v
                 app.h.ccKfoldVerdict.Text = sprintf('%s wins vs vendor by %.2f ΔE00 (cross-validated).', bestName, v-best);
                 app.h.ccKfoldVerdict.FontColor = [0.35 0.80 0.40];
@@ -1217,7 +1261,8 @@ classdef ECamCameraGUI < handle
                 app.h.ccKfoldVerdict.Text = sprintf('vendor is as good or better (by %.2f) — derived does not generalize past it.', best-v);
                 app.h.ccKfoldVerdict.FontColor = [0.90 0.80 0.20];
             end
-            app.setColorStatus(sprintf('k-fold done: best derived %.2f vs vendor %.2f ΔE00', best, v), [0.6 0.9 0.6]);
+            app.setStatus(sprintf('k-fold: %d captures — derived %.2f vs vendor %.2f ΔE00 (from raw)', ...
+                R.nCaptures, best, v), app.deColor(best));
         end
         function colorRun(app, corners, exps, g)
             [~, info] = app.cam.deriveCCM(corners, 'exposures', exps, 'gain', g);
@@ -1343,6 +1388,7 @@ classdef ECamCameraGUI < handle
             if isfield(app.h,'ccStatus') && isvalid(app.h.ccStatus)
                 app.h.ccStatus.Text = msg; app.h.ccStatus.FontColor = col;
             end
+            app.setStatus(msg, col);            % mirror to the large status band
             drawnow limitrate;
         end
         function drawSwatches(app, R)
@@ -1420,7 +1466,8 @@ classdef ECamCameraGUI < handle
                     'colour with this matrix. Set CCM = ''none'' on the Camera tab to revert.'], dE), ...
                     'Apply CCM', 'Icon','success');
             end
-            app.setColorStatus(sprintf('Applied CCM (dE %.2f).',dE), app.deColor(dE));
+            app.setColorStatus(sprintf('Applied derived CCM to cam.CCM (dE %.2f) — future captures render with it.',dE), app.deColor(dE));
+            app.updateCCMBadge();
         end
         function previewCCM(app)
             if isempty(app.ColorLast) || ~isnumeric(app.ColorLast.ccm) || isempty(app.ColorLast.ccm)
@@ -1547,7 +1594,9 @@ classdef ECamCameraGUI < handle
             app.clearOverlay();
             img = app.applyStretch(single(rgb)/255);
             app.setDisplay(img);
-            title(app.h.ax, sprintf('processed %dx%d', size(rgb,2), size(rgb,1)));
+            title(app.h.ax, sprintf('processed %dx%d  |  Display CCM: %s', ...
+                size(rgb,2), size(rgb,1), app.ccmStateStr()));
+            app.updateCCMBadge();
             luma = single(rgb(:,:,1))*0.299+single(rgb(:,:,2))*0.587+single(rgb(:,:,3))*0.114;
             app.LastLuma = luma; app.updateHistogram(luma, 255);
         end

@@ -58,6 +58,9 @@
     <h2>Capture</h2>
     <button id="liveBtn" class="on">● Go live</button>
     <button id="once" class="sec">Measure once</button>
+    <label style="display:block;margin-top:8px;color:var(--mut);font-size:12px">
+      <input type="checkbox" id="lock"> Lock ROIs <span style="color:var(--mut)">(fast: reuse squares, skip MSER)</span></label>
+    <button id="resetPeak" class="sec" style="margin-top:6px">Reset peak</button>
   </div>
   <div class="card">
     <h2>Exposure</h2>
@@ -85,8 +88,8 @@
   </div>
   <div class="card" style="flex:1; min-width:220px">
     <h2>Per-edge MTF (<span class="u">cyc/mm</span>)</h2>
-    <table><thead><tr><th class="l">sq·edge</th><th>MTF50</th><th>@Nyq</th></tr></thead>
-      <tbody id="tbl"><tr><td class="l" colspan="3">go live or measure once</td></tr></tbody></table>
+    <table><thead><tr><th class="l">sq·edge</th><th>MTF50</th><th>peak</th><th>@Nyq</th></tr></thead>
+      <tbody id="tbl"><tr><td class="l" colspan="4">go live or measure once</td></tr></tbody></table>
     <div class="hint" id="meta"></div>
   </div>
 </div>
@@ -108,28 +111,38 @@ $("applyEG").onclick = async () => { setStatus("applying…");
   setStatus("applied","ok"); refreshInfo();
 };
 
-function params(){ return {
+let LASTBOXES=null, PEAK={};
+function params(){ const p = {
   pitch_um:+$("pitch").value, efl_mm:+$("efl").value, osf:+$("osf").value,
   units:document.querySelector('input[name=units]:checked').value,
   min_pct:+$("minpct").value, max_pct:+$("maxpct").value, delta:+$("delta").value,
-  min_ar:+$("minar").value, along:+$("along").value, across:0.3, max_var:0.25, min_div:0.2 }; }
+  min_ar:+$("minar").value, along:+$("along").value, across:0.3, max_var:0.25, min_div:0.2 };
+  if($("lock").checked && LASTBOXES && LASTBOXES.length) p.boxes = LASTBOXES;   // reuse ROIs -> skip MSER
+  return p; }
 
 async function measure(){
   const d = await (await fetch("/api/mtf",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify(params())})).json();
   if(d.error){ setStatus("error: "+d.error,"bad"); return null; }
+  if(d.boxes && d.boxes.length) LASTBOXES = d.boxes;   // remember for lock/reuse
   render(d); return d;
 }
+$("resetPeak").onclick = () => { PEAK = {}; setStatus("peak reset","ok"); };
 
 function render(d){
   $("overlay").src = d.overlay_png;
   document.querySelectorAll(".u").forEach(e=>e.textContent=d.units);
+  d.edges.forEach(e=>{ if(e.mtf50!=null){ const k=e.square+"·"+e.edge; PEAK[k]=Math.max(PEAK[k]||0, e.mtf50); }});
   const es = d.edges.slice().sort((a,b)=>(b.mtf50||0)-(a.mtf50||0));
-  $("tbl").innerHTML = es.length ? es.map(e=>
-    `<tr><td class="l"><span style="color:${COLORS[e.square%COLORS.length]}">&#9632;</span> ${e.square}·${e.edge}</td>`
-    +`<td>${e.mtf50==null?"–":e.mtf50.toFixed(2)}</td><td>${e.mtf_nyq.toFixed(3)}</td></tr>`).join("")
-    : `<tr><td class="l" colspan="3">no edges — adjust MSER / aim at slanted edges</td></tr>`;
-  $("meta").textContent = `${d.n_squares} sq · ${d.n_edges} edges · Nyq ${d.nyquist} ${d.units} · clip ${(d.clip_frac*100).toFixed(1)}%`;
+  $("tbl").innerHTML = es.length ? es.map(e=>{ const k=e.square+"·"+e.edge, pk=PEAK[k];
+    const atPk = (e.mtf50!=null && pk!=null && e.mtf50>=pk-1e-6);   // at/near this edge's best
+    return `<tr><td class="l"><span style="color:${COLORS[e.square%COLORS.length]}">&#9632;</span> ${k}</td>`
+    +`<td style="${atPk?'color:var(--ok);font-weight:600':''}">${e.mtf50==null?"–":e.mtf50.toFixed(2)}</td>`
+    +`<td style="color:var(--mut)">${pk==null?"–":pk.toFixed(2)}</td>`
+    +`<td>${e.mtf_nyq.toFixed(3)}</td></tr>`; }).join("")
+    : `<tr><td class="l" colspan="4">no edges — adjust MSER / aim at slanted edges</td></tr>`;
+  const lk = d.found===false ? " · <b>ROIs locked</b>" : "";
+  $("meta").innerHTML = `${d.n_squares} sq · ${d.n_edges} edges · Nyq ${d.nyquist} ${d.units} · clip ${(d.clip_frac*100).toFixed(1)}%${lk}`;
   drawPlot(d);
 }
 

@@ -119,6 +119,8 @@ def analyze(frame, maxv, params=None):
     bl = params.get("black_level") if params else None
     if bl is None:
         bl = default_black_level(maxv)
+    # Locked ROIs: reuse caller-supplied boxes (skip MSER) for a fast live loop.
+    boxes_in = params.get("boxes") if params else None
     luma = _bin_luma(frame, maxv, bl)
 
     osf = int(p["osf"])
@@ -132,7 +134,12 @@ def analyze(frame, maxv, params=None):
     nyq = 1.0 / (2.0 * pixel)
     fq = np.linspace(0, nyq, 80)
 
-    sq = _find_squares(luma, p)
+    if boxes_in:
+        sq = [{"verts": np.asarray(b, np.float64)} for b in boxes_in if len(b) == 4]
+        found = False
+    else:
+        sq = _find_squares(luma, p)
+        found = True
     disp = cv2.cvtColor(
         (np.clip(luma / max(np.percentile(luma, 99), 1e-6), 0, 1) ** (1 / 2.2) * 255).astype(np.uint8),
         cv2.COLOR_GRAY2BGR)
@@ -167,8 +174,9 @@ def analyze(frame, maxv, params=None):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1, cv2.LINE_AA)
 
     return {
-        "n_squares": len(sq), "n_edges": len(edges),
+        "n_squares": len(sq), "n_edges": len(edges), "found": found,
         "units": ustr, "nyquist": round(nyq, 4), "pixel": pixel, "osf": osf,
         "black_level": float(bl), "clip_frac": float((frame >= maxv).mean()),
         "edges": edges, "overlay_png": _b64jpg(disp),
+        "boxes": [b["verts"].round(1).tolist() for b in sq],   # for lock/reuse
     }

@@ -382,26 +382,36 @@ classdef ECamCameraGUI < handle
                 rb=uiradiobutton(bgi,'Text',app.ILLUM_OPTS{i},'Position',[4+68*(i-1) 4 66 20]);
                 if strcmp(app.ILLUM_OPTS{i},'D65'), bgi.SelectedObject=rb; end
             end
-            app.h.illumEst=uilabel(g2,'Text','Estimated: —  (measure to estimate)','FontColor',[0.7 0.85 1.0]);
-            % Result (explicit layout so the buttons render)
+            app.h.illumEst=uilabel(g2,'Text','Estimated: —  (measure to estimate)','FontColor',[0.7 0.85 1.0],'WordWrap','on');
+            % Result — dedicated indicator fields (key/value) so nothing clips in
+            % the narrow panel; free-text lines WordWrap. Explicit Layout so the
+            % buttons always render (a spanning auto-placed child hides them).
             p3 = uipanel(gl,'Title','Result (dE = CIELAB error)');
-            g3 = uigridlayout(p3,[5 3]); g3.ColumnWidth={'1x','1x','1x'}; g3.RowHeight={'fit','fit','fit','fit','fit'};
-            app.h.ccDE=uilabel(g3,'Text','current dE: —','FontWeight','bold'); app.h.ccDE.Layout.Row=1; app.h.ccDE.Layout.Column=[1 3];
-            app.h.ccPredict=uilabel(g3,'Text','if Apply CCM: —','FontColor',[0.8 0.85 0.95]); app.h.ccPredict.Layout.Row=2; app.h.ccPredict.Layout.Column=[1 3];
+            g3 = uigridlayout(p3,[7 3]); g3.ColumnWidth={'fit','1x','1x'};
+            g3.RowHeight={'fit','fit','fit','fit','fit','fit','fit'}; g3.RowSpacing=4;
+            kc = [0.68 0.74 0.85];                                   % key-label colour
+            kN=uilabel(g3,'Text','dE current','FontColor',kc); kN.Layout.Row=1; kN.Layout.Column=1;
+            app.h.ccDEnow=uilabel(g3,'Text','—','FontWeight','bold'); app.h.ccDEnow.Layout.Row=1; app.h.ccDEnow.Layout.Column=[2 3];
+            kW=uilabel(g3,'Text','dE with CCM','FontColor',kc); kW.Layout.Row=2; kW.Layout.Column=1;
+            app.h.ccDEccm=uilabel(g3,'Text','—','FontWeight','bold'); app.h.ccDEccm.Layout.Row=2; app.h.ccDEccm.Layout.Column=[2 3];
+            kR=uilabel(g3,'Text','residual','FontColor',kc); kR.Layout.Row=3; kR.Layout.Column=1;
+            app.h.ccResid=uilabel(g3,'Text','—'); app.h.ccResid.Layout.Row=3; app.h.ccResid.Layout.Column=[2 3];
+            app.h.ccPredict=uilabel(g3,'Text','if Apply CCM: —','FontColor',[0.8 0.85 0.95],'WordWrap','on');
+            app.h.ccPredict.Layout.Row=4; app.h.ccPredict.Layout.Column=[1 3];
             b1=uibutton(g3,'Text','CCM->ws','ButtonPushedFcn',@(~,~)app.ccmToWorkspace(), ...
                 'Tooltip','Copy the derived 3x3 CCM to the MATLAB base workspace as variable ''userCCM''.');
-            b1.Layout.Row=3; b1.Layout.Column=1;
+            b1.Layout.Row=5; b1.Layout.Column=1;
             b2=uibutton(g3,'Text','Apply CCM','ButtonPushedFcn',@(~,~)app.applyDerivedCCM(), ...
                 'Tooltip','Set cam.CCM to the derived matrix so processed / HDR captures render corrected colour.');
-            b2.Layout.Row=3; b2.Layout.Column=2;
+            b2.Layout.Row=5; b2.Layout.Column=2;
             bp=uibutton(g3,'Text','Preview CCM','ButtonPushedFcn',@(~,~)app.previewCCM(), ...
                 'Tooltip','Re-capture rendered WITH the derived CCM (does NOT change cam.CCM) and report the true rendered dE.');
-            bp.Layout.Row=3; bp.Layout.Column=3;
+            bp.Layout.Row=5; bp.Layout.Column=3;
             b3=uibutton(g3,'Text','Save .mat','ButtonPushedFcn',@(~,~)app.doSaveColor(), ...
                 'Tooltip','Save the ColorChecker history (colours, dE, CCM, config) to a .mat in the Save dir.');
-            b3.Layout.Row=4; b3.Layout.Column=1;
-            app.h.ccStatus=uilabel(g3,'Text','pick a chart and Measure','FontColor',[0.7 0.8 1.0]);
-            app.h.ccStatus.Layout.Row=5; app.h.ccStatus.Layout.Column=[1 3];
+            b3.Layout.Row=6; b3.Layout.Column=1;
+            app.h.ccStatus=uilabel(g3,'Text','pick a chart and Measure','FontColor',[0.7 0.8 1.0],'WordWrap','on');
+            app.h.ccStatus.Layout.Row=7; app.h.ccStatus.Layout.Column=[1 3];
             % History
             p4 = uipanel(gl,'Title','ColorChecker history');
             g4 = uigridlayout(p4,[2 4]); g4.ColumnWidth={'fit','1x','fit','1x'}; g4.RowHeight={'fit','fit'};
@@ -1188,13 +1198,16 @@ classdef ECamCameraGUI < handle
             app.drawSwatches(R);
             col = app.deColor(meanP);
             if hasCur
-                app.h.ccDE.Text = sprintf('current dE %.2f (max %.2f)  ->  with new CCM %.2f   [resid %.4f]', ...
-                    R.meanCurrent, max(R.dEcurrent), R.meanAfter, R.residual);
+                app.h.ccDEnow.Text = sprintf('%.2f   (max %.2f)', R.meanCurrent, max(R.dEcurrent));
+                app.h.ccDEccm.Text = sprintf('%.2f', R.meanAfter);
+                app.h.ccDEnow.FontColor = app.deColor(R.meanCurrent);
             else
-                app.h.ccDE.Text = sprintf('WB-only dE %.2f  ->  with CCM %.2f (max %.2f)   [resid %.4f]', ...
-                    R.meanBefore, R.meanAfter, R.maxAfter, R.residual);
+                app.h.ccDEnow.Text = sprintf('%.2f   (WB only)', R.meanBefore);
+                app.h.ccDEccm.Text = sprintf('%.2f   (max %.2f)', R.meanAfter, R.maxAfter);
+                app.h.ccDEnow.FontColor = app.deColor(R.meanBefore);
             end
-            app.h.ccDE.FontColor = col;
+            app.h.ccDEccm.FontColor = app.deColor(R.meanAfter);
+            app.h.ccResid.Text = sprintf('%.4f', R.residual);
             if meanP < 1,      verdict = 'dE<1: colour accurate, no CCM update needed';
             elseif meanP < 3,  verdict = 'dE 1-3: ok, CCM may need updating';
             else,              verdict = 'dE>3: colour off, CCM needs update'; end

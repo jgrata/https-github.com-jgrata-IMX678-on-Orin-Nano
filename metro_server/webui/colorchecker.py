@@ -192,6 +192,43 @@ def _loo_de2000(chart, ref, ref_lab):
     return de
 
 
+def _rootpoly_features(rgb, degree):
+    """Finlayson root-polynomial features (2015). Each term is homogeneous of
+    degree 1 in RGB, so the mapping stays EXPOSURE-INVARIANT (unlike ordinary
+    polynomials) -- the property a CCM must keep. deg1=3 terms (=linear),
+    deg2=6, deg3=13. Inputs are non-negative linear signals."""
+    R = np.clip(rgb[:, 0], 0, None); G = np.clip(rgb[:, 1], 0, None); B = np.clip(rgb[:, 2], 0, None)
+    feats = [R, G, B]
+    if degree >= 2:
+        feats += [np.sqrt(R * G), np.sqrt(G * B), np.sqrt(R * B)]
+    if degree >= 3:
+        feats += [np.cbrt(R * G * G), np.cbrt(R * R * G), np.cbrt(G * B * B),
+                  np.cbrt(G * G * B), np.cbrt(R * B * B), np.cbrt(R * R * B), np.cbrt(R * G * B)]
+    return np.column_stack(feats)
+
+
+def _fit_rootpoly(chart, ref, degree):
+    sc = ref.mean() / max(chart.mean(), 1e-9)
+    Phi = _rootpoly_features(chart * sc, degree)
+    A, *_ = np.linalg.lstsq(Phi, ref, rcond=None)      # [Nterms x 3]
+    return (sc, A, degree)
+
+
+def _apply_rootpoly(rgb, model):
+    sc, A, degree = model
+    return _rootpoly_features(np.atleast_2d(rgb) * sc, degree) @ A
+
+
+def _loo_rootpoly_de2000(chart, ref, ref_lab, degree):
+    n = len(chart); de = np.zeros(n); keep = np.arange(n)
+    for i in range(n):
+        m = keep != i
+        model = _fit_rootpoly(chart[m], ref[m], degree)
+        pred = _apply_rootpoly(chart[i], model)
+        de[i] = _de2000(_lin2lab(pred), ref_lab[i:i + 1])[0]
+    return de
+
+
 def meter_levels(frame, maxv, black_level=None):
     """Detect the chart and return the brightest patch-channel and darkest patch,
     as fractions of full signal (black-level subtracted). Orientation-independent:
@@ -219,7 +256,7 @@ def meter_levels(frame, maxv, black_level=None):
     }
 
 
-def analyze(frame, maxv, black_level=None):
+def analyze(frame, maxv, black_level=None, rootpoly_degree=2):
     if black_level is None:
         black_level = _default_black_level(maxv)
     rgb_lin = _bin_rggb(frame, maxv, black_level)
@@ -256,6 +293,15 @@ def analyze(frame, maxv, black_level=None):
     vend = np.asarray(chart * s3) @ np.asarray(hdr.VENDOR_CCM).T
     dE_vendor = _de2000(_lin2lab(vend), ref_lab)
 
+    # root-polynomial CCM (ANALYSIS ONLY -- the exported/applied CCM stays the 3x3;
+    # root-poly isn't a 3x3 the ISP can consume). Shows the headroom beyond a 3x3;
+    # the fit-vs-xval gap is the overfit guardrail (more DOF -> watch the gap).
+    rp_deg = int(rootpoly_degree)
+    rp_model = _fit_rootpoly(chart, ref, rp_deg)
+    dE_rp_fit = _de2000(_lin2lab(np.clip(_apply_rootpoly(chart, rp_model), 0, 1)), ref_lab)
+    dE_rp_xval = _loo_rootpoly_de2000(chart, ref, ref_lab, rp_deg)
+    rp_terms = int(_rootpoly_features(chart[:1], rp_deg).shape[1])
+
     cct, illum = _illuminant(np.mean(chart[18:21], axis=0))
 
     # detection overlay (green sample boxes) -- ctrs are in ORIGINAL (unpermuted) order
@@ -282,6 +328,13 @@ def analyze(frame, maxv, black_level=None):
         "dE_xval_mean": float(dE_xval.mean()),            # leave-one-out (honest)
         "dE_xval_max": float(dE_xval.max()),
         "derived_beats_vendor": bool(dE_xval.mean() < dE_vendor.mean()),
+        # root-polynomial (analysis) -- can a higher-DOF model beat the 3x3?
+        "rootpoly_degree": rp_deg,
+        "rootpoly_terms": rp_terms,
+        "dE_rootpoly_fit_mean": float(dE_rp_fit.mean()),
+        "dE_rootpoly_xval_mean": float(dE_rp_xval.mean()),
+        "dE_rootpoly_xval_max": float(dE_rp_xval.max()),
+        "rootpoly_beats_linear": bool(dE_rp_xval.mean() < dE_xval.mean()),
         "dE_derived": dE_xval.round(3).tolist(),          # per-patch = cross-validated
         "dE_vendor": dE_vendor.round(3).tolist(),
         "patch_names": PATCH_NAMES,

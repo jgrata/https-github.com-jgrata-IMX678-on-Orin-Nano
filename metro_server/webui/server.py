@@ -111,10 +111,11 @@ async def api_colorchecker(request: Request):
     except Exception:
         body = {}
     bl = body.get("black_level")
+    rp_deg = int(body.get("rootpoly_degree", 2))
     try:
         with _client() as c:
             frame, maxv = c.capture()
-        return colorchecker.analyze(frame, maxv, black_level=bl)
+        return colorchecker.analyze(frame, maxv, black_level=bl, rootpoly_degree=rp_deg)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
 

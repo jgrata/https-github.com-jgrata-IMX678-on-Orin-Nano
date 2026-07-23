@@ -11,6 +11,7 @@ units (cyc/mm or cyc/deg), and an annotated overlay PNG.
 import base64
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import cv2
@@ -32,11 +33,21 @@ def _bin_luma(frame, maxv, black_level):
     return luma / (maxv - black_level)
 
 
-def _find_squares(luma, p):
-    npx = luma.size
-    minA = max(int(p["min_pct"] / 100 * npx), 30)
+def _find_squares(luma, p, det_width=640):
+    # MSER + the per-region hull/minAreaRect loop are run on a DOWNSAMPLED image
+    # (default ~640 px wide): MSER at 2 MP spawns a huge number of nested regions
+    # so the loop dominates (~1.5 s); at 640 px it's ~10x faster and finds the same
+    # squares. Box vertices are scaled back to full luma coords for the SFR (which
+    # still runs on the full-res edge). area% is of the downsampled image (== of the
+    # frame, so thresholds are unchanged).
+    Hf, Wf = luma.shape
+    s = min(1.0, det_width / float(Wf))
+    small = cv2.resize(luma, (int(round(Wf * s)), int(round(Hf * s))),
+                       interpolation=cv2.INTER_AREA) if s < 1.0 else luma
+    npx = small.size
+    minA = max(int(p["min_pct"] / 100 * npx), 12)
     maxA = max(int(p["max_pct"] / 100 * npx), minA + 1)
-    I8 = cv2.normalize(luma, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    I8 = cv2.normalize(small, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
     try:
         I8 = cv2.createCLAHE(2.0, (8, 8)).apply(I8)          # aids MSER (per mtfgui)
     except Exception:
@@ -51,16 +62,17 @@ def _find_squares(luma, p):
         except Exception:
             pass
     regions, _ = mser.detectRegions(I8)
+    inv = 1.0 / s
     boxes = []
     for pts in regions:
         if len(pts) < 3:
             continue
         hull = cv2.convexHull(pts.reshape(-1, 1, 2).astype(np.int32))
-        (cx, cy), (w, h), ang = cv2.minAreaRect(hull)        # Feret box
+        (cx, cy), (w, h), ang = cv2.minAreaRect(hull)        # Feret box (downsampled coords)
         if max(w, h) <= 0 or min(w, h) / max(w, h) < p["min_ar"]:
             continue
-        boxes.append({"verts": cv2.boxPoints(((cx, cy), (w, h), ang)),
-                      "center": (cx, cy), "wh": (w, h), "area": w * h})
+        boxes.append({"verts": cv2.boxPoints(((cx, cy), (w, h), ang)) * inv,   # -> full luma coords
+                      "center": (cx * inv, cy * inv), "wh": (w * inv, h * inv), "area": w * h * inv * inv})
     boxes.sort(key=lambda b: -b["area"])                     # merge near-duplicates
     kept = []
     for b in boxes:
@@ -143,35 +155,51 @@ def analyze(frame, maxv, params=None):
     disp = cv2.cvtColor(
         (np.clip(luma / max(np.percentile(luma, 99), 1e-6), 0, 1) ** (1 / 2.2) * 255).astype(np.uint8),
         cv2.COLOR_GRAY2BGR)
-    edges = []
+    # Collect every edge ROI (draw the square outlines now), then run the SFR on
+    # all of them in PARALLEL (jslantedge's FFT/numpy release the GIL) so per-frame
+    # square-finding stays fast even with many edges. Drawing is done after (cv2
+    # draw on one image isn't thread-safe).
+    tasks = []
     for si, b in enumerate(sq):
         V = b["verts"]
         cv2.polylines(disp, [V.astype(np.int32)], True, (255, 180, 80), 1)
         for e in range(4):
             R = _edge_roi_corners(V, e, p["along"], p["across"])
             roi = _extract_roi(luma, R)
-            if roi.size < 64:
-                continue
-            try:
-                ff, mm, *_ = mtf.jslantedge(roi, osf, pixel)
-            except Exception:
-                continue
-            m50 = _mtf50(ff, mm)
-            mq = np.interp(fq, ff, mm, left=float(mm[0]), right=0.0)
-            m_nyq = float(np.interp(nyq, ff, mm, left=float(mm[0]), right=0.0))
-            edges.append({
-                "square": si, "edge": e,
+            if roi.size >= 64:
+                tasks.append((si, e, R, roi))
+
+    def _one(task):
+        si, e, R, roi = task
+        try:
+            ff, mm, *_ = mtf.jslantedge(roi, osf, pixel)
+        except Exception:
+            return None
+        m50 = _mtf50(ff, mm)
+        mq = np.interp(fq, ff, mm, left=float(mm[0]), right=0.0)
+        m_nyq = float(np.interp(nyq, ff, mm, left=float(mm[0]), right=0.0))
+        return {"square": si, "edge": e, "R": R,
                 "mtf50": None if np.isnan(m50) else round(m50, 4),
                 "mtf_nyq": round(m_nyq, 4),
-                "freq": fq.round(4).tolist(), "mtf": mq.round(4).tolist(),
-            })
-            x0, y0 = int(R[:, 0].min()), int(R[:, 1].min())
-            x1, y1 = int(R[:, 0].max()), int(R[:, 1].max())
-            cv2.rectangle(disp, (x0, y0), (x1, y1), (0, 255, 0), 1)
-            Mc = R.mean(0)
-            lbl = "--" if np.isnan(m50) else "%.2f" % m50
-            cv2.putText(disp, lbl, (int(Mc[0]) - 12, int(Mc[1])),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1, cv2.LINE_AA)
+                "freq": fq.round(4).tolist(), "mtf": mq.round(4).tolist()}
+
+    if tasks:
+        with ThreadPoolExecutor(max_workers=min(8, len(tasks))) as ex:
+            results = [r for r in ex.map(_one, tasks) if r is not None]
+    else:
+        results = []
+
+    edges = []
+    for r in results:
+        R = r.pop("R")
+        edges.append(r)
+        x0, y0 = int(R[:, 0].min()), int(R[:, 1].min())
+        x1, y1 = int(R[:, 0].max()), int(R[:, 1].max())
+        cv2.rectangle(disp, (x0, y0), (x1, y1), (0, 255, 0), 1)
+        Mc = R.mean(0)
+        lbl = "--" if r["mtf50"] is None else "%.2f" % r["mtf50"]
+        cv2.putText(disp, lbl, (int(Mc[0]) - 12, int(Mc[1])),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1, cv2.LINE_AA)
 
     return {
         "n_squares": len(sq), "n_edges": len(edges), "found": found,

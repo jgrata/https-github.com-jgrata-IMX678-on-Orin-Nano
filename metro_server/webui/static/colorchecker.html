@@ -62,6 +62,8 @@
       </div>
       <div class="hint">Black level blank = vendor optical-black <b>scalar</b> (no lens cap needed — safe when
         makeshift caps leak). Enter a DN to override.</div>
+      <button class="sec" id="darkcheck" style="margin-top:6px">Check dark (cap the lens first)</button>
+      <div class="hint" id="darkInfo"></div>
       <div class="row" style="margin-top:6px">
         <div><label>CCM model (analysis)</label>
           <select id="rpdeg"><option value="2">+ root-poly deg2 (6-term)</option>
@@ -137,6 +139,23 @@ $("applyEG").onclick = async () => {
     body:JSON.stringify({exposure_ns:Math.round(parseFloat($("exp_ms").value)*1e6),
                          gain:parseFloat($("gain").value)})});
   setStatus("applied — let it settle a moment","ok"); refreshInfo();
+};
+
+$("darkcheck").onclick = async () => {
+  setStatus("dark check: capturing short + long (cap must be ON)…","warn"); $("darkcheck").disabled=true;
+  let d;
+  try{ d = await (await fetch("/api/darkcheck",{method:"POST",
+        headers:{"Content-Type":"application/json"}, body:JSON.stringify({})})).json(); }
+  catch(e){ setStatus("dark check failed: "+e.message,"bad"); $("darkcheck").disabled=false; return; }
+  $("darkcheck").disabled=false;
+  if(d.error){ setStatus("dark check: "+d.error,"bad"); return; }
+  const col = d.leaky ? "var(--bad)" : "var(--ok)";
+  $("darkInfo").innerHTML = `<b style="color:${col}">${d.summary}</b><br>`
+    + `mean ${d.short.mean.toFixed(1)}→${d.long.mean.toFixed(1)} DN over ${d.exp_short_ms}→${d.exp_long_ms} ms `
+    + `(leak ${d.leak_over_ramp_dn.toFixed(2)} DN, ${d.leak_rate_dn_per_ms.toFixed(3)} DN/ms) · `
+    + `pedestal ${d.pedestal_expected} · std ${d.long.std.toFixed(1)} · uniformity ${d.long.block_spread.toFixed(1)} DN`
+    + (d.reasons && d.reasons.length ? `<br><span style="color:var(--bad)">${d.reasons.join("; ")}</span>` : "");
+  setStatus(d.leaky ? "dark check: possible LEAK" : "dark check: light-tight", d.leaky?"bad":"ok");
 };
 
 $("autoexp").onclick = async () => {

@@ -23,6 +23,7 @@ from camera_client import CameraClient  # noqa: E402
 import imaging  # noqa: E402
 import colorchecker  # noqa: E402
 import mtf_analyze  # noqa: E402
+import darkcheck  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 IMG_HOST = os.environ.get("IMG_HOST", "127.0.0.1")
@@ -202,6 +203,40 @@ async def api_meter(request: Request):
                 "target_hi": target_hi, "target_lo": target_lo,
                 "clamped": (t_short <= MIN_NS or t_long >= MAX_NS),
                 "note": note, "trace": trace,
+            }
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.post("/api/darkcheck")
+async def api_darkcheck(request: Request):
+    """Certify a capped-lens dark: capture at a short and a long exposure and test
+    for light leakage (exposure invariance is decisive). Restores exposure after."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    exp_short_ms = float(body.get("exp_short_ms", 0.2))
+    exp_long_ms = float(body.get("exp_long_ms", 30.0))
+    try:
+        with _client() as c:
+            orig = int(c.info().get("exposure_ns", 8_000_000))
+
+            def grab(exp_ms):
+                c.set_params({"exposure_ns": int(exp_ms * 1e6)})
+                time.sleep(1.3)
+                frame, maxv = c.capture()
+                return darkcheck.dark_stats(frame), maxv
+
+            s, maxv = grab(exp_short_ms)
+            l, _ = grab(exp_long_ms)
+            c.set_params({"exposure_ns": orig})           # restore
+            pedestal = 200.0 if maxv > 2000 else 50.0
+            v = darkcheck.verdict(s, l, exp_short_ms, exp_long_ms, pedestal)
+            return {
+                "pedestal_expected": pedestal,
+                "exp_short_ms": exp_short_ms, "exp_long_ms": exp_long_ms,
+                "short": s, "long": l, **v,
             }
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)

@@ -127,6 +127,33 @@ def _swatch_image(after_lin, ref_lin, cell=54, gap=3):
     return _b64png(img)
 
 
+def meter_levels(frame, maxv, black_level=None):
+    """Detect the chart and return the brightest patch-channel and darkest patch,
+    as fractions of full signal (black-level subtracted). Orientation-independent:
+    'hi' = the channel most at risk of clipping (max over all patches/channels),
+    'lo' = the darkest patch (min patch-mean) — the SNR-limited end. Used to meter
+    an HDR bracket that keeps the whole chart unclipped with good shadow SNR."""
+    if black_level is None:
+        black_level = _default_black_level(maxv)
+    rgb_lin = _bin_rggb(frame, maxv, black_level)          # signal / (maxv - bl), in [0,1]
+    bgr = _detect_img(rgb_lin)
+    det = cv2.mcc.CCheckerDetector_create()
+    if not det.process(bgr, cv2.mcc.MCC24):
+        return {"detected": False, "clip_frac": float((frame >= maxv).mean())}
+    cc = det.getListColorChecker()[0]
+    chart, _, _ = _sample_linear(rgb_lin, _sort_corners(cc.getBox()))
+    hi = float(chart.max())                                # brightest single channel (clip risk)
+    lo = float(chart.mean(axis=1).min())                   # darkest patch mean (SNR limit)
+    return {
+        "detected": True,
+        "hi": hi, "lo": lo,
+        "hi_clip": hi >= 0.97,                              # brightest patch channel at/above saturation
+        "chart_dr": (hi / lo) if lo > 1e-6 else float("inf"),
+        "black_level": float(black_level),
+        "clip_frac": float((frame >= maxv).mean()),
+    }
+
+
 def analyze(frame, maxv, black_level=None):
     if black_level is None:
         black_level = _default_black_level(maxv)

@@ -61,9 +61,10 @@
         <div><label>Black level (DN)</label><input id="bl" type="number" step="1" placeholder="auto"></div>
       </div>
       <button class="sec" id="applyEG">Apply exposure / gain</button>
+      <button class="sec" id="autoexp">Auto-expose (meter chart)</button>
       <button id="measure">Measure ColorChecker</button>
-      <div class="hint">Tip: for accurate colour, drop exposure until <b>clip ≈ 0%</b> and avoid specular
-        glint from the light source on the glossy patches.</div>
+      <div class="hint" id="meterInfo">Auto-expose meters the chart's own white/black patches to find an
+        HDR bracket that keeps every patch unclipped with good shadow SNR (reports the exposures).</div>
     </div>
 
     <div class="card" id="overlayCard" style="display:none">
@@ -125,6 +126,25 @@ $("applyEG").onclick = async () => {
     body:JSON.stringify({exposure_ns:Math.round(parseFloat($("exp_ms").value)*1e6),
                          gain:parseFloat($("gain").value)})});
   setStatus("applied — let it settle a moment","ok"); refreshInfo();
+};
+
+$("autoexp").onclick = async () => {
+  setStatus("metering chart (un-clipping highlights)…","warn"); $("autoexp").disabled=true;
+  let d;
+  try{ d = await (await fetch("/api/colorchecker/meter",{method:"POST",
+        headers:{"Content-Type":"application/json"}, body:JSON.stringify({})})).json(); }
+  catch(e){ setStatus("meter failed: "+e.message,"bad"); $("autoexp").disabled=false; return; }
+  $("autoexp").disabled=false;
+  if(d.error){ setStatus("meter: "+d.error,"bad"); return; }
+  const nat = d.exceeds_native_16to1 ? ' <span style="color:var(--warn)">(&gt; 16:1 native HDR)</span>' : '';
+  $("meterInfo").innerHTML =
+    `chart DR <b>${d.chart_dr}:1</b> (${d.chart_dr_stops} stops) &rarr; suggested bracket <b>${d.bracket_ratio}:1</b>${nat}`
+    + ` &middot; legs <b>${d.exposures_str}</b> ms<br><span style="color:var(--mut)">${d.note}</span>`;
+  // the single-frame web Measure uses the short leg (brightest patch ~90%, unclipped)
+  $("exp_ms").value = d.t_short_ms.toFixed(2);
+  await fetch("/api/params",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({exposure_ns:Math.round(d.t_short_ms*1e6),gain:parseFloat($("gain").value)})});
+  setStatus(`metered - set ${d.t_short_ms.toFixed(2)} ms (short leg); let it settle, then Measure`,"ok");
 };
 
 $("measure").onclick = async () => {

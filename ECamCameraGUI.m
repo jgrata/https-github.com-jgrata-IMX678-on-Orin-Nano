@@ -1065,8 +1065,12 @@ classdef ECamCameraGUI < handle
                 app.colorRun(app.reorderForLongEdge(app.regToCorners(chart, sc)), exps, g); return
             end
             meas = app.sampleROIsBayer(rad, rois);           % 24x3 raw linear, ColorROIs order
-            [ccm, resid] = app.lsqCCM(meas, refLin);         % raw 3x3 (correspondence guaranteed)
+            [ccm, ~] = app.lsqCCM(meas, refLin);             % raw 3x3 (correspondence guaranteed)
             afterLin = min(max(meas * ccm', 0), 1);
+            % residual on the CLIPPED values (consistent with dE): a bright patch
+            % overshooting to >1 then clipping to white is correct colour, so it
+            % must NOT inflate the reported residual (the unclipped RMS did).
+            resid = sqrt(mean((afterLin - refLin).^2, 'all'));
             Lref = app.labFromLinSRGB(refLin);
             dEafter = sqrt(sum((app.labFromLinSRGB(afterLin) - Lref).^2, 2));
             [cct, name] = app.illuminantEstimate(mean(meas(19:21,:),1));
@@ -1117,9 +1121,9 @@ classdef ECamCameraGUI < handle
                 app.setColorStatus('Server returned no patch samples (redeploy image_server.py).',[1 .4 .3]); return
             end
             meas = double(info.patches); ref = double(info.reference);   % 24x3 raw-linear / linear-sRGB
-            [ccm, meas, resid] = app.fitCCMoriented(meas, ref);          % auto-orient + fit on client
-            R = app.colorAnalyze(meas, ref, ccm);
-            R.corners = corners; R.exposures_ns = exps; R.gain = g; R.residual = resid;
+            [ccm, meas, ~] = app.fitCCMoriented(meas, ref);              % auto-orient + fit on client
+            R = app.colorAnalyze(meas, ref, ccm);                        % sets clip-consistent R.residual
+            R.corners = corners; R.exposures_ns = exps; R.gain = g;
             R.illumSel = app.h.illum.SelectedObject.Text;
             app.ColorLast = R;
             app.colorDisplay(R);
@@ -1149,12 +1153,13 @@ classdef ECamCameraGUI < handle
             Lref = app.labFromLinSRGB(ref);
             dEbefore = sqrt(sum((app.labFromLinSRGB(beforeLin)-Lref).^2, 2));
             dEafter  = sqrt(sum((app.labFromLinSRGB(afterLin) -Lref).^2, 2));
+            resid = sqrt(mean((afterLin - ref).^2, 'all'));   % clip-consistent (matches dE)
             [cct, name] = app.illuminantEstimate(mean(meas(19:21,:),1));
             R = struct('measured',meas, 'reference',ref, 'ccm',ccm, 'wb',wb, ...
                 'beforeSRGB',app.linToSRGB(beforeLin), 'afterSRGB',app.linToSRGB(afterLin), ...
                 'refSRGB',app.linToSRGB(ref), 'dEbefore',dEbefore, 'dEafter',dEafter, ...
                 'meanBefore',mean(dEbefore,'omitnan'), 'meanAfter',mean(dEafter,'omitnan'), ...
-                'maxAfter',max(dEafter), 'illumCCT',cct, 'illumEst',name);
+                'maxAfter',max(dEafter), 'illumCCT',cct, 'illumEst',name, 'residual',resid);
         end
         function [cct, name] = illuminantEstimate(app, grayLin)
             % approximate (uncalibrated): vendor CCM as camera->linear sRGB, then

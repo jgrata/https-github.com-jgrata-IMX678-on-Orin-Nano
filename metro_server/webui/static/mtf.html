@@ -85,6 +85,9 @@
     <span class="f"><label>delta</label><input id="delta" type="number" step="1" value="5"></span>
     <span class="f"><label>min AR</label><input id="minar" type="number" step="0.05" value="0.6"></span>
     <span class="f"><label>along</label><input id="along" type="number" step="0.05" value="0.7"></span>
+    <span class="f"><label>channel</label><select id="chan"><option>R</option><option>B</option><option value="Y">Y (abs)</option></select></span>
+    <label style="display:block;margin-top:6px;color:var(--mut);font-size:12px">
+      <input type="checkbox" id="tighten" checked> Auto-tighten (size/AR from found squares — faster)</label>
   </div>
   <div class="card" style="flex:1; min-width:220px">
     <h2>Per-edge MTF (<span class="u">cyc/mm</span>)</h2>
@@ -111,12 +114,15 @@ $("applyEG").onclick = async () => { setStatus("applying…");
   setStatus("applied","ok"); refreshInfo();
 };
 
-let LASTBOXES=null, PEAK={};
+let LASTBOXES=null, PEAK={}, TIGHTEN=null;
 function params(){ const p = {
   pitch_um:+$("pitch").value, efl_mm:+$("efl").value, osf:+$("osf").value,
-  units:document.querySelector('input[name=units]:checked').value,
+  units:document.querySelector('input[name=units]:checked').value, chan:$("chan").value,
   min_pct:+$("minpct").value, max_pct:+$("maxpct").value, delta:+$("delta").value,
   min_ar:+$("minar").value, along:+$("along").value, across:0.3, max_var:0.25, min_div:0.2 };
+  if($("tighten").checked && TIGHTEN){                 // narrow area/AR to the found squares -> fewer regions
+    p.min_pct=TIGHTEN.min_pct; p.max_pct=TIGHTEN.max_pct; p.min_ar=TIGHTEN.min_ar;
+  }
   if($("lock").checked && LASTBOXES && LASTBOXES.length) p.boxes = LASTBOXES;   // reuse ROIs -> skip MSER
   return p; }
 
@@ -125,6 +131,13 @@ async function measure(){
     body:JSON.stringify(params())})).json();
   if(d.error){ setStatus("error: "+d.error,"bad"); return null; }
   if(d.boxes && d.boxes.length) LASTBOXES = d.boxes;   // remember for lock/reuse
+  if(d.found){                                          // auto-tighten from found square size/aspect
+    if(d.sq_area_pct && d.sq_area_pct.length){
+      TIGHTEN={ min_pct:Math.max(0.02, 0.6*Math.min(...d.sq_area_pct)),
+                max_pct:1.7*Math.max(...d.sq_area_pct),
+                min_ar:Math.max(0.3, 0.85*Math.min(...d.sq_ar)) };
+    } else { TIGHTEN=null; }                            // lost squares -> loosen to re-acquire
+  }
   render(d); return d;
 }
 $("resetPeak").onclick = () => { PEAK = {}; setStatus("peak reset","ok"); };

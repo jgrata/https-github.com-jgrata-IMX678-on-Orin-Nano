@@ -11,7 +11,6 @@ units (cyc/mm or cyc/deg), and an annotated overlay PNG.
 import base64
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import cv2
@@ -22,18 +21,28 @@ import mtf  # noqa: E402  (validated jslantedge port)
 from imaging import default_black_level  # noqa: E402
 
 
-def _bin_luma(frame, maxv, black_level):
-    """2x2 RGGB bin -> luma [0..1], half-res (matches the GUI's LastLuma)."""
+def _bin_channel(frame, maxv, black_level, chan="R"):
+    """4:1 Bayer bin to one half-res plane, black-subtracted, [0..1].
+    chan 'R'/'B' = a single strided plane (cheap; a high-contrast B&W target has
+    signal in every channel, so R or B is ideal and skips the luma weighting).
+    'Y' = 0.25R+0.5G+0.25B (needed for ABSOLUTE MTF; relative-focus MTF on a single
+    channel is fine). Only 'Y' pays the full-frame cost."""
     H, W = frame.shape
     He, We = (H // 2) * 2, (W // 2) * 2
-    f = np.clip(frame[:He, :We].astype(np.float32) - black_level, 0, None)
-    R = f[0::2, 0::2]; Gr = f[0::2, 1::2]; Gb = f[1::2, 0::2]; B = f[1::2, 1::2]
-    G = 0.5 * (Gr + Gb)
-    luma = 0.25 * R + 0.5 * G + 0.25 * B
-    return luma / (maxv - black_level)
+    fr = frame[:He, :We]
+    if chan == "R":
+        plane = fr[0::2, 0::2].astype(np.float32)
+    elif chan == "B":
+        plane = fr[1::2, 1::2].astype(np.float32)
+    else:  # Y luma
+        R = fr[0::2, 0::2].astype(np.float32); Gr = fr[0::2, 1::2].astype(np.float32)
+        Gb = fr[1::2, 0::2].astype(np.float32); B = fr[1::2, 1::2].astype(np.float32)
+        plane = 0.25 * R + 0.25 * (Gr + Gb) + 0.25 * B
+    plane = np.maximum(plane - black_level, 0.0)
+    return plane / (maxv - black_level)
 
 
-def _find_squares(luma, p, det_width=640):
+def _find_squares(luma, p, det_width=480):
     # MSER + the per-region hull/minAreaRect loop are run on a DOWNSAMPLED image
     # (default ~640 px wide): MSER at 2 MP spawns a huge number of nested regions
     # so the loop dominates (~1.5 s); at 640 px it's ~10x faster and finds the same
@@ -121,7 +130,7 @@ def _b64jpg(bgr, width=900, quality=80):
 
 _DEFAULTS = dict(min_pct=0.3, max_pct=8.0, delta=5, max_var=0.25, min_div=0.2,
                  min_ar=0.6, merge_frac=0.5, along=0.7, across=0.3, osf=4,
-                 pitch_um=2.0, efl_mm=8.0, units="mm")
+                 pitch_um=2.0, efl_mm=8.0, units="mm", chan="R")
 
 
 def analyze(frame, maxv, params=None):
@@ -133,7 +142,7 @@ def analyze(frame, maxv, params=None):
         bl = default_black_level(maxv)
     # Locked ROIs: reuse caller-supplied boxes (skip MSER) for a fast live loop.
     boxes_in = params.get("boxes") if params else None
-    luma = _bin_luma(frame, maxv, bl)
+    luma = _bin_channel(frame, maxv, bl, p["chan"])   # R/B (fast, B&W target) or Y (absolute)
 
     osf = int(p["osf"])
     pitch_um = float(p["pitch_um"]) * 2.0        # half-res preview -> pitch doubles
@@ -155,10 +164,9 @@ def analyze(frame, maxv, params=None):
     disp = cv2.cvtColor(
         (np.clip(luma / max(np.percentile(luma, 99), 1e-6), 0, 1) ** (1 / 2.2) * 255).astype(np.uint8),
         cv2.COLOR_GRAY2BGR)
-    # Collect every edge ROI (draw the square outlines now), then run the SFR on
-    # all of them in PARALLEL (jslantedge's FFT/numpy release the GIL) so per-frame
-    # square-finding stays fast even with many edges. Drawing is done after (cv2
-    # draw on one image isn't thread-safe).
+    # Collect every edge ROI (draw square outlines now), then run the SFR serially.
+    # (Profiled: ThreadPool is SLOWER here -- jslantedge is GIL-bound on small ROIs,
+    # so pool overhead dominates. 8 edges ~30 ms serial.)
     tasks = []
     for si, b in enumerate(sq):
         V = b["verts"]
@@ -183,14 +191,11 @@ def analyze(frame, maxv, params=None):
                 "mtf_nyq": round(m_nyq, 4),
                 "freq": fq.round(4).tolist(), "mtf": mq.round(4).tolist()}
 
-    if tasks:
-        with ThreadPoolExecutor(max_workers=min(8, len(tasks))) as ex:
-            results = [r for r in ex.map(_one, tasks) if r is not None]
-    else:
-        results = []
-
     edges = []
-    for r in results:
+    for t in tasks:
+        r = _one(t)
+        if r is None:
+            continue
         R = r.pop("R")
         edges.append(r)
         x0, y0 = int(R[:, 0].min()), int(R[:, 1].min())
@@ -201,10 +206,21 @@ def analyze(frame, maxv, params=None):
         cv2.putText(disp, lbl, (int(Mc[0]) - 12, int(Mc[1])),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1, cv2.LINE_AA)
 
+    # per-square size (% of the detect image) + aspect, so the client can
+    # auto-tighten the finder params (size is stable under focus drift).
+    npx = float(luma.size)
+    area_pct, ars = [], []
+    for b in sq:
+        V = b["verts"]; x = V[:, 0]; y = V[:, 1]
+        A = 0.5 * abs(float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
+        s1 = float(np.hypot(*(V[1] - V[0]))); s2 = float(np.hypot(*(V[2] - V[1])))
+        area_pct.append(round(100.0 * A / npx, 3))
+        ars.append(round(min(s1, s2) / max(s1, s2, 1e-9), 3))
     return {
-        "n_squares": len(sq), "n_edges": len(edges), "found": found,
+        "n_squares": len(sq), "n_edges": len(edges), "found": found, "chan": p["chan"],
         "units": ustr, "nyquist": round(nyq, 4), "pixel": pixel, "osf": osf,
         "black_level": float(bl), "clip_frac": float((frame >= maxv).mean()),
         "edges": edges, "overlay_png": _b64jpg(disp),
         "boxes": [b["verts"].round(1).tolist() for b in sq],   # for lock/reuse
+        "sq_area_pct": area_pct, "sq_ar": ars,                  # for auto-tighten
     }

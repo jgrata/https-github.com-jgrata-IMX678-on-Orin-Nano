@@ -137,55 +137,67 @@ struct FrameBuffer {
 
 // ── CUDA EGL frame → uint16 ───────────────────────────────────────────────────
 
+/* Reused staging buffer for the EGL-frame -> host copy. The main loop is
+ * single-threaded, so file-scope statics are safe. Reusing avoids a per-frame
+ * cuMemAllocHost; PINNED host memory lets the copy engine DMA directly (a
+ * pageable destination forces the driver to stage through an internal pinned
+ * buffer first -- an extra full-frame copy we were paying every frame). */
+static uint16_t* g_hpin    = nullptr;
+static size_t    g_hpin_n  = 0;
+static double    g_dec_ms  = 0.0;       /* last decode time, for the throughput log */
+static double    g_serve_ms = 0.0;      /* last clients.poll (pack + TCP) time */
+
 static bool cuda_frame_to_u16(CUgraphicsResource res,
                                uint32_t w, uint32_t h, uint32_t bpp,
                                std::vector<uint16_t>& out)
 {
+    struct timespec _t0; clock_gettime(CLOCK_MONOTONIC,&_t0);
     CUeglFrame f; memset(&f,0,sizeof(f));
     CU_CHECK(cuGraphicsResourceGetMappedEglFrame(&f,res,0,0));
 
     uint32_t fw=f.width?f.width:w, fh=f.height?f.height:h, pitch=f.pitch;
-    CUdeviceptr dptr=0; bool alloc=false;
-
-    if (f.frameType==CU_EGL_FRAME_TYPE_PITCH) {
-        dptr=(CUdeviceptr)f.frame.pPitch[0];
+    bool  isPitch = (f.frameType==CU_EGL_FRAME_TYPE_PITCH);
+    CUarray arr = nullptr;
+    if (isPitch) {
         if (!pitch) pitch=fw*2;
     } else {
-        CUarray arr=f.frame.pArray[0];
+        arr=f.frame.pArray[0];
         CUDA_ARRAY_DESCRIPTOR d{}; cuArrayGetDescriptor(&d,arr);
         fw=(uint32_t)d.Width; fh=(uint32_t)d.Height;
-        size_t dp=0; CU_CHECK(cuMemAllocPitch(&dptr,&dp,fw*2,fh,2));
-        pitch=(uint32_t)dp; alloc=true;
-        CUDA_MEMCPY2D cp{};
-        cp.srcMemoryType=CU_MEMORYTYPE_ARRAY; cp.srcArray=arr;
-        cp.dstMemoryType=CU_MEMORYTYPE_DEVICE; cp.dstDevice=dptr;
-        cp.dstPitch=pitch; cp.WidthInBytes=fw*2; cp.Height=fh;
-        if (cuMemcpy2D(&cp)!=CUDA_SUCCESS){cuMemFree(dptr);return false;}
     }
-    if (!dptr) return false;
+    size_t n=(size_t)fw*fh;
 
-    out.resize(fw*fh);
-    CUDA_MEMCPY2D cp2{};
-    cp2.srcMemoryType=CU_MEMORYTYPE_DEVICE; cp2.srcDevice=dptr; cp2.srcPitch=pitch;
-    cp2.dstMemoryType=CU_MEMORYTYPE_HOST;   cp2.dstHost=out.data(); cp2.dstPitch=fw*2;
-    cp2.WidthInBytes=fw*2; cp2.Height=fh;
-    CUresult mr=cuMemcpy2D(&cp2);
-    if (alloc) cuMemFree(dptr);
-    if (mr!=CUDA_SUCCESS) return false;
+    if (g_hpin==nullptr || g_hpin_n<n) {           /* (re)alloc the pinned buffer once */
+        if (g_hpin) cuMemFreeHost(g_hpin);
+        if (cuMemAllocHost((void**)&g_hpin, n*sizeof(uint16_t))!=CUDA_SUCCESS){ g_hpin=nullptr; return false; }
+        g_hpin_n=n;
+    }
+
+    /* ONE copy straight to pinned host. A block-linear CUDA array is de-tiled by
+     * the driver on copy-out, so the old array->device->host round trip (with a
+     * per-frame cuMemAllocPitch) was unnecessary. */
+    CUDA_MEMCPY2D cp{};
+    cp.dstMemoryType=CU_MEMORYTYPE_HOST; cp.dstHost=g_hpin; cp.dstPitch=fw*2;
+    cp.WidthInBytes=fw*2; cp.Height=fh;
+    if (isPitch) { cp.srcMemoryType=CU_MEMORYTYPE_DEVICE; cp.srcDevice=(CUdeviceptr)f.frame.pPitch[0]; cp.srcPitch=pitch; }
+    else         { cp.srcMemoryType=CU_MEMORYTYPE_ARRAY;  cp.srcArray=arr; }
+    if (cuMemcpy2D(&cp)!=CUDA_SUCCESS) return false;
 
     /* Argus RAW16 is MSB-aligned: an N-bit sensor value is stored as
-     * sensor<<(16-N), so sensor = stored>>(16-N). 10-bit -> >>6 (0-1023),
-     * 12-bit -> >>4 (0-4095). Vectorized under -O3/NEON (~2ms). */
+     * sensor<<(16-N), so sensor = stored>>(16-N). 10-bit -> >>6, 12-bit -> >>4.
+     * Vectorized under -O3/NEON (~2ms). */
     uint32_t sh = (bpp < 16) ? (16 - bpp) : 0;
-    if (sh) for (auto& v:out) v>>=sh;
+    if (sh) for (size_t i=0;i<n;i++) g_hpin[i]>>=sh;
 
-    if (fw!=w||fh!=h) {
-        std::vector<uint16_t> tmp(w*h,0);
+    if (fw==w && fh==h) {
+        out.assign(g_hpin, g_hpin+n);
+    } else {
+        out.assign((size_t)w*h, 0);
         for (uint32_t y=0;y<std::min(fh,h);y++)
-            for (uint32_t x=0;x<std::min(fw,w);x++)
-                tmp[y*w+x]=out[y*fw+x];
-        out=std::move(tmp);
+            memcpy(&out[(size_t)y*w], &g_hpin[(size_t)y*fw], std::min(fw,w)*sizeof(uint16_t));
     }
+    struct timespec _t1; clock_gettime(CLOCK_MONOTONIC,&_t1);
+    g_dec_ms = (_t1.tv_sec-_t0.tv_sec)*1e3 + (_t1.tv_nsec-_t0.tv_nsec)*1e-6;
     return true;
 }
 
@@ -985,9 +997,14 @@ int main(int argc,char*argv[])
                     frames_captured++;
 
                     if (frames_captured%30==1) {
-                        printf("[Buffer] frame=%d  conns=%zu\n",
-                               g_buf.seq, clients.fds.size());
+                        static double t_last=0; static int f_last=0;
+                        struct timespec ts; clock_gettime(CLOCK_MONOTONIC,&ts);
+                        double now=ts.tv_sec+ts.tv_nsec*1e-9;
+                        double fps=(t_last>0)?(frames_captured-f_last)/(now-t_last):0.0;
+                        printf("[Buffer] frame=%d  conns=%zu  decode=%.1fms  serve=%.1fms  fps=%.1f\n",
+                               g_buf.seq, clients.fds.size(), g_dec_ms, g_serve_ms, fps);
                         fflush(stdout);
+                        t_last=now; f_last=frames_captured;
                     }
 
                     /* Immediately submit next capture to keep pipeline full */
@@ -1001,7 +1018,10 @@ int main(int argc,char*argv[])
             /* CUDA_ERROR_UNKNOWN or other: ignore, try again */
 
             /* ── Service persistent client connections (non-blocking) ────── */
+            struct timespec _s0; clock_gettime(CLOCK_MONOTONIC,&_s0);
             clients.poll(srv, g_buf);
+            struct timespec _s1; clock_gettime(CLOCK_MONOTONIC,&_s1);
+            g_serve_ms = (_s1.tv_sec-_s0.tv_sec)*1e3 + (_s1.tv_nsec-_s0.tv_nsec)*1e-6;
         }
 
         printf("[Server] shutting down  frames=%d  conns=%zu\n",

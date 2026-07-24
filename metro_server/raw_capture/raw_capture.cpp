@@ -29,6 +29,7 @@
 #include <sys/mman.h>       /* shm_open, mmap — in-process zero-copy frame tap */
 #include <fcntl.h>
 #include <atomic>
+#include <arm_neon.h>       /* NEON RAW10/RAW12 packers */
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -644,50 +645,74 @@ struct ReqHdr { uint32_t cmd; uint64_t want_exp; float want_gain; uint32_t pad; 
 #pragma pack(pop)
 enum { REQ_FRAME=1, REQ_SET_EXPGAIN=2, REQ_PING=3, REQ_FRAME_PACKED=4 };
 
-/* Pack uint16 10-bit pixels (0-1023) into RAW10: 4 px -> 5 bytes.
- * out size = ceil(n/4)*5. Byte layout matches the Python pack_raw10 and the
- * MATLAB unpackRaw10 exactly:
- *   o0..o3 = p0..p3 >> 2   (high 8 bits)
- *   o4     = (p0&3) | (p1&3)<<2 | (p2&3)<<4 | (p3&3)<<6   (low 2 bits, LE)
- * Doing this in C++ replaces the ~0.10s NumPy pack in image_server. */
+/* RAW10 (4 px -> 5 bytes) and RAW12 (2 px -> 3 bytes) packers. Byte layout matches
+ * the Python/MATLAB unpackers exactly (verified bit-exact against the scalar refs):
+ *   RAW10: o0..o3 = p0..p3>>2;  o4 = (p0&3)|(p1&3)<<2|(p2&3)<<4|(p3&3)<<6
+ *   RAW12: o0 = p0>>4; o1 = p1>>4; o2 = (p0&0xF)|((p1&0xF)<<4)
+ * NEON-vectorized (RAW10 via vld4q + vqtbl3q shuffle; RAW12 via vld2q + vst3q); the
+ * scalar versions below stay as the reference and the (rare) tail handler. */
+static void pack_raw10_scalar(const uint16_t* px, size_t n, uint8_t* o)
+{
+    size_t groups = (n + 3) / 4, i = 0;
+    for (size_t g = 0; g < groups; ++g, o += 5, i += 4) {
+        uint16_t p0 = i<n?px[i]:0, p1 = i+1<n?px[i+1]:0, p2 = i+2<n?px[i+2]:0, p3 = i+3<n?px[i+3]:0;
+        o[0]=(uint8_t)(p0>>2); o[1]=(uint8_t)(p1>>2); o[2]=(uint8_t)(p2>>2); o[3]=(uint8_t)(p3>>2);
+        o[4]=(uint8_t)((p0&3)|((p1&3)<<2)|((p2&3)<<4)|((p3&3)<<6));
+    }
+}
+static void pack_raw12_scalar(const uint16_t* px, size_t n, uint8_t* o)
+{
+    size_t groups = (n + 1) / 2, i = 0;
+    for (size_t g = 0; g < groups; ++g, o += 3, i += 2) {
+        uint16_t p0 = i<n?px[i]:0, p1 = i+1<n?px[i+1]:0;
+        o[0]=(uint8_t)(p0>>4); o[1]=(uint8_t)(p1>>4); o[2]=(uint8_t)((p0&0xF)|((p1&0xF)<<4));
+    }
+}
+
+/* 5-way interleave shuffle tables: 8 groups (32 px) -> 40 bytes. Source layout in
+ * the vqtbl3q table: [0:8]=H0(p0>>2), [8:16]=H1, [16:24]=H2, [24:32]=H3, [32:40]=L. */
+static const uint8_t RAW10_IDX0[16]={0,8,16,24,32,1,9,17,25,33,2,10,18,26,34,3};
+static const uint8_t RAW10_IDX1[16]={11,19,27,35,4,12,20,28,36,5,13,21,29,37,6,14};
+static const uint8_t RAW10_IDX2[16]={22,30,38,7,15,23,31,39,0,0,0,0,0,0,0,0};
+
 static void pack_raw10(const uint16_t* px, size_t n, std::vector<uint8_t>& out)
 {
     size_t groups = (n + 3) / 4;
     out.resize(groups * 5);
     uint8_t* o = out.data();
-    size_t i = 0;
-    for (size_t g = 0; g < groups; ++g, o += 5, i += 4) {
-        uint16_t p0 = i   < n ? px[i]   : 0;
-        uint16_t p1 = i+1 < n ? px[i+1] : 0;
-        uint16_t p2 = i+2 < n ? px[i+2] : 0;
-        uint16_t p3 = i+3 < n ? px[i+3] : 0;
-        o[0] = (uint8_t)(p0 >> 2);
-        o[1] = (uint8_t)(p1 >> 2);
-        o[2] = (uint8_t)(p2 >> 2);
-        o[3] = (uint8_t)(p3 >> 2);
-        o[4] = (uint8_t)((p0 & 3) | ((p1 & 3) << 2) |
-                         ((p2 & 3) << 4) | ((p3 & 3) << 6));
+    size_t vg = (groups / 8) * 8, g = 0, i = 0;
+    uint8x16_t i0 = vld1q_u8(RAW10_IDX0), i1 = vld1q_u8(RAW10_IDX1), i2 = vld1q_u8(RAW10_IDX2);
+    uint16x8_t three = vdupq_n_u16(3);
+    for (; g < vg; g += 8, i += 32, o += 40) {
+        uint16x8x4_t p = vld4q_u16(px + i);          /* val[k] = k-th pixel of each group */
+        uint8x8_t H0 = vshrn_n_u16(p.val[0], 2), H1 = vshrn_n_u16(p.val[1], 2);
+        uint8x8_t H2 = vshrn_n_u16(p.val[2], 2), H3 = vshrn_n_u16(p.val[3], 2);
+        uint16x8_t L16 = vorrq_u16(
+            vorrq_u16(vandq_u16(p.val[0], three), vshlq_n_u16(vandq_u16(p.val[1], three), 2)),
+            vorrq_u16(vshlq_n_u16(vandq_u16(p.val[2], three), 4), vshlq_n_u16(vandq_u16(p.val[3], three), 6)));
+        uint8x16x3_t tbl = { vcombine_u8(H0, H1), vcombine_u8(H2, H3), vcombine_u8(vmovn_u16(L16), vdup_n_u8(0)) };
+        vst1q_u8(o,      vqtbl3q_u8(tbl, i0));
+        vst1q_u8(o + 16, vqtbl3q_u8(tbl, i1));
+        vst1_u8 (o + 32, vget_low_u8(vqtbl3q_u8(tbl, i2)));
     }
+    if (g < groups) pack_raw10_scalar(px + i, n - i, o);
 }
 
-/* Pack uint16 12-bit pixels (0-4095) into RAW12: 2 px -> 3 bytes.
- * out size = ceil(n/2)*3. Byte layout matches the MATLAB unpackRaw12:
- *   o0 = p0 >> 4                              (high 8 bits of p0)
- *   o1 = p1 >> 4                              (high 8 bits of p1)
- *   o2 = (p0 & 0xF) | ((p1 & 0xF) << 4)       (low nibbles, LE) */
 static void pack_raw12(const uint16_t* px, size_t n, std::vector<uint8_t>& out)
 {
     size_t groups = (n + 1) / 2;
     out.resize(groups * 3);
     uint8_t* o = out.data();
-    size_t i = 0;
-    for (size_t g = 0; g < groups; ++g, o += 3, i += 2) {
-        uint16_t p0 = i   < n ? px[i]   : 0;
-        uint16_t p1 = i+1 < n ? px[i+1] : 0;
-        o[0] = (uint8_t)(p0 >> 4);
-        o[1] = (uint8_t)(p1 >> 4);
-        o[2] = (uint8_t)((p0 & 0xF) | ((p1 & 0xF) << 4));
+    size_t vg = (groups / 8) * 8, g = 0, i = 0;
+    uint16x8_t nib = vdupq_n_u16(0xF);
+    for (; g < vg; g += 8, i += 16, o += 24) {
+        uint16x8x2_t a = vld2q_u16(px + i);          /* val[0]=even px, val[1]=odd px */
+        uint8x8_t A = vshrn_n_u16(a.val[0], 4), B = vshrn_n_u16(a.val[1], 4);
+        uint16x8_t C16 = vorrq_u16(vandq_u16(a.val[0], nib), vshlq_n_u16(vandq_u16(a.val[1], nib), 4));
+        uint8x8x3_t o3 = { A, B, vmovn_u16(C16) };
+        vst3_u8(o, o3);
     }
+    if (g < groups) pack_raw12_scalar(px + i, n - i, o);
 }
 
 /* Pending exp/gain change requested by a client, consumed by the Argus loop.

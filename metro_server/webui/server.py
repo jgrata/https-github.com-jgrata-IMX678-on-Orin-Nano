@@ -61,6 +61,41 @@ def _overlay_bytes(results):
     return None
 
 
+# --- Local zero-copy frame source (shared memory) ---------------------------
+# raw_capture publishes decoded uint16 frames to /dev/shm/metro_raw. Reading them
+# here skips RAW10 pack + localhost TCP + NumPy unpack -- the fast LOCAL path. Held
+# in a reused reader; on any error (e.g. raw_capture restarted -> new shm inode) we
+# drop it and fall back to the TCP client.
+_shm = {"reader": None}
+
+
+def _get_frame(prefer_shm=True):
+    """Return (frame uint16 Bayer, maxv, meta). Prefers the local shm ring; falls
+    back to the TCP capture. meta.source is 'shm' or 'tcp'."""
+    if prefer_shm and not _isp_active():
+        try:
+            import shm_reader
+            r = _shm["reader"] or shm_reader.ShmReader()
+            _shm["reader"] = r
+            f = r.latest()
+            if f is not None:
+                return f["frame"], f["maxv"], {
+                    "exposure_ns": int(f["exp_ns"]), "gain": float(f["gain"]),
+                    "sof_ns": int(f["sof_ns"]), "source": "shm"}
+        except Exception:
+            try:
+                if _shm["reader"]:
+                    _shm["reader"].close()
+            except Exception:
+                pass
+            _shm["reader"] = None
+    with _client() as c:
+        frame, maxv = c.capture()
+        meta = _capture_meta(c.info())
+    meta["source"] = "tcp"
+    return frame, maxv, meta
+
+
 # --- ISP capture mode (nvarguscamerasrc) ------------------------------------
 # The RAW path (raw_capture -> image_server) and the ISP path (nvarguscamerasrc,
 # in-process here) can't hold Argus at once. Entering ISP mode releases the RAW
@@ -146,8 +181,7 @@ def api_frame(width: int = 960):
     if _isp_active():
         return JSONResponse({"error": "camera in ISP mode (use the MTF page)"}, status_code=409)
     try:
-        with _client() as c:
-            frame, maxv = c.capture()
+        frame, maxv, _ = _get_frame()
         jpg = imaging.encode_jpeg(imaging.fast_preview(frame, maxv, out_width=width))
         return Response(content=jpg, media_type="image/jpeg")
     except Exception as e:
@@ -166,15 +200,15 @@ def api_histogram():
 
 def _mjpeg_generator(width):
     boundary = b"--frame"
-    with _client() as c:
-        while True:
-            try:
-                frame, maxv = c.capture()
-                jpg = imaging.encode_jpeg(imaging.fast_preview(frame, maxv, out_width=width))
-            except Exception:
-                break
-            yield (boundary + b"\r\nContent-Type: image/jpeg\r\nContent-Length: "
-                   + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n")
+    while True:
+        try:
+            frame, maxv, _ = _get_frame()          # local shm if available
+            jpg = imaging.encode_jpeg(imaging.fast_preview(frame, maxv, out_width=width))
+        except Exception:
+            break
+        yield (boundary + b"\r\nContent-Type: image/jpeg\r\nContent-Length: "
+               + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n")
+        time.sleep(0.03)                           # cap ~30 fps; shm.latest() is instant
 
 
 @app.get("/colorchecker", response_class=HTMLResponse)
@@ -303,15 +337,31 @@ async def api_mtf(request: Request):
             res = mtf_analyze.analyze_gray(gray, body)
             res["source"] = "isp"
             return res
-        with _client() as c:
-            frame, maxv = c.capture()
-            meta = _capture_meta(c.info())
+        frame, maxv, meta = _get_frame()          # local shm if available, else TCP
         res = mtf_analyze.analyze(frame, maxv, body)
         res["source"] = "raw"
+        res["frame_source"] = meta.get("source")
         _last["mtf"] = {"frame": frame, "maxv": maxv, "results": res, "meta": meta}
         return res
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.get("/api/sensor_timing")
+def api_sensor_timing(duration_s: float = 2.0):
+    """Measure true sensor frame timing (period, fps, jitter, drops) from the local
+    shm ring's per-frame sensor timestamps -- a full-rate, non-ISP timing probe that
+    doesn't touch the network."""
+    try:
+        import shm_reader
+    except Exception as e:
+        return JSONResponse({"error": "shm_reader unavailable: %s" % e}, status_code=500)
+    try:
+        return shm_reader.sensor_timing(max(0.2, min(float(duration_s), 10.0)))
+    except shm_reader.ShmUnavailable as e:
+        return JSONResponse({"error": str(e)}, status_code=503)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.get("/history", response_class=HTMLResponse)

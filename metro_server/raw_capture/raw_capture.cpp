@@ -26,6 +26,9 @@
 #include <sys/select.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <sys/mman.h>       /* shm_open, mmap — in-process zero-copy frame tap */
+#include <fcntl.h>
+#include <atomic>
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -135,6 +138,81 @@ struct FrameBuffer {
     }
 } g_buf;
 
+// ── Shared-memory frame publisher (in-process zero-copy tap) ──────────────────
+// Publishes each decoded uint16 frame into a POSIX shm ring so LOCAL consumers
+// (the Jetson-side web UI / sensor-timing tools) read frames directly -- no
+// RAW10 pack, no localhost TCP, no NumPy unpack. Remote clients keep using TCP
+// (the 1 GbE port can't carry full-rate 4K RAW anyway). Layout is fixed and
+// little-endian so Python parses it with struct + numpy (see shm_reader.py).
+// SPSC: one writer (this capture loop), many readers; 4 slots + a published
+// seq give a reader ~4 frame-periods to copy a slot before it's reused.
+#pragma pack(push,1)
+struct ShmHeader {                 /* at offset 0 */
+    uint32_t magic;                /* 0x5741524D 'MRAW' (LE) */
+    uint32_t version;
+    uint32_t nslots;
+    uint32_t slot_stride;          /* bytes per slot (meta + pixel data, 64-aligned) */
+    uint32_t max_w, max_h;
+    uint32_t data_off;             /* pixel-data offset within a slot */
+    uint32_t _pad;
+    uint64_t latest_seq;           /* published last (acts as the release signal) */
+    uint32_t latest_slot;
+    uint32_t _pad2;
+};
+struct ShmSlotMeta {               /* at the start of each slot */
+    uint64_t seq;
+    uint32_t w, h, bpp, _pad;
+    uint64_t exp_ns;
+    uint64_t sof_ns;               /* sensor start-of-frame timestamp (kernel) */
+    double   gain;
+    double   capture_time;         /* host CLOCK_MONOTONIC seconds */
+};
+#pragma pack(pop)
+
+struct ShmPublisher {
+    int        fd    = -1;
+    uint8_t*   base  = nullptr;
+    size_t     total = 0;
+    ShmHeader* hdr   = nullptr;
+    uint32_t   nslots=0, slot_stride=0, data_off=64;
+    uint64_t   seq   = 0;
+    static constexpr uint32_t HDR_SZ = 64;
+
+    bool init(uint32_t w, uint32_t h, uint32_t nslots_=4, const char* name="/metro_raw") {
+        nslots = nslots_;
+        size_t slot_data = (size_t)w*h*2;
+        slot_stride = (uint32_t)(((data_off + slot_data) + 63) & ~size_t(63));
+        total = HDR_SZ + (size_t)slot_stride * nslots;
+        fd = shm_open(name, O_CREAT|O_RDWR, 0666);
+        if (fd < 0) { perror("[shm] shm_open"); return false; }
+        if (ftruncate(fd, total) != 0) { perror("[shm] ftruncate"); return false; }
+        base = (uint8_t*)mmap(nullptr, total, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+        if (base == MAP_FAILED) { perror("[shm] mmap"); base=nullptr; return false; }
+        hdr = (ShmHeader*)base;
+        hdr->magic=0x5741524D; hdr->version=1; hdr->nslots=nslots;
+        hdr->slot_stride=slot_stride; hdr->max_w=w; hdr->max_h=h;
+        hdr->data_off=data_off; hdr->_pad=0; hdr->latest_seq=0; hdr->latest_slot=0; hdr->_pad2=0;
+        printf("[shm] /dev/shm%s ready: %ux%u  %u slots x %u B  (%.1f MB)\n",
+               name, w, h, nslots, slot_stride, total/1e6);
+        return true;
+    }
+    void publish(const uint16_t* px, uint32_t w, uint32_t h, uint32_t bpp,
+                 uint64_t exp_ns, uint64_t sof_ns, double gain, double ctime) {
+        if (!base) return;
+        uint64_t s = ++seq;
+        uint32_t slot = (uint32_t)(s % nslots);
+        uint8_t* sp = base + HDR_SZ + (size_t)slot*slot_stride;
+        ShmSlotMeta* m = (ShmSlotMeta*)sp;
+        m->w=w; m->h=h; m->bpp=bpp; m->_pad=0; m->exp_ns=exp_ns; m->sof_ns=sof_ns;
+        m->gain=gain; m->capture_time=ctime;
+        memcpy(sp + data_off, px, (size_t)w*h*2);
+        std::atomic_thread_fence(std::memory_order_release);
+        m->seq = s;                    /* slot's own seq, for reader tear-check */
+        hdr->latest_slot = slot;
+        hdr->latest_seq  = s;          /* publish */
+    }
+} g_shm;
+
 // ── CUDA EGL frame → uint16 ───────────────────────────────────────────────────
 
 /* Reused staging buffer for the EGL-frame -> host copy. The main loop is
@@ -235,6 +313,7 @@ struct Session {
     IEventQueue*               iEventQueue   = nullptr;
     uint64_t                   actual_exp_ns = 0;
     float                      actual_gain   = 0.0f;
+    uint64_t                   actual_sof_ns = 0;   /* sensor start-of-frame timestamp */
 
     /* Drain capture-complete events; keep the most recent actual exp/gain.
      * Non-blocking; called from the server loop (single Argus thread). */
@@ -254,6 +333,7 @@ struct Session {
             if (iM) {
                 actual_exp_ns = iM->getSensorExposureTime();
                 actual_gain   = iM->getSensorAnalogGain();
+                actual_sof_ns = iM->getSensorTimestamp();   /* kernel SOF ts, for timing tests */
             }
         }
     }
@@ -948,6 +1028,12 @@ int main(int argc,char*argv[])
         printf("[Server] READY — fast captures enabled\n");
         fflush(stdout);
 
+        /* Publish frames to shared memory for LOCAL zero-copy consumers (webui /
+         * sensor-timing tools) -- no pack, no TCP, no unpack. */
+        if (!g_shm.init(session.W, session.H))
+            printf("[Server] WARN: shm publish disabled (init failed)\n");
+        fflush(stdout);
+
         ClientSet clients;
 
         /* Stats */
@@ -994,6 +1080,8 @@ int main(int argc,char*argv[])
                     g_buf.update(std::move(px),
                                  session.W,session.H,session.BPP,
                                  rep_exp, rep_gain);
+                    g_shm.publish(g_buf.pixels.data(), g_buf.w, g_buf.h, g_buf.bpp,
+                                  rep_exp, session.actual_sof_ns, rep_gain, g_buf.capture_time);
                     frames_captured++;
 
                     if (frames_captured%30==1) {

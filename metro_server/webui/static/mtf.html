@@ -58,6 +58,22 @@
     <h2>Capture</h2>
     <button id="liveBtn" class="on">● Go live</button>
     <button id="once" class="sec">Measure once</button>
+    <div style="margin-top:8px">
+      <span class="seg" id="srcSeg">
+        <label><input type="radio" name="src" value="raw" checked><span>RAW</span></label>
+        <label title="Disabled: releasing RAW SEGVs nvargus-daemon (~28 s recovery). Needs the raw_capture teardown fix (waitForIdle) or a dual-output Argus session — deferred to IQ9.">
+          <input type="radio" name="src" value="isp" disabled><span style="opacity:.45;cursor:not-allowed">ISP fast (n/a)</span></label>
+      </span>
+      <select id="ispRes" style="width:auto;margin-left:6px" disabled>
+        <option value="1920x1080x60">1080p·60</option>
+        <option value="3840x2160x30">4K·30</option>
+        <option value="3840x2160x60">4K·60</option>
+      </select>
+    </div>
+    <div class="hint" id="srcHint" style="margin-top:4px;max-width:230px">
+      Focus assist runs on the RAW path (~7 Hz, plenty for manual focus). The ISP
+      fast path (~60 fps) is wired end-to-end but disabled: the RAW→ISP handoff
+      SEGVs nvargus-daemon on this rig — deferred to the IQ9 camera stack.</div>
     <label style="display:block;margin-top:8px;color:var(--mut);font-size:12px">
       <input type="checkbox" id="lock"> Lock ROIs <span style="color:var(--mut)">(motorized/tunable lens only — manual focus drifts the frame, keep OFF)</span></label>
     <button id="resetPeak" class="sec" style="margin-top:6px">Reset peak</button>
@@ -185,12 +201,41 @@ async function tick(){
 }
 function setLive(on){ live=on; const b=$("liveBtn");
   b.textContent = on?"■ Stop live":"● Go live"; b.className = on?"":"on";
-  $("overlay").src = on ? $("overlay").src : "/stream.mjpg?width=900";
+  // Raw MJPEG live preview when idle; in ISP mode that stream is dead, so keep
+  // the last analysed overlay instead.
+  if(!on && SRC==="raw") $("overlay").src = "/stream.mjpg?width=900";
   if(on) tick();
 }
 $("liveBtn").onclick = () => setLive(!live);
 $("once").onclick = async () => { const wasLive=live; if(wasLive) setLive(false);
   setStatus("measuring…","warn"); await measure(); setStatus("measured","ok"); };
+
+// --- Source: RAW <-> ISP (releases/reacquires the camera server-side) --------
+let SRC="raw", ispBusy=false;
+async function setSource(mode){
+  if(mode===SRC || ispBusy) return;
+  ispBusy=true; setLive(false);
+  try{
+    if(mode==="isp"){
+      const [w,h,fps]=$("ispRes").value.split("x").map(Number);
+      setStatus("entering ISP mode…","warn");
+      const r=await (await fetch("/api/isp/start",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({width:w,height:h,fps})})).json();
+      if(r.error){ setStatus("ISP start failed: "+r.error,"bad");
+        document.querySelector('input[name=src][value=raw]').checked=true; SRC="raw"; ispBusy=false; setLive(true); return; }
+      SRC="isp"; LASTBOXES=null; TIGHTEN=null;           // fresh geometry (full-res, not binned)
+      setStatus(`ISP mode ${r.width}×${r.height}@${r.fps}`,"ok");
+    } else {
+      setStatus("leaving ISP (reacquiring RAW ~7 s)…","warn");
+      await fetch("/api/isp/stop",{method:"POST"});
+      SRC="raw"; LASTBOXES=null; TIGHTEN=null;
+      setStatus("RAW mode","ok");
+    }
+  }catch(e){ setStatus("source switch error: "+e.message,"bad"); }
+  ispBusy=false; setLive(true);                          // resume live in the new source
+}
+document.querySelectorAll('input[name=src]').forEach(r=>r.addEventListener("change",()=>setSource(r.value)));
+window.addEventListener("beforeunload",()=>{ if(SRC==="isp") navigator.sendBeacon("/api/isp/stop"); });
 
 refreshInfo(); setInterval(refreshInfo,4000);
 setLive(true);           // start in live focus-assist mode

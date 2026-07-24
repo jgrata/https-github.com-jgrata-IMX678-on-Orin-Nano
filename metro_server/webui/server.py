@@ -13,8 +13,10 @@ Run:  IMG_HOST=127.0.0.1 IMG_PORT=9000 PORT=8080 python3 server.py
 """
 import os
 import sys
+import threading
 import time
 
+import numpy as np
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
@@ -34,6 +36,57 @@ app = FastAPI(title="Metro Camera Web UI (skeleton)")
 
 def _client():
     return CameraClient(IMG_HOST, IMG_PORT)
+
+
+# --- ISP capture mode (nvarguscamerasrc) ------------------------------------
+# The RAW path (raw_capture -> image_server) and the ISP path (nvarguscamerasrc,
+# in-process here) can't hold Argus at once. Entering ISP mode releases the RAW
+# camera (CMD_RELEASE_CAM); leaving it reacquires (CMD_REACQUIRE_CAM). One stream
+# at a time, guarded by a lock.
+_isp_lock = threading.Lock()
+_isp = {"stream": None, "w": 0, "h": 0, "fps": 0, "last": 0.0}
+_ISP_IDLE_LIMIT = 30.0        # s: auto-leave ISP if the page stops polling (closed tab)
+
+
+def _isp_active():
+    return _isp["stream"] is not None
+
+
+def _isp_channel(bgr, chan):
+    """Pick a single plane from an ISP BGR frame for the SFR (no Bayer bin here --
+    the ISP already demosaiced, so every plane is full-res with signal)."""
+    if chan == "R":
+        return bgr[:, :, 2]
+    if chan == "B":
+        return bgr[:, :, 0]
+    return bgr[:, :, 1]        # green as the luma proxy for 'Y'/'G'
+
+
+def _isp_watchdog():
+    """A released camera lives in THIS process, not the browser tab. If the page
+    stops polling /api/mtf (tab closed, navigated away) while ISP mode is on, leave
+    ISP and reacquire RAW so raw_capture doesn't stay dark indefinitely."""
+    while True:
+        time.sleep(5.0)
+        idle = False
+        with _isp_lock:
+            s = _isp["stream"]
+            if s is not None and (time.monotonic() - _isp["last"]) >= _ISP_IDLE_LIMIT:
+                idle = True
+                try:
+                    s.stop()
+                except Exception:
+                    pass
+                _isp.update(stream=None, w=0, h=0, fps=0)
+        if idle:
+            try:
+                with _client() as c:
+                    c.reacquire_camera()
+            except Exception:
+                pass
+
+
+threading.Thread(target=_isp_watchdog, daemon=True).start()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -67,6 +120,8 @@ async def api_params(request: Request):
 
 @app.get("/api/frame.jpg")
 def api_frame(width: int = 960):
+    if _isp_active():
+        return JSONResponse({"error": "camera in ISP mode (use the MTF page)"}, status_code=409)
     try:
         with _client() as c:
             frame, maxv = c.capture()
@@ -127,6 +182,83 @@ def mtf_page():
         return f.read()
 
 
+@app.get("/api/isp/status")
+def api_isp_status():
+    return {"active": _isp_active(), "width": _isp["w"], "height": _isp["h"], "fps": _isp["fps"]}
+
+
+@app.post("/api/isp/start")
+async def api_isp_start(request: Request):
+    """Enter ISP mode: release the RAW camera, then open nvarguscamerasrc in-process.
+    Confirms a first frame before committing; on any failure it reacquires RAW."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    w = int(body.get("width", 1920)); h = int(body.get("height", 1080)); fps = int(body.get("fps", 60))
+    with _isp_lock:
+        if _isp["stream"] is not None:
+            return {"active": True, "width": _isp["w"], "height": _isp["h"], "fps": _isp["fps"],
+                    "note": "already active"}
+        try:
+            import isp_stream
+        except Exception as e:
+            return JSONResponse({"error": "ISP unavailable (no GStreamer): " + str(e)}, status_code=501)
+        try:
+            with _client() as c:
+                c.release_camera()
+        except Exception as e:
+            return JSONResponse({"error": "release_camera failed: " + str(e)}, status_code=502)
+        # Releasing the RAW camera tears down its Argus CameraProvider, which
+        # frequently crashes nvargus-daemon; systemd restarts it but it takes
+        # ~13 s to relist. So retry (recreate the pipeline each attempt -- a failed
+        # "connection refused" attempt returns immediately) until a frame arrives.
+        last_err = None
+        for attempt in range(11):                        # ~28 s budget (covers the daemon restart)
+            s = None
+            try:
+                s = isp_stream.ISPStream(w, h, fps).start()
+                if s.frame(timeout_s=2.5) is not None:
+                    _isp.update(stream=s, w=w, h=h, fps=fps, last=time.monotonic())
+                    return {"active": True, "width": w, "height": h, "fps": fps,
+                            "attempts": attempt + 1}
+                last_err = "no frame"
+            except Exception as e:
+                last_err = str(e)
+            try:
+                if s is not None:
+                    s.stop()
+            except Exception:
+                pass
+            time.sleep(2.5)                              # wait for nvargus-daemon to relist
+        try:
+            with _client() as c:
+                c.reacquire_camera()                     # give up -> roll back to RAW
+        except Exception:
+            pass
+        return JSONResponse({"error": "ISP failed after retries: %s" % last_err, "active": False},
+                            status_code=502)
+
+
+@app.post("/api/isp/stop")
+def api_isp_stop():
+    """Leave ISP mode: stop nvarguscamerasrc and reacquire the RAW camera."""
+    with _isp_lock:
+        s = _isp["stream"]
+        if s is not None:
+            try:
+                s.stop()
+            finally:
+                _isp.update(stream=None, w=0, h=0, fps=0)
+        try:
+            with _client() as c:
+                c.reacquire_camera()
+        except Exception as e:
+            return JSONResponse({"error": "stopped ISP but reacquire failed: " + str(e),
+                                 "active": False}, status_code=502)
+    return {"active": False}
+
+
 @app.post("/api/mtf")
 async def api_mtf(request: Request):
     try:
@@ -134,9 +266,22 @@ async def api_mtf(request: Request):
     except Exception:
         body = {}
     try:
+        if _isp_active():
+            with _isp_lock:
+                s = _isp["stream"]
+                _isp["last"] = time.monotonic()
+            bgr = s.frame(timeout_s=2.0) if s is not None else None
+            if bgr is None:
+                return JSONResponse({"error": "ISP frame timeout"}, status_code=502)
+            gray = _isp_channel(bgr, body.get("chan", "R"))
+            res = mtf_analyze.analyze_gray(gray, body)
+            res["source"] = "isp"
+            return res
         with _client() as c:
             frame, maxv = c.capture()
-        return mtf_analyze.analyze(frame, maxv, body)
+        res = mtf_analyze.analyze(frame, maxv, body)
+        res["source"] = "raw"
+        return res
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
 

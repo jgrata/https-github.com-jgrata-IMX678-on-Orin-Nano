@@ -133,19 +133,43 @@ _DEFAULTS = dict(min_pct=0.3, max_pct=8.0, delta=5, max_var=0.25, min_div=0.2,
                  pitch_um=2.0, efl_mm=8.0, units="mm", chan="R")
 
 
-def analyze(frame, maxv, params=None):
+def _merge(params):
     p = dict(_DEFAULTS)
     if params:
         p.update({k: params[k] for k in params if k in _DEFAULTS})
+    return p
+
+
+def analyze(frame, maxv, params=None):
+    """RAW path: Bayer frame -> 4:1 binned single plane -> slanted-edge MTF."""
+    p = _merge(params)
     bl = params.get("black_level") if params else None
     if bl is None:
         bl = default_black_level(maxv)
-    # Locked ROIs: reuse caller-supplied boxes (skip MSER) for a fast live loop.
     boxes_in = params.get("boxes") if params else None
     luma = _bin_channel(frame, maxv, bl, p["chan"])   # R/B (fast, B&W target) or Y (absolute)
+    pitch_um = float(p["pitch_um"]) * 2.0             # half-res preview -> pitch doubles
+    clip = float((frame >= maxv).mean())
+    return _analyze_luma(luma, p, boxes_in, pitch_um, float(bl), clip)
 
+
+def analyze_gray(gray, params=None):
+    """ISP path: an already-demosaiced single-channel image in [0..1] (or 0..255).
+    No Bayer bin and no half-res pitch doubling -- the ISP frame is full-res, so
+    the MTF axis uses pitch_um directly (approximate if the ISP rescales the sensor
+    image; fine for relative focus, note it for absolute cyc/mm)."""
+    p = _merge(params)
+    boxes_in = params.get("boxes") if params else None
+    g = np.asarray(gray, np.float32)
+    if float(g.max() if g.size else 0.0) > 1.5:       # tolerate 0..255 input
+        g = g / 255.0
+    clip = float((g >= 0.999).mean())
+    return _analyze_luma(g, p, boxes_in, float(p["pitch_um"]), 0.0, clip)
+
+
+def _analyze_luma(luma, p, boxes_in, pitch_um, bl, clip_frac):
+    # Locked ROIs: reuse caller-supplied boxes (skip MSER) for a fast live loop.
     osf = int(p["osf"])
-    pitch_um = float(p["pitch_um"]) * 2.0        # half-res preview -> pitch doubles
     if p["units"] == "deg":
         pixel = float(np.degrees(np.arctan((pitch_um / 1000.0) / max(float(p["efl_mm"]), 1e-9))))
         ustr = "cyc/deg"
@@ -219,7 +243,7 @@ def analyze(frame, maxv, params=None):
     return {
         "n_squares": len(sq), "n_edges": len(edges), "found": found, "chan": p["chan"],
         "units": ustr, "nyquist": round(nyq, 4), "pixel": pixel, "osf": osf,
-        "black_level": float(bl), "clip_frac": float((frame >= maxv).mean()),
+        "black_level": float(bl), "clip_frac": float(clip_frac),
         "edges": edges, "overlay_png": _b64jpg(disp),
         "boxes": [b["verts"].round(1).tolist() for b in sq],   # for lock/reuse
         "sq_area_pct": area_pct, "sq_ar": ars,                  # for auto-tighten

@@ -15,6 +15,8 @@ CMD_CAPTURE = 0x01
 CMD_SET_PARAMS = 0x04
 CMD_GET_INFO = 0x05
 CMD_PING = 0x06
+CMD_RELEASE_CAM = 0x0C
+CMD_REACQUIRE_CAM = 0x0D
 
 DTYPE_U16 = 0x10
 DTYPE_RAW10 = 0x11
@@ -97,6 +99,22 @@ class CameraClient:
         self.sock.sendall(struct.pack("<II", CMD_SET_PARAMS, len(pay)) + pay)
         status, data = self._read_resp()          # server replies b'OK'
         return status == 0x00
+
+    def release_camera(self):
+        """Free Argus (stop raw_capture) so an ISP consumer can take the camera."""
+        self.sock.sendall(struct.pack("<II", CMD_RELEASE_CAM, 0))
+        status, data = self._read_resp()
+        if status != 0x00:
+            raise RuntimeError("release_camera failed: " + data.decode(errors="replace"))
+        return True
+
+    def reacquire_camera(self):
+        """Restart raw_capture (~7 s Argus init) and resume the RAW path."""
+        self.sock.sendall(struct.pack("<II", CMD_REACQUIRE_CAM, 0))
+        status, data = self._read_resp()
+        if status != 0x00:
+            raise RuntimeError("reacquire_camera failed: " + data.decode(errors="replace"))
+        return True
 
     def capture(self):
         """Return (frame uint16 [H,W] Bayer, maxv). Handles RAW10/RAW12/U16."""

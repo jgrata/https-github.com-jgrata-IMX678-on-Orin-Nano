@@ -26,6 +26,7 @@ import imaging  # noqa: E402
 import colorchecker  # noqa: E402
 import mtf_analyze  # noqa: E402
 import darkcheck  # noqa: E402
+import history  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 IMG_HOST = os.environ.get("IMG_HOST", "127.0.0.1")
@@ -36,6 +37,28 @@ app = FastAPI(title="Metro Camera Web UI (skeleton)")
 
 def _client():
     return CameraClient(IMG_HOST, IMG_PORT)
+
+
+# Last measurement per kind, so "Save" persists EXACTLY what's on screen (no
+# re-capture). Holds the raw frame too, for an optional full-fidelity bundle.
+_last = {"colorchecker": None, "mtf": None}
+_CAPTURE_META_KEYS = ("exposure_ns", "gain", "sensormode", "sensor_mode", "fps",
+                      "bit_depth", "width", "height", "actual_exposure_ns", "actual_gain")
+
+
+def _capture_meta(info):
+    return {k: info[k] for k in _CAPTURE_META_KEYS if isinstance(info, dict) and k in info}
+
+
+def _overlay_bytes(results):
+    uri = results.get("overlay_png") or ""
+    if "," in uri:
+        import base64
+        try:
+            return base64.b64decode(uri.split(",", 1)[1])
+        except Exception:
+            return None
+    return None
 
 
 # --- ISP capture mode (nvarguscamerasrc) ------------------------------------
@@ -171,7 +194,10 @@ async def api_colorchecker(request: Request):
     try:
         with _client() as c:
             frame, maxv = c.capture()
-        return colorchecker.analyze(frame, maxv, black_level=bl, rootpoly_degree=rp_deg)
+            meta = _capture_meta(c.info())
+        res = colorchecker.analyze(frame, maxv, black_level=bl, rootpoly_degree=rp_deg)
+        _last["colorchecker"] = {"frame": frame, "maxv": maxv, "results": res, "meta": meta}
+        return res
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
 
@@ -279,11 +305,88 @@ async def api_mtf(request: Request):
             return res
         with _client() as c:
             frame, maxv = c.capture()
+            meta = _capture_meta(c.info())
         res = mtf_analyze.analyze(frame, maxv, body)
         res["source"] = "raw"
+        _last["mtf"] = {"frame": frame, "maxv": maxv, "results": res, "meta": meta}
         return res
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.get("/history", response_class=HTMLResponse)
+def history_page():
+    with open(os.path.join(HERE, "static", "history.html"), encoding="utf-8") as f:
+        return f.read()
+
+
+@app.post("/api/history/save")
+async def api_history_save(request: Request):
+    """Persist the last measurement of `kind` (exactly what's on screen). Set
+    save_raw to also store the 4K uint16 frame for MATLAB re-analysis."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    kind = body.get("kind")
+    save_raw = bool(body.get("save_raw", False))
+    slot = _last.get(kind)
+    if slot is None:
+        return JSONResponse({"error": "nothing to save for '%s' — measure first" % kind},
+                            status_code=400)
+    try:
+        bid = history.save_bundle(
+            kind, slot["results"], overlay_jpeg=_overlay_bytes(slot["results"]),
+            raw=(slot["frame"] if save_raw else None), maxv=slot.get("maxv"),
+            meta=slot.get("meta"))
+        return {"saved": True, "id": bid, "saved_raw": save_raw}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/history")
+def api_history_list():
+    try:
+        return {"bundles": history.list_bundles(), "dir": history.SESS_DIR}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/history/item")
+def api_history_item(stem: str):
+    b = history.get_bundle(stem)
+    if b is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return b
+
+
+@app.get("/api/history/thumb")
+def api_history_thumb(stem: str):
+    jpg = history.overlay_jpeg(stem)
+    if jpg is None:
+        return Response(status_code=404)
+    return Response(content=jpg, media_type="image/jpeg")
+
+
+@app.get("/api/history/download")
+def api_history_download(stem: str):
+    from fastapi.responses import FileResponse
+    p = history.download_path(stem)
+    if p is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return FileResponse(p, media_type="application/x-hdf5", filename=os.path.basename(p))
+
+
+@app.post("/api/history/delete")
+async def api_history_delete(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    stem = body.get("stem")
+    if not stem:
+        return JSONResponse({"error": "stem required"}, status_code=400)
+    return {"deleted": history.delete_bundle(stem)}
 
 
 @app.post("/api/colorchecker/meter")

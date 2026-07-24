@@ -46,7 +46,7 @@
 <body>
 <header>
   <h1>ColorChecker measurement</h1>
-  <a href="/">&larr; live view</a>
+  <a href="/">&larr; live view</a> <a href="/mtf">MTF</a> <a href="/history">History</a>
   <div class="status" id="status">ready</div>
 </header>
 
@@ -72,6 +72,9 @@
       <button class="sec" id="applyEG">Apply exposure / gain</button>
       <button class="sec" id="autoexp">Auto-expose (meter chart)</button>
       <button id="measure">Measure ColorChecker</button>
+      <button class="sec" id="save" disabled>Save</button>
+      <label style="font-size:11px;color:var(--mut);margin-left:4px"><input type="checkbox" id="saveRaw"> incl. raw</label>
+      <div class="hint" id="saveMsg"></div>
       <div class="hint" id="meterInfo">Auto-expose meters the chart's own white/black patches to find an
         HDR bracket that keeps every patch unclipped with good shadow SNR (reports the exposures).</div>
     </div>
@@ -189,8 +192,16 @@ $("measure").onclick = async () => {
   if(d.error){ setStatus("error: "+d.error,"bad"); return; }
   if(!d.detected){ setStatus("chart NOT detected (clip "+(d.clip_frac*100).toFixed(1)+"%) — reframe/expose","bad"); return; }
   render(d);
+  $("save").disabled=false; $("saveMsg").textContent="";
   setStatus("measured","ok");
 };
+
+$("save").onclick = async () => { $("saveMsg").textContent="saving…";
+  try{ const r = await (await fetch("/api/history/save",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({kind:"colorchecker", save_raw:$("saveRaw").checked})})).json();
+    $("saveMsg").innerHTML = r.error ? `<span style="color:var(--bad)">${r.error}</span>`
+      : `saved <b>${r.id}</b>${r.saved_raw?" (+raw)":""} · <a href="/history" style="color:var(--acc)">history</a>`;
+  }catch(e){ $("saveMsg").textContent="error: "+e.message; } };
 
 function render(d){
   $("overlay").src = d.overlay_png; $("overlayCard").style.display="";

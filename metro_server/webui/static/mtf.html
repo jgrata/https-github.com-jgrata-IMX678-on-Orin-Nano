@@ -43,7 +43,7 @@
 <body>
 <header>
   <h1>MTF / focus assist</h1>
-  <a href="/">live</a> <a href="/colorchecker">ColorChecker</a>
+  <a href="/">live</a> <a href="/colorchecker">ColorChecker</a> <a href="/history">History</a>
   <div class="status" id="status">ready</div>
 </header>
 
@@ -77,6 +77,11 @@
     <label style="display:block;margin-top:8px;color:var(--mut);font-size:12px">
       <input type="checkbox" id="lock"> Lock ROIs <span style="color:var(--mut)">(motorized/tunable lens only — manual focus drifts the frame, keep OFF)</span></label>
     <button id="resetPeak" class="sec" style="margin-top:6px">Reset peak</button>
+    <div style="margin-top:8px;border-top:1px solid var(--line);padding-top:8px">
+      <button id="save" class="sec">Save</button>
+      <label style="font-size:11px;color:var(--mut);margin-left:6px"><input type="checkbox" id="saveRaw"> incl. raw</label>
+      <div class="hint" id="saveMsg" style="margin-top:4px"></div>
+    </div>
   </div>
   <div class="card">
     <h2>Exposure</h2>
@@ -157,6 +162,12 @@ async function measure(){
   render(d); return d;
 }
 $("resetPeak").onclick = () => { PEAK = {}; setStatus("peak reset","ok"); };
+$("save").onclick = async () => { $("saveMsg").textContent = "saving…";
+  try{ const r = await (await fetch("/api/history/save",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({kind:"mtf", save_raw:$("saveRaw").checked})})).json();
+    $("saveMsg").innerHTML = r.error ? `<span style="color:var(--bad)">${r.error}</span>`
+      : `saved <b>${r.id}</b>${r.saved_raw?" (+raw)":""} · <a href="/history" style="color:var(--acc)">history</a>`;
+  }catch(e){ $("saveMsg").textContent = "error: "+e.message; } };
 
 function render(d){
   $("overlay").src = d.overlay_png;

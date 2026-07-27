@@ -343,3 +343,72 @@ def analyze(frame, maxv, black_level=None, rootpoly_degree=2):
         "overlay_png": _b64png(ov),
         "swatch_png": _swatch_image(after, ref),
     }
+
+
+# ── Vendor-ISP colour eval (processed frames: Jetson ISP / IQ9 NV12) ──────────
+# No CCM fit -- the ISP already colour-corrects (its tuning carries the CCMs), so we
+# measure ΔE00 of ITS displayed output vs the ColorChecker reference. The input is a
+# display-ready sRGB BGR frame, so we detect on it directly (no tonemap) and sample
+# in sRGB (no black-level / linearisation of raw).
+def _srgb2lab(srgb01):
+    """sRGB (gamma-encoded RGB in [0,1]) -> Lab (D65). OpenCV RGB2Lab assumes sRGB."""
+    lab = cv2.cvtColor(np.clip(srgb01, 0, 1).astype(np.float32).reshape(-1, 1, 3),
+                       cv2.COLOR_RGB2Lab)
+    return lab.reshape(-1, 3).astype(np.float64)
+
+
+def _swatch_image8(meas8, ref8, cell=54, gap=3):
+    """4x6 swatch; each cell LEFT = measured (ISP), RIGHT = reference. 8-bit RGB in."""
+    H = 4 * cell + 5 * gap; W = 6 * cell + 5 * gap
+    img = np.full((H, W, 3), 30, np.uint8)
+    for p in range(24):
+        i, j = p // 6, p % 6
+        y0 = gap + i * (cell + gap); x0 = gap + j * (cell + gap); half = cell // 2
+        img[y0:y0 + cell, x0:x0 + half] = meas8[p][::-1]         # left = measured (to BGR)
+        img[y0:y0 + cell, x0 + half:x0 + cell] = ref8[p][::-1]   # right = reference
+    return _b64png(img)
+
+
+def analyze_processed(bgr):
+    """Vendor-ISP colour eval on an ISP-processed BGR frame (e.g. IQ9 NV12).
+    Returns per-patch + summary ΔE00 of the ISP output vs the ColorChecker reference,
+    the neutral-patch colour cast, a detection overlay, and a measured-vs-ref swatch."""
+    det = cv2.mcc.CCheckerDetector_create()
+    if not det.process(bgr, cv2.mcc.MCC24):
+        return {"detected": False, "clip_frac": float((bgr >= 254).mean())}
+    cc = det.getListColorChecker()[0]
+    corners = _sort_corners(cc.getBox())
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB).astype(np.float64)
+    meas, ctrs, (hh, hw) = _sample_linear(rgb, corners)          # 24x3 in 0..255
+    meas01 = np.clip(meas / 255.0, 0.0, 1.0)
+
+    ref = np.asarray(hdr.colorchecker_linear()); ref_lab = _lin2lab(ref)
+    best = None                                                  # orient by min mean ΔE00
+    for name, perm in _PERMS.items():
+        de = _de2000(_srgb2lab(meas01[perm]), ref_lab)
+        if best is None or de.mean() < best[1]:
+            best = (name, float(de.mean()), perm)
+    orient, _, perm = best
+    meas01 = meas01[perm]; ctrs = [ctrs[k] for k in perm.tolist()]
+    meas_lab = _srgb2lab(meas01)
+    de = _de2000(meas_lab, ref_lab)
+
+    neutral = meas_lab[18:24]                                    # gray ramp: residual cast
+    cast_a = float(np.mean(np.abs(neutral[:, 1]))); cast_b = float(np.mean(np.abs(neutral[:, 2])))
+    worst = np.argsort(-de)[:3]
+
+    ov = bgr.copy()
+    for (r, c) in ctrs:
+        cv2.rectangle(ov, (c - hw, r - hh), (c + hw, r + hh), (0, 255, 0), 2)
+    meas8 = (meas01 * 255 + 0.5).astype(np.uint8)
+
+    return {
+        "detected": True, "mode": "vendor-isp-eval", "metric": "CIEDE2000",
+        "orientation": orient, "cost": float(cc.getCost()),
+        "clip_frac": float((bgr >= 254).mean()),
+        "dE_mean": float(de.mean()), "dE_max": float(de.max()), "dE_median": float(np.median(de)),
+        "dE": de.round(3).tolist(), "patch_names": PATCH_NAMES,
+        "worst": [{"name": PATCH_NAMES[i], "de": round(float(de[i]), 2)} for i in worst],
+        "neutral_cast_a": round(cast_a, 2), "neutral_cast_b": round(cast_b, 2),
+        "overlay_png": _b64png(ov), "swatch_png": _swatch_image8(meas8, _lin2srgb8(ref)),
+    }

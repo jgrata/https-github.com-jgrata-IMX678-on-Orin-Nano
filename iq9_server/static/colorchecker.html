@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ColorChecker — vendor-ISP eval — IQ9</title>
+<style>
+  :root { --bg:#15171c; --panel:#1e2128; --ink:#e6e8ec; --mut:#9aa3b2;
+          --acc:#4ea1ff; --line:#2c303a; --ok:#5fd08a; --warn:#e6c15f; --bad:#e46a6a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:13px/1.45 system-ui,Segoe UI,Roboto,sans-serif; }
+  header { padding:8px 14px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; }
+  header h1 { font-size:14px; margin:0; font-weight:600; }
+  header a { color:var(--acc); text-decoration:none; font-size:13px; }
+  header .status { margin-left:auto; color:var(--mut); font-size:12px; }
+  .wrap { display:flex; gap:12px; padding:12px 14px; flex-wrap:wrap; align-items:flex-start; }
+  .col { flex:1 1 320px; min-width:300px; display:flex; flex-direction:column; gap:12px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  .card h2 { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--mut); margin:0 0 8px; }
+  img { width:100%; border-radius:8px; border:1px solid var(--line); background:#0c0e12; display:block; }
+  button { background:var(--acc); color:#08213d; border:0; border-radius:6px; padding:8px 14px; font-weight:600; cursor:pointer; font:inherit; }
+  button.sec { background:#2a2f3a; color:var(--ink); }
+  .tiles { display:flex; gap:10px; flex-wrap:wrap; }
+  .tile { background:#12141a; border:1px solid var(--line); border-radius:8px; padding:8px 12px; min-width:92px; }
+  .tile .n { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .tile .l { font-size:10.5px; color:var(--mut); text-transform:uppercase; letter-spacing:.04em; }
+  .grid { display:grid; grid-template-columns:repeat(6,1fr); gap:4px; }
+  .patch { border-radius:5px; padding:4px 3px; text-align:center; font-size:9.5px; line-height:1.15; color:#0c0e12; }
+  .patch .de { font-weight:700; font-size:12px; font-variant-numeric:tabular-nums; }
+  .hint { font-size:10.5px; color:var(--mut); margin-top:6px; }
+  .big { font-size:12px; }
+  .b { font-weight:600; } .mut { color:var(--mut); }
+</style>
+</head>
+<body>
+<header>
+  <h1>ColorChecker — vendor-ISP eval</h1>
+  <a href="/">&larr; live</a> <a href="/mtf">MTF</a> <a href="/history">History</a>
+  <div class="status" id="status">ready</div>
+</header>
+
+<div class="wrap">
+  <div class="col">
+    <div class="card">
+      <button id="measure">Measure ColorChecker</button>
+      <button class="sec" id="save" disabled>Save</button>
+      <div class="hint">Measures ΔE00 of the <b>ISP's</b> output vs the ColorChecker reference —
+        i.e. how accurate the Spectra ISP's colour is. No CCM fit (the ISP already corrects;
+        its tuning carries LI's CCMs). Derived-CCM-from-RAW needs the CamX RDI path.</div>
+    </div>
+    <div class="card" id="ovCard" style="display:none">
+      <h2>Detection</h2><img id="overlay" alt="detection overlay">
+    </div>
+    <div class="card" id="swCard" style="display:none">
+      <h2>Measured (left) vs reference (right)</h2><img id="swatch" alt="swatch">
+    </div>
+  </div>
+  <div class="col">
+    <div class="card" id="sumCard" style="display:none">
+      <h2>Summary</h2>
+      <div class="tiles" id="tiles"></div>
+      <div class="hint" id="meta"></div>
+    </div>
+    <div class="card" id="worstCard" style="display:none">
+      <h2>Worst patches</h2><div id="worst" class="big"></div>
+    </div>
+    <div class="card" id="gridCard" style="display:none">
+      <h2>Per-patch ΔE00</h2>
+      <div class="grid" id="grid"></div>
+      <div class="hint">cell colour = reference; green &lt;3 · amber 3–6 · red &gt;6</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const REF = null;
+function setStatus(t,c){ const s=$("status"); s.textContent=t; s.style.color = c==="bad"?"var(--bad)":c==="ok"?"var(--ok)":c==="warn"?"var(--warn)":"var(--mut)"; }
+const deColor = d => d==null?"#555":(d<3?"#5fd08a":d<6?"#e6c15f":"#e46a6a");
+
+let LAST=null;
+$("measure").onclick = async () => {
+  setStatus("capturing + detecting…","warn"); $("measure").disabled=true;
+  let d;
+  try{ d = await (await fetch("/api/colorchecker",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"})).json(); }
+  catch(e){ setStatus("request failed: "+e.message,"bad"); $("measure").disabled=false; return; }
+  $("measure").disabled=false;
+  if(d.error){ setStatus("error: "+d.error,"bad"); return; }
+  if(!d.detected){ setStatus("chart NOT detected (clip "+((d.clip_frac||0)*100).toFixed(1)+"%) — aim at the ColorChecker","bad");
+    ["ovCard","swCard","sumCard","worstCard","gridCard"].forEach(i=>$(i).style.display="none"); return; }
+  LAST=d; render(d); $("save").disabled=false; setStatus("measured","ok");
+};
+
+$("save").onclick = async () => {
+  setStatus("saving…","warn");
+  try{ const r = await (await fetch("/api/history/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({kind:"colorchecker"})})).json();
+    setStatus(r.error?("save: "+r.error):("saved "+r.id),"ok");
+  }catch(e){ setStatus("save failed","bad"); }
+};
+
+function render(d){
+  $("overlay").src=d.overlay_png; $("ovCard").style.display="";
+  $("swatch").src=d.swatch_png; $("swCard").style.display="";
+  const tiles=[["ΔE mean",d.dE_mean,2],["ΔE max",d.dE_max,2],["ΔE median",d.dE_median,2],
+               ["neutral a*",d.neutral_cast_a,2],["neutral b*",d.neutral_cast_b,2]];
+  $("tiles").innerHTML = tiles.map(([l,v,p])=>`<div class="tile"><div class="n" style="color:${l.startsWith('ΔE')?deColor(v):'var(--ink)'}">${v==null?'–':(+v).toFixed(p)}</div><div class="l">${l}</div></div>`).join("");
+  $("meta").innerHTML = `orientation <b>${d.orientation}</b> · detector cost ${(+d.cost).toFixed(3)} · clip ${((d.clip_frac||0)*100).toFixed(1)}% · metric CIEDE2000`;
+  $("sumCard").style.display="";
+  $("worst").innerHTML = (d.worst||[]).map(w=>`<div><span class="b" style="color:${deColor(w.de)}">${w.de.toFixed(2)}</span> <span class="mut">${w.name}</span></div>`).join("");
+  $("worstCard").style.display = (d.worst&&d.worst.length)?"":"none";
+  $("grid").innerHTML = (d.dE||[]).map((de,i)=>`<div class="patch" style="background:${deColor(de)}"><div class="de">${de.toFixed(1)}</div>${(d.patch_names&&d.patch_names[i]||"").replace(/ /g,"&nbsp;")}</div>`).join("");
+  $("gridCard").style.display = (d.dE&&d.dE.length)?"":"none";
+}
+</script>
+</body>
+</html>

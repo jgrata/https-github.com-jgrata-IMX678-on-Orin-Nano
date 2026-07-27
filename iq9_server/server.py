@@ -31,6 +31,11 @@ for _p in (HERE, os.path.join(HERE, "_shared"),
 import camera_qmmf            # noqa: E402  (IQ9 capture backend)
 import mtf_analyze            # noqa: E402  (shared: slanted-edge MTF, analyze_gray path)
 try:
+    import colorchecker       # noqa: E402  (shared: detect + CIEDE2000; analyze_processed)
+    _HAS_CC = True
+except Exception:
+    _HAS_CC = False
+try:
     import history            # noqa: E402  (shared: HDF5 session save)
     _HAS_HISTORY = True
 except Exception:
@@ -213,7 +218,7 @@ async def api_mtf(request: Request):
 
 
 # ── history / save (reused shared module; stores the processed frame) ────────
-_last = {"mtf": None}
+_last = {"mtf": None, "colorchecker": None}
 
 
 @app.post("/api/history/save")
@@ -247,14 +252,22 @@ def api_history_list():
     return {"bundles": history.list_bundles(), "dir": history.SESS_DIR}
 
 
-# ── colorchecker: vendor-ISP eval (NV12) — placeholder until wired ───────────
+# ── colorchecker: vendor-ISP colour eval on the NV12 (ISP-processed) frame ───
 @app.post("/api/colorchecker")
 async def api_colorchecker(request: Request):
-    return JSONResponse(
-        {"error": "ColorChecker on IQ9 = vendor-ISP colour eval on NV12 (ΔE of the "
-                  "ISP output vs reference) — not wired yet. Derived-CCM-from-RAW "
-                  "needs the CamX RDI usecase + CHI-CDK."},
-        status_code=501)
+    if not _HAS_CC:
+        return JSONResponse({"error": "colorchecker module not deployed"}, status_code=501)
+    bgr = _frame()
+    if bgr is None:
+        return JSONResponse({"error": "no frame"}, status_code=502)
+    try:
+        res = colorchecker.analyze_processed(bgr)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    if res.get("detected"):
+        _last["colorchecker"] = {"frame": bgr, "results": res,
+                                 "meta": {"source": "nv12-isp", "camera": CAM, "w": W, "h": H}}
+    return res
 
 
 if __name__ == "__main__":

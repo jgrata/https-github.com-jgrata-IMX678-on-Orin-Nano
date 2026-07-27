@@ -28,13 +28,29 @@ transport are platform-specific (structure "A" — monorepo, DRY).
 **Validated:** NV12 processed → BGR via `qtiqmmfsrc ! …NV12 ! videoconvert ! BGRx !
 appsink` in Python (`QmmfCapture(mode="nv12")` returns a real 1080p BGR frame).
 
-**Open: RAW Bayer** — the caps advertise `video/x-bayer` but naive caps
-(`format=rggb,width=3856,height=2180,framerate=30`) deliver **no frame** (pipeline
-negotiates, then times out; a MESA/GBM buffer gripe also appears). The color/CCM/MTF
-science needs linear RAW, so this is the **#1 open task**. Likely needs a camx/QMMF
-stream-config change or the right RAW caps/bit-depth qualifier (Qualcomm camera docs
-/ QMMF SDK). Note: `qtiqmmfsrc` can't be instantiated twice per process
-(`qmmfsrc_init` asserts) — one capture per process.
+**Open (#1 risk): RAW Bayer is not accessible via `qtiqmmfsrc` on this build.**
+The color/CCM/MTF science needs *linear RAW*, but every standard path failed
+(investigated 2026-07-24):
+- bayer on the **video pad** → links, then QMMF **`StartVideoTracks Failed`**.
+- **`bpp=12`** (per the newer Qualcomm docs, doc 80-70014-50) → caps don't link;
+  this build's template has no `bpp` field.
+- bayer on the **image pad** (snapshot) → links alone, but `capture-image` returns
+  **False / no frame** (needs a running preview; the preview+snapshot combo hits a
+  negotiation quirk at full res).
+- **Qualcomm's own examples** (`/usr/bin/gst-camera-*-example`,
+  `gst-camera-opencv-resize.py`) use **only NV12** — none demonstrate bayer/snapshot.
+- **libcamera** sees no cameras (`cam -l` empty; cam-server owns them).
+
+**Leading option:** CAMSS **V4L2-direct** — stop `cam-server`, wire the media graph
+with `media-ctl` (sensor→CSIPHY→CSID→IFE→V4L2 capture node), grab RAW over V4L2,
+bypassing QMMF/CamX. Likely **mutually exclusive with `qtiqmmfsrc`** (same
+raw-vs-processed exclusivity as the Jetson's Argus-vs-raw_capture). Other options:
+a QMMF-SDK/CamX custom RAW stream config, or Qualcomm support. Needs platform
+expertise to settle.
+
+Canonical idiom (from the examples): `qtiqmmfsrc name=camsrc video_0::type=video !
+video/x-raw,format=NV12,… ! … ! appsink`. Gotcha: `qtiqmmfsrc` can't be created
+twice per process (`qmmfsrc_init` asserts) — one capture per process.
 
 ## Structure (A — shared monorepo)
 

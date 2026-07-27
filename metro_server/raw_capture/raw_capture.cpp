@@ -30,6 +30,9 @@
 #include <fcntl.h>
 #include <atomic>
 #include <arm_neon.h>       /* NEON RAW10/RAW12 packers */
+#include <thread>           /* serve thread — decouple TCP pack+send from capture */
+#include <mutex>
+#include <memory>
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -138,6 +141,19 @@ struct FrameBuffer {
         return (now - capture_time) * 1000.0;
     }
 } g_buf;
+
+// ── Published frame for server mode (capture thread swaps; serve thread reads) ─
+// A shared_ptr swap hands the latest frame to the TCP serve thread with zero copy:
+// the capture loop builds a new FrameBuffer and atomically republishes the pointer,
+// so serve can pack+send from an immutable frame (kept alive by its own shared_ptr)
+// WITHOUT blocking capture. Only the pointer swap is locked (microseconds).
+static std::shared_ptr<FrameBuffer> g_pub;
+static std::mutex                   g_pub_mtx;
+static std::shared_ptr<FrameBuffer> pub_get()
+{
+    std::lock_guard<std::mutex> lk(g_pub_mtx);
+    return g_pub;
+}
 
 // ── Shared-memory frame publisher (in-process zero-copy tap) ──────────────────
 // Publishes each decoded uint16 frame into a POSIX shm ring so LOCAL consumers
@@ -715,13 +731,16 @@ static void pack_raw12(const uint16_t* px, size_t n, std::vector<uint8_t>& out)
     if (g < groups) pack_raw12_scalar(px + i, n - i, o);
 }
 
-/* Pending exp/gain change requested by a client, consumed by the Argus loop.
- * Guarded by a simple flag pair; only the loop writes cur_* on the Session. */
+/* Pending exp/gain change requested by a client (on the serve thread), consumed
+ * by the Argus/capture loop. Guarded by a mutex: the serve thread and capture
+ * thread are now separate, so a plain volatile flag+payload is NOT safe on ARM's
+ * weak memory model (the flag could be seen before the payload). */
 struct PendingCtl {
-    volatile bool     have = false;
-    volatile uint64_t exp_ns = 0;
-    volatile float    gain = 0.0f;
+    bool     have = false;
+    uint64_t exp_ns = 0;
+    float    gain = 0.0f;
 } g_pending;
+static std::mutex g_pending_mtx;
 
 static void serve_frame(int cli, const FrameBuffer& buf)
 {
@@ -755,7 +774,8 @@ static void serve_frame_packed(int cli, const FrameBuffer& buf)
         send_all(cli,&err,sizeof(err));
         return;
     }
-    static std::vector<uint8_t> packed;   // reused; single-threaded serve path
+    struct timespec _p0; clock_gettime(CLOCK_MONOTONIC,&_p0);
+    static std::vector<uint8_t> packed;   // reused; single serve thread
     if (buf.bpp == 12) pack_raw12(buf.pixels.data(), buf.pixels.size(), packed);
     else               pack_raw10(buf.pixels.data(), buf.pixels.size(), packed);
     NetHdr nh{};
@@ -769,43 +789,44 @@ static void serve_frame_packed(int cli, const FrameBuffer& buf)
     nh.pad        = (uint32_t)packed.size();   // packed payload length in bytes
     send_all(cli,&nh,sizeof(nh));
     send_all(cli,packed.data(),packed.size());
+    struct timespec _p1; clock_gettime(CLOCK_MONOTONIC,&_p1);
+    g_serve_ms = (_p1.tv_sec-_p0.tv_sec)*1e3 + (_p1.tv_nsec-_p0.tv_nsec)*1e-6;  /* pack+send (serve thread) */
 }
 
 /* Handle one request on an already-open client socket.
  * Returns false if the connection should be closed. */
-static bool handle_request(int cli, const FrameBuffer& buf)
+static bool handle_request(int cli)
 {
     ReqHdr rq{};
     if (!recv_all(cli,&rq,sizeof(rq))) return false;  /* client closed */
 
     switch (rq.cmd) {
-    case REQ_FRAME:
-        serve_frame(cli, buf);
+    case REQ_FRAME: {
+        auto s = pub_get(); FrameBuffer empty;
+        serve_frame(cli, s ? *s : empty);             /* s keeps the frame alive during send */
         return true;
-    case REQ_FRAME_PACKED:
-        serve_frame_packed(cli, buf);
+    }
+    case REQ_FRAME_PACKED: {
+        auto s = pub_get(); FrameBuffer empty;
+        serve_frame_packed(cli, s ? *s : empty);
         return true;
+    }
     case REQ_SET_EXPGAIN: {
-        g_pending.exp_ns = rq.want_exp;
-        g_pending.gain   = rq.want_gain;
-        g_pending.have   = true;
+        {   std::lock_guard<std::mutex> lk(g_pending_mtx);
+            g_pending.exp_ns = rq.want_exp;
+            g_pending.gain   = rq.want_gain;
+            g_pending.have   = true;                  /* applied on the Argus/capture thread */
+        }
         uint32_t ack = 0;
         return send_all(cli,&ack,sizeof(ack));
     }
     case REQ_PING: {
-        /* Lightweight actual-value probe: return a NetHdr (no pixel payload)
-         * carrying the exp/gain currently tagged on the latest buffer, so the
-         * Python AE monitor can poll without a full-frame transfer or any
-         * v4l2-ctl subprocess. nf=0 signals "header only". */
+        /* Lightweight actual-value probe: NetHdr only (nf=0), exp/gain from the
+         * latest frame, so the Python AE monitor can poll without a full transfer. */
+        auto s = pub_get();
         NetHdr nh{};
-        nh.magic      = 0x52413130;
-        nh.w          = buf.w;
-        nh.h          = buf.h;
-        nh.bpp        = buf.bpp;
-        nh.nf         = 0;
-        nh.exp_ns     = buf.exp_ns;
-        nh.gain_x1000 = (uint32_t)(buf.gain*1000);
-        nh.pad        = 0;
+        nh.magic = 0x52413130; nh.nf = 0; nh.pad = 0;
+        if (s) { nh.w=s->w; nh.h=s->h; nh.bpp=s->bpp; nh.exp_ns=s->exp_ns; nh.gain_x1000=(uint32_t)(s->gain*1000); }
         return send_all(cli,&nh,sizeof(nh));
     }
     default:
@@ -813,37 +834,31 @@ static bool handle_request(int cli, const FrameBuffer& buf)
     }
 }
 
-/* Non-blocking client set management. Accept new connections, service any
- * readable client sockets, drop closed ones. clients[] holds open fds. */
+/* Client set management. Runs on the SERVE thread (not the capture loop), so
+ * pack+TCP never blocks capture. poll() blocks up to timeout_ms on srv + all
+ * client fds, then accepts new connections and services readable ones. Each
+ * request pulls the current published frame via pub_get() (zero-copy). */
 struct ClientSet {
     std::vector<int> fds;
 
-    void poll(int srv, const FrameBuffer& buf)
+    void poll(int srv, int timeout_ms)
     {
-        /* Accept every pending new connection (non-blocking). */
-        while (true) {
-            fd_set afds; FD_ZERO(&afds); FD_SET(srv,&afds);
-            struct timeval tv={0,0};
-            if (select(srv+1,&afds,nullptr,nullptr,&tv)<=0) break;
-            int cli=accept(srv,nullptr,nullptr);
-            if (cli<0) break;
-            int one=1; setsockopt(cli,IPPROTO_TCP,TCP_NODELAY,&one,sizeof(one));
-            fds.push_back(cli);
-        }
-
-        if (fds.empty()) return;
-
-        /* Which existing clients have a request waiting? */
-        fd_set rfds; FD_ZERO(&rfds); int maxfd=-1;
+        fd_set rfds; FD_ZERO(&rfds); FD_SET(srv,&rfds); int maxfd=srv;
         for (int fd : fds) { FD_SET(fd,&rfds); if (fd>maxfd) maxfd=fd; }
-        struct timeval tv={0,0};
-        if (select(maxfd+1,&rfds,nullptr,nullptr,&tv)<=0) return;
+        struct timeval tv={ timeout_ms/1000, (timeout_ms%1000)*1000 };
+        if (select(maxfd+1,&rfds,nullptr,nullptr,&tv) <= 0) return;   /* idle -> return (thread rechecks g_running) */
 
-        std::vector<int> keep;
-        keep.reserve(fds.size());
+        if (FD_ISSET(srv,&rfds)) {                                    /* accept one pending connection */
+            int cli=accept(srv,nullptr,nullptr);
+            if (cli>=0) {
+                int one=1; setsockopt(cli,IPPROTO_TCP,TCP_NODELAY,&one,sizeof(one));
+                fds.push_back(cli);
+            }
+        }
+        std::vector<int> keep; keep.reserve(fds.size());
         for (int fd : fds) {
             if (FD_ISSET(fd,&rfds)) {
-                if (handle_request(fd, buf)) keep.push_back(fd);
+                if (handle_request(fd)) keep.push_back(fd);
                 else close(fd);
             } else {
                 keep.push_back(fd);
@@ -854,6 +869,15 @@ struct ClientSet {
 
     void close_all() { for (int fd : fds) close(fd); fds.clear(); }
 };
+
+/* Serve thread: services TCP clients from the published frame, independent of
+ * the capture loop. Exits when g_running clears (select timeout bounds latency). */
+static void serve_thread_fn(int srv)
+{
+    ClientSet clients;
+    while (g_running) clients.poll(srv, 5);
+    clients.close_all();
+}
 
 // ── File save (single-shot mode) ──────────────────────────────────────────────
 
@@ -1059,7 +1083,8 @@ int main(int argc,char*argv[])
             printf("[Server] WARN: shm publish disabled (init failed)\n");
         fflush(stdout);
 
-        ClientSet clients;
+        /* TCP serve runs on its own thread so pack+send never throttles capture. */
+        std::thread serve_thr(serve_thread_fn, srv);
 
         /* Stats */
         int frames_captured = 0;
@@ -1067,16 +1092,14 @@ int main(int argc,char*argv[])
         while (g_running) {
 
             /* ── Apply any pending live exp/gain change (Argus thread) ────── */
-            if (g_pending.have) {
-                uint64_t we = g_pending.exp_ns;
-                float    wg = g_pending.gain;
-                g_pending.have = false;
-                if (session.set_exposure_gain_live(we, wg)) {
-                    printf("[Server] live exp=%.1fms gain=%s\n",
-                           we/1e6,
-                           wg>0.0f ? std::to_string(wg).c_str() : "auto");
-                    fflush(stdout);
-                }
+            bool have=false; uint64_t we=0; float wg=0.0f;
+            {   std::lock_guard<std::mutex> lk(g_pending_mtx);
+                if (g_pending.have) { have=true; we=g_pending.exp_ns; wg=g_pending.gain; g_pending.have=false; }
+            }
+            if (have && session.set_exposure_gain_live(we, wg)) {
+                printf("[Server] live exp=%.1fms gain=%s\n",
+                       we/1e6, wg>0.0f ? std::to_string(wg).c_str() : "auto");
+                fflush(stdout);
             }
 
             /* ── Try to get latest frame (short timeout) ─────────────────── */
@@ -1102,11 +1125,14 @@ int main(int argc,char*argv[])
                                         ? session.actual_exp_ns : session.cur_exp_ns;
                     float    rep_gain = session.actual_gain > 0.0f
                                         ? session.actual_gain : session.cur_gain;
-                    g_buf.update(std::move(px),
-                                 session.W,session.H,session.BPP,
-                                 rep_exp, rep_gain);
-                    g_shm.publish(g_buf.pixels.data(), g_buf.w, g_buf.h, g_buf.bpp,
-                                  rep_exp, session.actual_sof_ns, rep_gain, g_buf.capture_time);
+                    /* Build the new frame and republish the pointer (zero-copy
+                     * hand-off to the serve thread; only the swap is locked). */
+                    auto fb = std::make_shared<FrameBuffer>();
+                    fb->update(std::move(px), session.W, session.H, session.BPP, rep_exp, rep_gain);
+                    fb->seq = frames_captured + 1;         /* running seq (per-object update() would reset) */
+                    { std::lock_guard<std::mutex> lk(g_pub_mtx); g_pub = fb; }
+                    g_shm.publish(fb->pixels.data(), fb->w, fb->h, fb->bpp,
+                                  rep_exp, session.actual_sof_ns, rep_gain, fb->capture_time);
                     frames_captured++;
 
                     if (frames_captured%30==1) {
@@ -1114,8 +1140,8 @@ int main(int argc,char*argv[])
                         struct timespec ts; clock_gettime(CLOCK_MONOTONIC,&ts);
                         double now=ts.tv_sec+ts.tv_nsec*1e-9;
                         double fps=(t_last>0)?(frames_captured-f_last)/(now-t_last):0.0;
-                        printf("[Buffer] frame=%d  conns=%zu  decode=%.1fms  serve=%.1fms  fps=%.1f\n",
-                               g_buf.seq, clients.fds.size(), g_dec_ms, g_serve_ms, fps);
+                        printf("[Buffer] frame=%d  decode=%.1fms  serve=%.1fms(thread)  fps=%.1f\n",
+                               frames_captured, g_dec_ms, g_serve_ms, fps);
                         fflush(stdout);
                         t_last=now; f_last=frames_captured;
                     }
@@ -1129,18 +1155,12 @@ int main(int argc,char*argv[])
                 session.fill_pipeline(3);
             }
             /* CUDA_ERROR_UNKNOWN or other: ignore, try again */
-
-            /* ── Service persistent client connections (non-blocking) ────── */
-            struct timespec _s0; clock_gettime(CLOCK_MONOTONIC,&_s0);
-            clients.poll(srv, g_buf);
-            struct timespec _s1; clock_gettime(CLOCK_MONOTONIC,&_s1);
-            g_serve_ms = (_s1.tv_sec-_s0.tv_sec)*1e3 + (_s1.tv_nsec-_s0.tv_nsec)*1e-6;
+            /* Serving is handled by serve_thr — the capture loop no longer blocks on it. */
         }
 
-        printf("[Server] shutting down  frames=%d  conns=%zu\n",
-               frames_captured, clients.fds.size());
+        printf("[Server] shutting down  frames=%d\n", frames_captured);
         fflush(stdout);
-        clients.close_all();
+        serve_thr.join();                                  /* g_running cleared -> serve exits within ~5ms */
         close(srv);
     }
 

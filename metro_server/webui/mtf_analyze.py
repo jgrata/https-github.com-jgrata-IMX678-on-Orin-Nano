@@ -18,7 +18,9 @@ import cv2
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))               # webui/
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # metro_server/
 import mtf  # noqa: E402  (validated jslantedge port)
-from imaging import default_black_level  # noqa: E402
+# `default_black_level` (from imaging, which pulls in the Tegra-only `hdr`) is used
+# ONLY by the RAW analyze() path -- imported lazily there so the analyze_gray path
+# (Jetson ISP + IQ9 NV12) can run without imaging/hdr on the box.
 
 
 def _bin_channel(frame, maxv, black_level, chan="R"):
@@ -145,6 +147,7 @@ def analyze(frame, maxv, params=None):
     p = _merge(params)
     bl = params.get("black_level") if params else None
     if bl is None:
+        from imaging import default_black_level    # lazy (Tegra-only dep chain)
         bl = default_black_level(maxv)
     boxes_in = params.get("boxes") if params else None
     luma = _bin_channel(frame, maxv, bl, p["chan"])   # R/B (fast, B&W target) or Y (absolute)

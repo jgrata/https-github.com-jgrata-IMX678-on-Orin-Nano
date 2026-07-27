@@ -61,6 +61,26 @@ class QmmfCapture:
         self.desc = desc
         self.pipe = Gst.parse_launch(desc)
         self.sink = self.pipe.get_by_name("s")
+        self.src = self.pipe.get_by_name("c")        # the qtiqmmfsrc element (for live props)
+
+    def set_prop(self, name, value):
+        """Best-effort live set of a qtiqmmfsrc property (e.g. exposure-compensation).
+        Returns True if the property exists and was set."""
+        try:
+            if self.src is not None and self.src.find_property(name) is not None:
+                self.src.set_property(name, value)
+                return True
+        except Exception:
+            pass
+        return False
+
+    def get_prop(self, name, default=None):
+        try:
+            if self.src is not None and self.src.find_property(name) is not None:
+                return self.src.get_property(name)
+        except Exception:
+            pass
+        return default
 
     def start(self):
         self.pipe.set_state(Gst.State.PLAYING)

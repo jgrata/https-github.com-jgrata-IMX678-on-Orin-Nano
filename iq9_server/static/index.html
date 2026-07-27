@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IMX678 on IQ9 — live</title>
+<style>
+  :root { --bg:#15171c; --panel:#1e2128; --ink:#e6e8ec; --mut:#9aa3b2;
+          --acc:#4ea1ff; --line:#2c303a; --ok:#5fd08a; --warn:#e6c15f; --bad:#e46a6a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:13px/1.45 system-ui,Segoe UI,Roboto,sans-serif; }
+  header { padding:8px 14px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; }
+  header h1 { font-size:14px; margin:0; font-weight:600; }
+  header .pill { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em;
+                 background:rgba(78,161,255,.16); color:var(--acc); padding:2px 7px; border-radius:20px; }
+  header a { color:var(--acc); text-decoration:none; font-size:13px; }
+  header .status { margin-left:auto; color:var(--mut); font-size:12px; }
+  .wrap { display:flex; gap:12px; padding:12px 14px; align-items:flex-start; flex-wrap:wrap; }
+  .viewwrap { flex:1 1 60%; min-width:320px; }
+  img.frame { width:100%; border-radius:8px; background:#0c0e12; border:1px solid var(--line); display:block; }
+  .side { flex:1 1 260px; min-width:240px; display:flex; flex-direction:column; gap:12px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  .card h2 { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--mut); margin:0 0 8px; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:3px 12px; font-size:12px; }
+  .kv .k { color:var(--mut); } .kv .v { font-variant-numeric:tabular-nums; text-align:right; }
+  button { background:var(--acc); color:#08213d; border:0; border-radius:6px; padding:7px 11px; font-weight:600; cursor:pointer; font:inherit; }
+  button.sec { background:#2a2f3a; color:var(--ink); }
+  input[type=range] { width:100%; }
+  .row { display:flex; align-items:center; gap:8px; margin-top:6px; }
+  .note { font-size:10.5px; color:var(--mut); margin-top:8px; }
+  canvas { width:100%; height:70px; background:#0c0e12; border:1px solid var(--line); border-radius:6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>IMX678 on IQ9 <span class="pill">NV12 · ISP</span></h1>
+  <a href="/mtf">MTF / focus</a> <a href="/colorchecker">ColorChecker</a> <a href="/history">History &rarr;</a>
+  <div class="status" id="status">connecting…</div>
+</header>
+
+<div class="wrap">
+  <div class="viewwrap"><img class="frame" id="view" alt="live view" src="/stream.mjpg?width=1280"></div>
+  <div class="side">
+    <div class="card">
+      <h2>Camera</h2>
+      <div class="kv" id="info"><div class="k">…</div><div class="v"></div></div>
+    </div>
+    <div class="card">
+      <h2>Exposure compensation</h2>
+      <div class="row"><input type="range" id="ec" min="-12" max="12" step="1" value="0">
+        <span id="ecv" style="width:2.2em;text-align:right;font-variant-numeric:tabular-nums">0</span></div>
+      <div class="note">NV12 is 3A-auto; this nudges the ISP exposure. Manual ns-exposure / gain
+        arrive with the RAW/RDI path.</div>
+    </div>
+    <div class="card">
+      <h2>Histogram (green)</h2>
+      <canvas id="hist" width="240" height="70"></canvas>
+      <div class="note" id="clip"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+function setStatus(t,c){ const s=$("status"); s.textContent=t; s.style.color = c==="bad"?"var(--bad)":c==="ok"?"var(--ok)":"var(--mut)"; }
+
+async function refreshInfo(){
+  try{
+    const d = await (await fetch("/api/info")).json();
+    $("info").innerHTML =
+      [["platform",d.platform],["source",d.source],["camera",d.camera],
+       ["resolution",d.width+"×"+d.height],["fps",d.fps],["bit depth",d.bit_depth]]
+      .map(([k,v])=>`<div class="k">${k}</div><div class="v">${v}</div>`).join("");
+    if(d.exposure_compensation!=null && document.activeElement!==$("ec")){
+      $("ec").value=d.exposure_compensation; $("ecv").textContent=d.exposure_compensation;
+    }
+    setStatus("live","ok");
+  }catch(e){ setStatus("offline — is server.py running?","bad"); }
+}
+
+let ecTimer=null;
+$("ec").oninput = () => { $("ecv").textContent=$("ec").value;
+  clearTimeout(ecTimer);
+  ecTimer=setTimeout(async()=>{ setStatus("applying…");
+    try{ await fetch("/api/params",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({exposure_compensation:parseInt($("ec").value)})});
+      setStatus("applied","ok"); }catch(e){ setStatus("apply failed","bad"); }
+  }, 250);
+};
+
+async function refreshHist(){
+  try{
+    const d = await (await fetch("/api/histogram")).json();
+    if(d.error) return;
+    const c=$("hist"), ctx=c.getContext("2d"), W=c.width, H=c.height;
+    ctx.clearRect(0,0,W,H);
+    const mx=Math.max(...d.bins,1), n=d.bins.length, bw=W/n;
+    ctx.fillStyle="#4ea1ff";
+    d.bins.forEach((v,i)=>{ const h=(v/mx)*(H-2); ctx.fillRect(i*bw,H-h,Math.max(1,bw-0.5),h); });
+    $("clip").textContent = "clip "+(d.clip_frac*100).toFixed(1)+"%";
+    $("clip").style.color = d.clip_frac>0.02 ? "var(--warn)" : "var(--mut)";
+  }catch(e){}
+}
+
+refreshInfo(); refreshHist();
+setInterval(refreshInfo, 3000);
+setInterval(refreshHist, 1500);
+</script>
+</body>
+</html>

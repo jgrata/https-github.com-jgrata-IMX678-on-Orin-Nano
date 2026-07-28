@@ -148,8 +148,16 @@ function params(){ const p = {
   return p; }
 
 async function measure(){
-  const d = await (await fetch("/api/mtf",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify(params())})).json();
+  // Abort a hung/slow request (e.g. during a server restart) so the live loop
+  // always settles and can recover, instead of freezing forever on one fetch.
+  const ctl = new AbortController();
+  const to = setTimeout(() => ctl.abort(), 8000);
+  let d;
+  try{
+    const r = await fetch("/api/mtf",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(params()), signal:ctl.signal});
+    d = await r.json();
+  } finally { clearTimeout(to); }
   if(d.error){ setStatus("error: "+d.error,"bad"); return null; }
   if(d.boxes && d.boxes.length) LASTBOXES = d.boxes;   // remember for lock/reuse
   if(d.found){                                          // auto-tighten from found square size/aspect
@@ -203,12 +211,11 @@ function drawPlot(d){
 let live=false, inflight=false;
 async function tick(){
   if(!live) return;
-  if(!inflight){ inflight=true; const t0=performance.now();
-    try{ const d=await measure(); if(d) setStatus(`live · ${Math.round(performance.now()-t0)} ms/frame · focus for max MTF50`,"ok"); }
-    catch(e){ setStatus("live error: "+e.message,"bad"); }
-    inflight=false;
-  }
-  if(live) setTimeout(tick, 150);
+  if(inflight){ if(live) setTimeout(tick, 150); return; }   // busy — recheck soon
+  inflight=true; const t0=performance.now();
+  try{ const d=await measure(); if(d) setStatus(`live · ${Math.round(performance.now()-t0)} ms/frame · focus for max MTF50`,"ok"); }
+  catch(e){ setStatus("live error: "+(e.name==="AbortError"?"timeout — retrying":e.message),"bad"); }
+  finally{ inflight=false; if(live) setTimeout(tick, 150); }   // ALWAYS reschedule -> self-healing
 }
 function setLive(on){ live=on; const b=$("liveBtn");
   b.textContent = on?"■ Stop live":"● Go live"; b.className = on?"":"on";

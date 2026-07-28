@@ -31,6 +31,8 @@ import history  # noqa: E402
 HERE = os.path.dirname(os.path.abspath(__file__))
 IMG_HOST = os.environ.get("IMG_HOST", "127.0.0.1")
 IMG_PORT = int(os.environ.get("IMG_PORT", "9000"))
+MTF_DEFAULTS_PATH = os.path.join(
+    os.environ.get("METRO_CONFIG_DIR", os.path.expanduser("~/metro_sessions")), "mtf_defaults.json")
 
 app = FastAPI(title="Metro Camera Web UI (skeleton)")
 
@@ -340,6 +342,39 @@ async def api_mtf(request: Request):
         return res
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.get("/api/mtf/defaults")
+def api_mtf_defaults_get():
+    """Saved MTF field defaults (optics + MSER params), or {} if none set yet."""
+    import json
+    try:
+        if os.path.exists(MTF_DEFAULTS_PATH):
+            with open(MTF_DEFAULTS_PATH) as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+@app.post("/api/mtf/defaults")
+async def api_mtf_defaults_set(request: Request):
+    """Persist the MTF field values as the page defaults (loaded on next open)."""
+    import json
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    keys = {"pitch_um", "efl_mm", "osf", "units", "chan",
+            "min_pct", "max_pct", "delta", "min_ar", "along", "tighten"}
+    d = {k: body[k] for k in body if k in keys}
+    try:
+        os.makedirs(os.path.dirname(MTF_DEFAULTS_PATH), exist_ok=True)
+        with open(MTF_DEFAULTS_PATH, "w") as f:
+            json.dump(d, f)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    return {"saved": True, "defaults": d}
 
 
 @app.get("/api/sensor_timing")

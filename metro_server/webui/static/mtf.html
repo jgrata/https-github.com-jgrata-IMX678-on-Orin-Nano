@@ -109,6 +109,7 @@
     <span class="f"><label>channel</label><select id="chan"><option>R</option><option>B</option><option value="Y">Y (abs)</option></select></span>
     <label style="display:block;margin-top:6px;color:var(--mut);font-size:12px">
       <input type="checkbox" id="tighten" checked> Auto-tighten (size/AR from found squares — faster)</label>
+    <button class="sec" id="saveDef" style="margin-top:8px" title="Persist the current optics + MSER values as the page defaults (loaded on next open)">Save as defaults</button>
   </div>
   <div class="card" style="flex:1; min-width:220px">
     <h2>Per-edge MTF (<span class="u">cyc/mm</span>)</h2>
@@ -135,7 +136,7 @@ $("applyEG").onclick = async () => { setStatus("applying…");
   setStatus("applied","ok"); refreshInfo();
 };
 
-let LASTBOXES=null, PEAK={}, TIGHTEN=null;
+let LASTBOXES=null, PEAK={}, TIGHTEN=null, HILITE=null, LASTD=null;
 function params(){ const p = {
   pitch_um:+$("pitch").value, efl_mm:+$("efl").value, osf:+$("osf").value,
   units:document.querySelector('input[name=units]:checked').value, chan:$("chan").value,
@@ -178,13 +179,17 @@ $("save").onclick = async () => { $("saveMsg").textContent = "saving…";
   }catch(e){ $("saveMsg").textContent = "error: "+e.message; } };
 
 function render(d){
+  LASTD = d;                                            // for hover re-draw
   $("overlay").src = d.overlay_png;
   document.querySelectorAll(".u").forEach(e=>e.textContent=d.units);
   d.edges.forEach(e=>{ if(e.mtf50!=null){ const k=e.square+"·"+e.edge; PEAK[k]=Math.max(PEAK[k]||0, e.mtf50); }});
   const es = d.edges.slice().sort((a,b)=>(b.mtf50||0)-(a.mtf50||0));
+  // Hover a row to isolate that edge's curve on the plot (the webui equivalent of
+  // the MATLAB GUI's hover-over-ROI).
   $("tbl").innerHTML = es.length ? es.map(e=>{ const k=e.square+"·"+e.edge, pk=PEAK[k];
     const atPk = (e.mtf50!=null && pk!=null && e.mtf50>=pk-1e-6);   // at/near this edge's best
-    return `<tr><td class="l"><span style="color:${COLORS[e.square%COLORS.length]}">&#9632;</span> ${k}</td>`
+    return `<tr style="cursor:pointer" onmouseenter="setHilite('${k}')" onmouseleave="setHilite(null)">`
+    +`<td class="l"><span style="color:${COLORS[e.square%COLORS.length]}">&#9632;</span> ${k}</td>`
     +`<td style="${atPk?'color:var(--ok);font-weight:600':''}">${e.mtf50==null?"–":e.mtf50.toFixed(2)}</td>`
     +`<td style="color:var(--mut)">${pk==null?"–":pk.toFixed(2)}</td>`
     +`<td>${e.mtf_nyq.toFixed(3)}</td></tr>`; }).join("")
@@ -204,9 +209,13 @@ function drawPlot(d){
     ctx.fillText(f.toFixed(f<1?2:0),x(f)-8,H-13); }
   ctx.strokeStyle="#3a3f4a"; ctx.setLineDash([3,3]); ctx.beginPath(); ctx.moveTo(L,y(0.5)); ctx.lineTo(W-Rp,y(0.5)); ctx.stroke(); ctx.setLineDash([]);
   ctx.fillText("MTF ("+d.units+")", W-90, H-2);
-  d.edges.forEach(e=>{ ctx.strokeStyle=COLORS[e.square%COLORS.length]; ctx.lineWidth=1.4; ctx.beginPath();
+  d.edges.forEach(e=>{ const key=e.square+"·"+e.edge, dim = HILITE && HILITE!==key;
+    ctx.strokeStyle=COLORS[e.square%COLORS.length]; ctx.globalAlpha=dim?0.12:1;
+    ctx.lineWidth=(HILITE===key)?2.8:1.4; ctx.beginPath();
     e.freq.forEach((f,i)=>{ const px=x(f),py=y(Math.max(0,Math.min(1,e.mtf[i]))); i?ctx.lineTo(px,py):ctx.moveTo(px,py); }); ctx.stroke(); });
+  ctx.globalAlpha=1;
 }
+function setHilite(k){ HILITE=k; if(LASTD) drawPlot(LASTD); }   // hover-over-ROI: isolate one curve
 
 let live=false, inflight=false;
 async function tick(){
@@ -255,8 +264,33 @@ async function setSource(mode){
 document.querySelectorAll('input[name=src]').forEach(r=>r.addEventListener("change",()=>setSource(r.value)));
 window.addEventListener("beforeunload",()=>{ if(SRC==="isp") navigator.sendBeacon("/api/isp/stop"); });
 
+// --- persistent defaults (optics + MSER params) ------------------------------
+async function applyDefaults(){
+  try{
+    const d = await (await fetch("/api/mtf/defaults")).json();
+    if(!d || !Object.keys(d).length) return;
+    const set=(id,v)=>{ if(v!==undefined && v!==null && $(id)) $(id).value=v; };
+    set("pitch",d.pitch_um); set("efl",d.efl_mm); set("osf",d.osf); set("chan",d.chan);
+    set("minpct",d.min_pct); set("maxpct",d.max_pct); set("delta",d.delta);
+    set("minar",d.min_ar); set("along",d.along);
+    if(d.units){ const r=document.querySelector(`input[name=units][value=${d.units}]`); if(r) r.checked=true; }
+    if(d.tighten!==undefined && $("tighten")) $("tighten").checked=!!d.tighten;
+  }catch(e){}
+}
+async function saveDefaults(){
+  const body={ pitch_um:+$("pitch").value, efl_mm:+$("efl").value, osf:+$("osf").value,
+    units:document.querySelector('input[name=units]:checked').value, chan:$("chan").value,
+    min_pct:+$("minpct").value, max_pct:+$("maxpct").value, delta:+$("delta").value,
+    min_ar:+$("minar").value, along:+$("along").value, tighten:$("tighten").checked };
+  try{ const r=await (await fetch("/api/mtf/defaults",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json();
+    setStatus(r.saved?"defaults saved":"save failed", r.saved?"ok":"bad");
+  }catch(e){ setStatus("save failed: "+e.message,"bad"); }
+}
+$("saveDef").onclick = saveDefaults;
+
 refreshInfo(); setInterval(refreshInfo,4000);
-setLive(true);           // start in live focus-assist mode
+applyDefaults().finally(()=>setLive(true));   // load saved defaults, then go live
 </script>
 </body>
 </html>

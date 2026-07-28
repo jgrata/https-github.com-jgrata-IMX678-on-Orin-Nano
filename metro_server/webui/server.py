@@ -63,10 +63,11 @@ def _overlay_bytes(results):
 
 # --- Local zero-copy frame source (shared memory) ---------------------------
 # raw_capture publishes decoded uint16 frames to /dev/shm/metro_raw. Reading them
-# here skips RAW10 pack + localhost TCP + NumPy unpack -- the fast LOCAL path. Held
-# in a reused reader; on any error (e.g. raw_capture restarted -> new shm inode) we
-# drop it and fall back to the TCP client.
-_shm = {"reader": None}
+# here skips RAW10 pack + localhost TCP + NumPy unpack -- the fast LOCAL path.
+# A FRESH reader is opened per call (open+mmap is cheap; the frame copy dominates):
+# this is robust against a raw_capture restart recreating the shm as a NEW inode
+# (a persistent mmap would freeze on the dead inode -> stale frames forever) and
+# against cross-thread sharing (stream/frame/mtf all call this concurrently).
 
 
 def _get_frame(prefer_shm=True):
@@ -75,20 +76,14 @@ def _get_frame(prefer_shm=True):
     if prefer_shm and not _isp_active():
         try:
             import shm_reader
-            r = _shm["reader"] or shm_reader.ShmReader()
-            _shm["reader"] = r
-            f = r.latest()
+            with shm_reader.ShmReader() as r:          # fresh mmap each call (see note above)
+                f = r.latest()
             if f is not None:
                 return f["frame"], f["maxv"], {
                     "exposure_ns": int(f["exp_ns"]), "gain": float(f["gain"]),
                     "sof_ns": int(f["sof_ns"]), "source": "shm"}
         except Exception:
-            try:
-                if _shm["reader"]:
-                    _shm["reader"].close()
-            except Exception:
-                pass
-            _shm["reader"] = None
+            pass
     with _client() as c:
         frame, maxv = c.capture()
         meta = _capture_meta(c.info())

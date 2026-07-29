@@ -85,8 +85,14 @@ def uniformity(frame):
             roi.mean())
 
 
-def capture_frames(c, n, delay=0.08):
-    """Grab n independent frames; return (list of float64 arrays, white level)."""
+def capture_frames(c, n, delay=0.08, flush=0):
+    """Grab n independent frames; return (list of float64 arrays, white level).
+    `flush` discards that many frames first -- the pipeline is ~2-3 frames deep
+    (~0.5 s/frame), so after a big exposure/gain jump the first captures are still
+    in-flight at the OLD setting; measuring them inflates the temporal variance and
+    corrupts the mean. Flush clears the transition before we measure."""
+    for _ in range(flush):
+        c.capture()
     frames, maxv = [], None
     for i in range(n):
         f, mv = c.capture()
@@ -110,6 +116,27 @@ def channel_stats(frames, chn, roi_frac):
     means = np.array([r.mean() for r in rois])
     diffs = [((rois[k] - rois[k + 1]) ** 2).mean() / 2.0 for k in range(len(rois) - 1)]
     return float(np.median(means)), float(np.median(diffs))
+
+
+def run_sweep(c, exps_ms, frames, roi, settle, verbose=True, flush=2):
+    """Set each exposure, grab `frames` frames, return (rows, white-level maxv).
+    Shared by the exposure-sweep tool and the gain-sweep driver (one source of
+    truth for how a PTC row is measured). `flush` drops in-flight frames after each
+    exposure change (see capture_frames)."""
+    rows, maxv = [], None
+    for e_ms in exps_ms:
+        c.set_params({"exposure_ns": int(e_ms * 1e6)}); time.sleep(settle)
+        fs, maxv = capture_frames(c, frames, flush=flush)
+        rec = {"exp_ms": round(float(e_ms), 4)}
+        for chn in ("R", "Gr", "Gb", "B"):
+            mean, var = channel_stats(fs, chn, roi)
+            rec["%s_mean" % chn] = round(mean, 3)
+            rec["%s_var" % chn] = round(var, 4)
+        rows.append(rec)
+        if verbose:
+            print("  %.2f ms  Gr mean=%.1f var=%.1f%s" % (e_ms, rec["Gr_mean"], rec["Gr_var"],
+                  "  (SAT)" if rec["Gr_mean"] >= 0.98 * maxv else ""))
+    return rows, maxv
 
 
 def main():
@@ -162,19 +189,8 @@ def main():
             return
 
         exps = np.geomspace(a.emin, a.emax, a.points)
-        rows = []
         print("\nexposure sweep (%d pts, %.2f-%.1f ms):" % (a.points, a.emin, a.emax))
-        for e_ms in exps:
-            c.set_params({"exposure_ns": int(e_ms * 1e6)}); time.sleep(a.settle)
-            frames, maxv = capture_frames(c, a.frames)
-            rec = {"exp_ms": round(float(e_ms), 4)}
-            for chn in ("R", "Gr", "Gb", "B"):
-                mean, var = channel_stats(frames, chn, a.roi)
-                rec["%s_mean" % chn] = round(mean, 3)
-                rec["%s_var" % chn] = round(var, 4)
-            rows.append(rec)
-            print("  %.2f ms  Gr mean=%.1f var=%.1f%s" % (e_ms, rec["Gr_mean"], rec["Gr_var"],
-                  "  (SAT)" if rec["Gr_mean"] >= 0.98 * maxv else ""))
+        rows, maxv = run_sweep(c, exps, a.frames, a.roi, a.settle)
     finally:
         c.set_params({"exposure_ns": orig})
         c.close()
@@ -193,30 +209,21 @@ SNR1S_FNUM = 1.4                # Sony reference lens
 SNR1S_REFL = 0.18              # Sony reference target (18% grey)
 
 
-def analyze(rows, maxv, lux=None, illum=None, fnum=None, reflectance=None):
-    """Per-channel OETF linearity + PTC (gain, read noise, full well), plus SNR1s
-    -- the Sony low-light figure of merit: the TARGET illuminance (lux) that yields
-    SNR = 1 at 1/60 s. Lower is better.
+def snr1s_normalize(s1s, fnum, reflectance):
+    """Scale a measured SNR1s (lux) to Sony's F1.4 / 18% grey reference. SNR1s is
+    the illuminance for a fixed sensor signal, and signal ~ reflectance / F^2, so
+      SNR1s_std = SNR1s_meas * (1.4/F)^2 * (reflectance/0.18).
+    Lets a 97% white standard stand in for a (future) 18% grey card."""
+    return s1s * (SNR1S_FNUM / fnum) ** 2 * (reflectance / SNR1S_REFL)
 
-    SNR is K-independent: SNR = signal / sqrt(var), and the PTC gives
-    var = slope*signal + readvar (slope = 1/K). SNR = 1 => signal^2 = var, i.e.
-      S1 = (slope + sqrt(slope^2 + 4*readvar)) / 2      [DN above black]
-    Map S1 through the OETF slope (DN/ms) to an exposure, then via the DMX->lux LUT
-    to an illuminance*time product H1 = lux*t1 [lux*s]; SNR1s = H1 / (1/60 s).
 
-    SNR1s scales with F-number^2 and inverse target reflectance, so given --fnum and
-    --reflectance it is also normalized to Sony's F1.4 / 18% grey:
-      SNR1s_std = SNR1s_meas * (1.4/F)^2 * (reflectance/0.18)
-    Spectrum is NOT correctable this way -- match Sony's 3200K by using --illum
-    tungsten. The raw value is a whole-system spec (sensor + lens + target)."""
+def compute_metrics(rows, maxv, lux=None):
+    """Shared numeric core: per-Bayer-channel OETF + PTC + SNR1s from sweep rows.
+    Returns {chn: {black, K, readN, fullwell, oetf_r2, oetf_slope, S1, snr1s}};
+    snr1s is the raw (as-measured) SNR1s in lux at 1/60 s, nan if no lux. See
+    analyze() for the physics."""
+    out = {}
     have_lux = lux is not None
-    print("\n=== OETF / PTC summary (per Bayer channel) ===")
-    hdr = "  %-3s %8s %8s %10s %9s %10s %8s" % (
-        "ch", "black", "K(e-/DN)", "readN(e-)", "fullwell", "OETF R^2", "S@SNR1")
-    if have_lux:
-        hdr += " %11s" % "SNR1s(lx)"
-    print(hdr)
-    snr1s = {}
     for chn in ("R", "Gr", "Gb", "B"):
         m = np.array([r["%s_mean" % chn] for r in rows])
         v = np.array([r["%s_var" % chn] for r in rows])
@@ -224,44 +231,67 @@ def analyze(rows, maxv, lux=None, illum=None, fnum=None, reflectance=None):
         sig = m - black
         sat = 0.9 * (maxv - black)
         lin = (sig > 0.05 * sat) & (sig < 0.85 * sat)         # shot-noise region (avoid readnoise + rolloff)
-        slope = readvar = float("nan")
+        slope = readvar = K = readN = fullwell = float("nan")
         if lin.sum() >= 3:
             slope, inter = np.polyfit(sig[lin], v[lin], 1)     # var = slope*sig + inter
             K = 1.0 / slope if slope > 0 else float("nan")     # e-/DN
             readvar = max(inter, float(v[m <= black + 2].mean()) if (m <= black + 2).any() else inter)
             readN = (readvar ** 0.5) * K if K == K else float("nan")
             fullwell = (maxv - black) * K if K == K else float("nan")
-        else:
-            K = readN = fullwell = float("nan")
         # SNR=1 signal (DN above black): S^2 = slope*S + readvar
         S1 = float("nan")
         if slope == slope and slope > 0 and readvar == readvar and readvar > 0:
             S1 = (slope + (slope * slope + 4 * readvar) ** 0.5) / 2.0
         # OETF linearity R^2 + slope (DN/ms) over the non-saturated range
         ok = sig < 0.9 * sat
-        oetf_slope = ss = float("nan")
+        oetf_slope = oetf_r2 = float("nan")
         if ok.sum() >= 3:
             exps = np.array([r["exp_ms"] for r in rows])[ok]
             p = np.polyfit(exps, m[ok], 1); oetf_slope = float(p[0]); fit = np.polyval(p, exps)
-            ss = 1 - np.sum((m[ok] - fit) ** 2) / max(np.sum((m[ok] - m[ok].mean()) ** 2), 1e-9)
+            oetf_r2 = 1 - np.sum((m[ok] - fit) ** 2) / max(np.sum((m[ok] - m[ok].mean()) ** 2), 1e-9)
         # exposure at SNR=1 -> illuminance*time H1 = lux*t1 -> SNR1s = H1 / (1/60 s)
         s1s = float("nan")
         if S1 == S1 and oetf_slope == oetf_slope and oetf_slope > 0 and have_lux:
-            H1 = lux * (S1 / oetf_slope) / 1000.0             # lux*s
-            s1s = H1 / SNR1S_EXP_S                            # lux at 1/60 s
-            snr1s[chn] = s1s
-        line = "  %-3s %8.1f %8.3f %10.1f %9.0f %10.5f %8.2f" % (chn, black, K, readN, fullwell, ss, S1)
+            s1s = (lux * (S1 / oetf_slope) / 1000.0) / SNR1S_EXP_S   # lux at 1/60 s
+        out[chn] = dict(black=black, K=K, readN=readN, fullwell=fullwell,
+                        oetf_r2=oetf_r2, oetf_slope=oetf_slope, S1=S1, snr1s=s1s)
+    return out
+
+
+def analyze(rows, maxv, lux=None, illum=None, fnum=None, reflectance=None):
+    """Print per-channel OETF/PTC + SNR1s (Sony low-light FoM): TARGET illuminance
+    (lux) for SNR=1 at 1/60 s, lower is better.
+
+    SNR is K-independent: SNR = signal / sqrt(var), and the PTC gives
+    var = slope*signal + readvar (slope = 1/K). SNR = 1 => signal^2 = var, i.e.
+      S1 = (slope + sqrt(slope^2 + 4*readvar)) / 2      [DN above black]
+    mapped through the OETF slope to an exposure then via the DMX->lux LUT to a
+    lux*s product, /(1/60 s). Normalizes to Sony's F1.4 / 18% grey with
+    --fnum/--reflectance (SNR1s ~ F^2/reflectance). Spectrum is NOT correctable
+    -- match Sony's 3200K with --illum tungsten."""
+    have_lux = lux is not None
+    met = compute_metrics(rows, maxv, lux)
+    print("\n=== OETF / PTC summary (per Bayer channel) ===")
+    hdr = "  %-3s %8s %8s %10s %9s %10s %8s" % (
+        "ch", "black", "K(e-/DN)", "readN(e-)", "fullwell", "OETF R^2", "S@SNR1")
+    if have_lux:
+        hdr += " %11s" % "SNR1s(lx)"
+    print(hdr)
+    for chn in ("R", "Gr", "Gb", "B"):
+        x = met[chn]
+        line = "  %-3s %8.1f %8.3f %10.1f %9.0f %10.5f %8.2f" % (
+            chn, x["black"], x["K"], x["readN"], x["fullwell"], x["oetf_r2"], x["S1"])
         if have_lux:
-            line += " %11.3f" % s1s
+            line += " %11.3f" % x["snr1s"]
         print(line)
-    if have_lux and "Gr" in snr1s:
-        s1s = snr1s["Gr"]
+    g = met["Gr"]["snr1s"]
+    if have_lux and g == g:
         print("\n  SNR1s (green) = %.3f lux  @ 1/60s, %s%s, this gain" % (
-            s1s, (illum or "?"), (" %.0fK" % 3200 if illum == "tungsten" else "")))
+            g, (illum or "?"), (" 3200K" if illum == "tungsten" else "")))
         if fnum and reflectance:
-            std = s1s * (SNR1S_FNUM / fnum) ** 2 * (reflectance / SNR1S_REFL)
+            std = snr1s_normalize(g, fnum, reflectance)
             print("  normalized to Sony conditions (F%.1f, %.0f%% grey): SNR1s = %.3f lux"
-                  " [from F%.1f, %.0f%% refl]" % (SNR1S_FNUM, 100 * SNR1S_REFL, std, fnum, 100 * reflectance))
+                  " [from F%.2f, %.0f%% refl]" % (SNR1S_FNUM, 100 * SNR1S_REFL, std, fnum, 100 * reflectance))
             if illum != "tungsten":
                 print("  ** illuminant is %s, not 3200K -- spectrum mismatch NOT corrected; re-run --illum tungsten" % illum)
         else:

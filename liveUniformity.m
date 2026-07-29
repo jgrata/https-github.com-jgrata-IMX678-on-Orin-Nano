@@ -59,9 +59,13 @@ function liveUniformity(cam, varargin)
         end
         spread = (max(tm(:)) - min(tm(:))) / max(mean(tm(:)), 1);
         if isvalid(tt)
-            tt.String = sprintf(['mean %.0f   central CV %.3f   tile spread %.1f%%' ...
-                '   (target: CV<0.05, spread<15%%)'], mean(roi(:)), cv, 100*spread);
-            if cv < 0.05 && spread < 0.15, tt.Color = [0.4 0.9 0.5]; else, tt.Color = [0.95 0.8 0.4]; end
+            % central CV is the OETF/PTC-relevant metric (measured on a central ROI);
+            % full-frame spread is mostly LENS relative illumination (vignetting), so
+            % it stays high even with a perfectly uniform target -- shown for context.
+            tt.String = sprintf(['mean %.0f   central CV %.3f (target <0.05)' ...
+                '   full-frame spread %.0f%% (incl. lens vignetting)'], ...
+                mean(roi(:)), cv, 100*spread);
+            if cv < 0.05, tt.Color = [0.4 0.9 0.5]; else, tt.Color = [0.95 0.8 0.4]; end
         end
         drawnow limitrate;
         pause(max(0, period - toc(t0)));

@@ -400,7 +400,7 @@ classdef ECamCameraGUI < handle
             % ── Lighting (DMX): Waveform 3082 via ENTTEC Open DMX USB (PC-side, COM5) ──
             % Shells out to lab/dmx_lights.py. Exclusive with QLC+ (close QLC+ first).
             p5 = uipanel(gl,'Title','Lighting (DMX)  ch4=D65  ch5=Tungsten');
-            g5 = uigridlayout(p5,[3 4]); g5.ColumnWidth={'fit','1x','fit','fit'}; g5.RowHeight={'fit','fit','fit'};
+            g5 = uigridlayout(p5,[4 4]); g5.ColumnWidth={'fit','1x','fit','fit'}; g5.RowHeight={'fit','fit','fit','fit'};
             app.h.dmxD65Lbl = uilabel(g5,'Text','D65 (ch4) 0'); app.h.dmxD65Lbl.Layout.Row=1; app.h.dmxD65Lbl.Layout.Column=1;
             app.h.dmxD65 = uislider(g5,'Limits',[0 255],'Value',0,'MajorTicks',[0 64 128 192 255]);
             app.h.dmxD65.Layout.Row=1; app.h.dmxD65.Layout.Column=[2 4];
@@ -415,6 +415,10 @@ classdef ECamCameraGUI < handle
             bDmxOff.Layout.Row=3; bDmxOff.Layout.Column=2;
             app.h.dmxStatus = uilabel(g5,'Text','close QLC+ to control','FontColor',[0.55 0.55 0.55]);
             app.h.dmxStatus.Layout.Row=3; app.h.dmxStatus.Layout.Column=[3 4];
+            bUnif = uibutton(g5,'Text','Live uniformity','ButtonPushedFcn',@(~,~)app.liveUniformityView());
+            bUnif.Layout.Row=4; bUnif.Layout.Column=[1 2];
+            lUnif = uilabel(g5,'Text','flat-field hot-spot view (close its window to stop)','FontColor',[0.55 0.55 0.55]);
+            lUnif.Layout.Row=4; lUnif.Layout.Column=[3 4];
             app.h.toolOut = uitextarea(gl,'Editable','off','Value',{'Tool output appears here.'});
         end
 
@@ -975,6 +979,17 @@ classdef ECamCameraGUI < handle
                 app.h.dmxStatus.Text = 'COM5 busy — close QLC+';
             else
                 app.h.dmxStatus.Text = ['DMX err: ' out(1:min(48,numel(out)))];
+            end
+        end
+        function liveUniformityView(app)
+            %LIVEUNIFORMITYVIEW  Open the live flat-field uniformity view (hot spots).
+            if isempty(app.cam)
+                uialert(app.Fig,'No camera client.','Live uniformity'); return
+            end
+            try
+                liveUniformity(app.cam);   % own figure; drawnow keeps the GUI responsive; close to stop
+            catch e
+                uialert(app.Fig, e.message, 'Live uniformity');
             end
         end
         function togglePause(app)

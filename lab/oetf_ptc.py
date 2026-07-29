@@ -14,16 +14,25 @@ METHOD (classic exposure-sweep PTC):
            conversion gain  K = 1/m           [e-/DN]
            read noise       = sqrt(var@0) * K  [e- rms]
            full well        = (sat-black) * K  [e-]
+  SNR1s: Sony low-light figure of merit = TARGET illuminance (lux) for SNR=1 at 1/60s.
+           SNR=1 signal S1 solves S1^2 = m*S1 + var@0 (K cancels: SNR = sig/sqrt(var));
+           map S1 through the OETF slope to an exposure, then via the DMX->lux LUT to a
+           lux*s product, /(1/60 s) -> SNR1s. Normalizes to Sony's F1.4 / 18% grey with
+           --fnum/--reflectance. Match Sony's 3200K source with --illum tungsten.
 
 Runs on the PC: DMX is local (lab/dmx_lights), raw frames come from the Jetson
 image_server over the wire (camera_client). Close QLC+ first (FTDI is exclusive).
 
 Usage:
   python lab/oetf_ptc.py --check                 # just report flat-field uniformity
-  python lab/oetf_ptc.py --illum d65 --level 128 --emin 0.3 --emax 120 --points 22 --frames 2
+  python lab/oetf_ptc.py --illum d65 --level 48 --emin 0.4 --emax 64 --points 24 --force
+  # SNR1s comparable to Sony's spec (3200K, F1.4, 18% grey, 1/60s):
+  python lab/oetf_ptc.py --illum tungsten --level 48 --emin 0.4 --emax 64 \
+      --fnum 1.8 --reflectance 0.18 --force
 """
 import argparse
 import csv
+import json
 import os
 import sys
 import time
@@ -49,6 +58,19 @@ def roi_of(pl, frac=0.25):
     h, w = pl.shape
     rh, rw = int(h * frac / 2), int(w * frac / 2)
     return pl[h // 2 - rh:h // 2 + rh, w // 2 - rw:w // 2 + rw]
+
+
+def lux_from_lut(illum, level):
+    """Target illuminance (lux) at a DMX level, interpolated from the calibration
+    LUT lab/dmx_lux_<illum>.json (built by dmx_lux_cal.py). None if no LUT exists.
+    NB this is illuminance AT THE TARGET (includes ambient), so downstream SNR=1
+    lux folds in target reflectance + lens f/# -- a system, not sensor, spec."""
+    p = os.path.join(_HERE, "dmx_lux_%s.json" % illum)
+    if not os.path.exists(p):
+        return None
+    with open(p) as fh:
+        d = json.load(fh)
+    return float(np.interp(level, d["dmx"], d["lux"]))
 
 
 def uniformity(frame):
@@ -103,6 +125,12 @@ def main():
     ap.add_argument("--settle", type=float, default=1.3, help="seconds after an exposure change")
     ap.add_argument("--out", default=os.path.join(_HERE, "ptc_result.csv"))
     ap.add_argument("--force", action="store_true", help="run even if the field looks non-uniform")
+    # SNR1s (Sony low-light figure of merit): illuminance at the target for SNR=1.
+    # Sony's reference conditions are 3200K, 18% grey, F1.4, 1/60s. Give --fnum and
+    # --reflectance to also print the value normalized to F1.4 / 18% grey.
+    ap.add_argument("--fnum", type=float, default=None, help="lens F-number used (for SNR1s F1.4 normalization)")
+    ap.add_argument("--reflectance", type=float, default=None,
+                    help="target reflectance 0-1 (e.g. 0.18 grey card; for SNR1s 18%% normalization)")
     a = ap.parse_args()
 
     # DMX flat field
@@ -156,13 +184,39 @@ def main():
     with open(a.out, "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
     print("\nwrote %s (%d rows)" % (a.out, len(rows)))
-    analyze(rows, maxv)
+    lux = lux_from_lut(a.illum, a.level) if a.illum != "keep" else None
+    analyze(rows, maxv, lux, illum=a.illum, fnum=a.fnum, reflectance=a.reflectance)
 
 
-def analyze(rows, maxv):
-    """Per-channel OETF linearity + PTC (gain, read noise, full well)."""
+SNR1S_EXP_S = 1.0 / 60.0        # Sony SNR1s reference exposure: 1/60 s
+SNR1S_FNUM = 1.4                # Sony reference lens
+SNR1S_REFL = 0.18              # Sony reference target (18% grey)
+
+
+def analyze(rows, maxv, lux=None, illum=None, fnum=None, reflectance=None):
+    """Per-channel OETF linearity + PTC (gain, read noise, full well), plus SNR1s
+    -- the Sony low-light figure of merit: the TARGET illuminance (lux) that yields
+    SNR = 1 at 1/60 s. Lower is better.
+
+    SNR is K-independent: SNR = signal / sqrt(var), and the PTC gives
+    var = slope*signal + readvar (slope = 1/K). SNR = 1 => signal^2 = var, i.e.
+      S1 = (slope + sqrt(slope^2 + 4*readvar)) / 2      [DN above black]
+    Map S1 through the OETF slope (DN/ms) to an exposure, then via the DMX->lux LUT
+    to an illuminance*time product H1 = lux*t1 [lux*s]; SNR1s = H1 / (1/60 s).
+
+    SNR1s scales with F-number^2 and inverse target reflectance, so given --fnum and
+    --reflectance it is also normalized to Sony's F1.4 / 18% grey:
+      SNR1s_std = SNR1s_meas * (1.4/F)^2 * (reflectance/0.18)
+    Spectrum is NOT correctable this way -- match Sony's 3200K by using --illum
+    tungsten. The raw value is a whole-system spec (sensor + lens + target)."""
+    have_lux = lux is not None
     print("\n=== OETF / PTC summary (per Bayer channel) ===")
-    print("  %-3s %8s %8s %10s %9s %10s" % ("ch", "black", "K(e-/DN)", "readN(e-)", "fullwell", "OETF R^2"))
+    hdr = "  %-3s %8s %8s %10s %9s %10s %8s" % (
+        "ch", "black", "K(e-/DN)", "readN(e-)", "fullwell", "OETF R^2", "S@SNR1")
+    if have_lux:
+        hdr += " %11s" % "SNR1s(lx)"
+    print(hdr)
+    snr1s = {}
     for chn in ("R", "Gr", "Gb", "B"):
         m = np.array([r["%s_mean" % chn] for r in rows])
         v = np.array([r["%s_var" % chn] for r in rows])
@@ -170,6 +224,7 @@ def analyze(rows, maxv):
         sig = m - black
         sat = 0.9 * (maxv - black)
         lin = (sig > 0.05 * sat) & (sig < 0.85 * sat)         # shot-noise region (avoid readnoise + rolloff)
+        slope = readvar = float("nan")
         if lin.sum() >= 3:
             slope, inter = np.polyfit(sig[lin], v[lin], 1)     # var = slope*sig + inter
             K = 1.0 / slope if slope > 0 else float("nan")     # e-/DN
@@ -178,15 +233,40 @@ def analyze(rows, maxv):
             fullwell = (maxv - black) * K if K == K else float("nan")
         else:
             K = readN = fullwell = float("nan")
-        # OETF linearity R^2 over the non-saturated range
+        # SNR=1 signal (DN above black): S^2 = slope*S + readvar
+        S1 = float("nan")
+        if slope == slope and slope > 0 and readvar == readvar and readvar > 0:
+            S1 = (slope + (slope * slope + 4 * readvar) ** 0.5) / 2.0
+        # OETF linearity R^2 + slope (DN/ms) over the non-saturated range
         ok = sig < 0.9 * sat
+        oetf_slope = ss = float("nan")
         if ok.sum() >= 3:
             exps = np.array([r["exp_ms"] for r in rows])[ok]
-            p = np.polyfit(exps, m[ok], 1); fit = np.polyval(p, exps)
+            p = np.polyfit(exps, m[ok], 1); oetf_slope = float(p[0]); fit = np.polyval(p, exps)
             ss = 1 - np.sum((m[ok] - fit) ** 2) / max(np.sum((m[ok] - m[ok].mean()) ** 2), 1e-9)
+        # exposure at SNR=1 -> illuminance*time H1 = lux*t1 -> SNR1s = H1 / (1/60 s)
+        s1s = float("nan")
+        if S1 == S1 and oetf_slope == oetf_slope and oetf_slope > 0 and have_lux:
+            H1 = lux * (S1 / oetf_slope) / 1000.0             # lux*s
+            s1s = H1 / SNR1S_EXP_S                            # lux at 1/60 s
+            snr1s[chn] = s1s
+        line = "  %-3s %8.1f %8.3f %10.1f %9.0f %10.5f %8.2f" % (chn, black, K, readN, fullwell, ss, S1)
+        if have_lux:
+            line += " %11.3f" % s1s
+        print(line)
+    if have_lux and "Gr" in snr1s:
+        s1s = snr1s["Gr"]
+        print("\n  SNR1s (green) = %.3f lux  @ 1/60s, %s%s, this gain" % (
+            s1s, (illum or "?"), (" %.0fK" % 3200 if illum == "tungsten" else "")))
+        if fnum and reflectance:
+            std = s1s * (SNR1S_FNUM / fnum) ** 2 * (reflectance / SNR1S_REFL)
+            print("  normalized to Sony conditions (F%.1f, %.0f%% grey): SNR1s = %.3f lux"
+                  " [from F%.1f, %.0f%% refl]" % (SNR1S_FNUM, 100 * SNR1S_REFL, std, fnum, 100 * reflectance))
+            if illum != "tungsten":
+                print("  ** illuminant is %s, not 3200K -- spectrum mismatch NOT corrected; re-run --illum tungsten" % illum)
         else:
-            ss = float("nan")
-        print("  %-3s %8.1f %8.3f %10.1f %9.0f %10.5f" % (chn, black, K, readN, fullwell, ss))
+            print("  give --fnum and --reflectance to normalize to Sony's F1.4 / 18%% grey."
+                  " Match 3200K with --illum tungsten.")
 
 
 if __name__ == "__main__":

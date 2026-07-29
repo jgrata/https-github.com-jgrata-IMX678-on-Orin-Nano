@@ -9,18 +9,19 @@
           --acc:#4ea1ff; --line:#2c303a; --ok:#5fd08a; --warn:#e6c15f; --bad:#e46a6a; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--ink);
-         font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; }
-  header { padding:10px 16px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; }
+         font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif;
+         display:flex; flex-direction:column; height:100vh; overflow:hidden; }   /* fill the window */
+  header { flex:0 0 auto; padding:10px 16px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; }
   header h1 { font-size:15px; margin:0; font-weight:600; }
   header a { color:var(--acc); text-decoration:none; font-size:13px; }
   header .status { margin-left:auto; color:var(--mut); font-size:12px; }
-  .wrap { display:flex; gap:14px; padding:14px; align-items:flex-start; flex-wrap:wrap; }
-  .col { display:flex; flex-direction:column; gap:14px; }
+  .wrap { flex:1 1 auto; min-height:0; display:flex; gap:14px; padding:14px; align-items:stretch; }
+  .col { display:flex; flex-direction:column; gap:14px; overflow-y:auto; min-height:0; }   /* each column scrolls */
   .col.left { flex:1 1 560px; min-width:320px; }
   .col.right { flex:0 0 340px; }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 14px; }
   .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut); margin:0 0 10px; }
-  img.frame { width:100%; border-radius:6px; background:#000; display:block; border:1px solid var(--line); }
+  img.frame { width:100%; max-height:44vh; object-fit:contain; border-radius:6px; background:#000; display:block; border:1px solid var(--line); }
   label { display:block; font-size:12px; color:var(--mut); margin:8px 0 3px; }
   input { width:100%; background:#12141a; color:var(--ink); border:1px solid var(--line);
           border-radius:6px; padding:6px 8px; font:inherit; }
@@ -72,6 +73,7 @@
       <button class="sec" id="applyEG">Apply exposure / gain</button>
       <button class="sec" id="autoexp">Auto-expose (meter chart)</button>
       <button id="measure">Measure ColorChecker</button>
+      <button id="measureHDR">Capture HDR + measure</button>
       <button class="sec" id="save" disabled>Save</button>
       <label style="font-size:11px;color:var(--mut);margin-left:4px"><input type="checkbox" id="saveRaw"> incl. raw</label>
       <div class="hint" id="saveMsg"></div>
@@ -161,6 +163,7 @@ $("darkcheck").onclick = async () => {
   setStatus(d.leaky ? "dark check: possible LEAK" : "dark check: light-tight", d.leaky?"bad":"ok");
 };
 
+let LASTLEGS = null;                                   // metered bracket, reused by HDR measure
 $("autoexp").onclick = async () => {
   setStatus("metering chart (un-clipping highlights)…","warn"); $("autoexp").disabled=true;
   let d;
@@ -173,6 +176,7 @@ $("autoexp").onclick = async () => {
   $("meterInfo").innerHTML =
     `chart DR <b>${d.chart_dr}:1</b> (${d.chart_dr_stops} stops) &rarr; suggested bracket <b>${d.bracket_ratio}:1</b>${nat}`
     + ` &middot; legs <b>${d.exposures_str}</b> ms<br><span style="color:var(--mut)">${d.note}</span>`;
+  LASTLEGS = d.legs_ms || null;                        // metered bracket -> reused by "Capture HDR + measure"
   // the single-frame web Measure uses the short leg (brightest patch ~90%, unclipped)
   $("exp_ms").value = d.t_short_ms.toFixed(2);
   await fetch("/api/params",{method:"POST",headers:{"Content-Type":"application/json"},
@@ -194,6 +198,24 @@ $("measure").onclick = async () => {
   render(d);
   $("save").disabled=false; $("saveMsg").textContent="";
   setStatus("measured","ok");
+};
+
+$("measureHDR").onclick = async () => {
+  const b=$("measureHDR"), old=b.textContent; b.disabled=true; b.textContent="capturing bracket…";
+  setStatus("HDR: capturing bracket + detecting…","warn");
+  const body = {analyze:true, rootpoly_degree: parseInt($("rpdeg").value)};
+  if(LASTLEGS && LASTLEGS.length) body.legs_ms = LASTLEGS;   // use the metered bracket if we have one
+  let d;
+  try{ d = await (await fetch("/api/hdr",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(body)})).json(); }
+  catch(e){ setStatus("HDR failed: "+e.message,"bad"); b.disabled=false; b.textContent=old; return; }
+  b.disabled=false; b.textContent=old;
+  if(d.error){ setStatus("HDR: "+d.error,"bad"); return; }
+  if(!d.detected){ setStatus("chart NOT detected in HDR merge — reframe/adjust bracket","bad"); return; }
+  render(d);
+  if(d.preview_png) $("live").src = d.preview_png;           // show the merged HDR in the aim pane
+  $("save").disabled=false; $("saveMsg").textContent="";
+  const h=d.hdr||{}; setStatus(`HDR measured · ${h.n_legs||"?"} legs · ${h.bracket_ratio||"?"}:1 · ΔE(xval) ${(+d.dE_xval_mean).toFixed(2)}`,"ok");
 };
 
 $("save").onclick = async () => { $("saveMsg").textContent="saving…";

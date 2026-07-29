@@ -11,23 +11,26 @@ client. Endpoints:
 
 Run:  IMG_HOST=127.0.0.1 IMG_PORT=9000 PORT=8080 python3 server.py
 """
+import base64
 import os
 import sys
 import threading
 import time
 
 import numpy as np
+import cv2
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool   # keep heavy CPU work off the event loop
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # webui/
 from camera_client import CameraClient  # noqa: E402
-import imaging  # noqa: E402
+import imaging  # noqa: E402  (adds metro_server/ to sys.path -> hdr importable below)
 import colorchecker  # noqa: E402
 import mtf_analyze  # noqa: E402
 import darkcheck  # noqa: E402
 import history  # noqa: E402
+import hdr  # noqa: E402  (server-side bracket merge / radiance / tonemap)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 IMG_HOST = os.environ.get("IMG_HOST", "127.0.0.1")
@@ -580,6 +583,74 @@ async def api_darkcheck(request: Request):
                 "exp_short_ms": exp_short_ms, "exp_long_ms": exp_long_ms,
                 "short": s, "long": l, **v,
             }
+
+    try:
+        return await run_in_threadpool(work)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.post("/api/hdr")
+async def api_hdr(request: Request):
+    """Capture an exposure bracket and merge to linear HDR radiance (reuses the
+    server-side hdr.py the MATLAB path uses). Returns a tonemapped colour preview;
+    with analyze=True also derives the ColorChecker CCM from the UNCLIPPED linear
+    HDR radiance (radiance_to_u16 -> colorchecker.analyze, black_level already
+    removed by the merge). legs_ms overrides the auto bracket (n legs spanning
+    `ratio` around the current exposure). Restores exposure afterwards."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    legs_ms = body.get("legs_ms")
+    ratio = float(body.get("ratio", 8.0))
+    n = int(body.get("n", 3))
+    do_ccm = bool(body.get("analyze", False))
+    rp_deg = int(body.get("rootpoly_degree", 2))
+    width = int(body.get("width", 900))
+    MIN_NS, MAX_NS = 50_000, 500_000_000
+
+    def work():
+        with _client() as c:
+            info = c.info()
+            orig = int(info.get("exposure_ns", 8_000_000))
+            gain = float(info.get("gain", 1.0)) or 1.0
+            if legs_ms:
+                exps = [int(float(x) * 1e6) for x in legs_ms]
+            elif n < 2:
+                exps = [orig]
+            else:                                     # geometric bracket spanning `ratio` around current exp
+                exps = [int(orig * (ratio ** (i / (n - 1) - 0.5))) for i in range(n)]
+            exps = sorted(max(MIN_NS, min(int(e), MAX_NS)) for e in exps)
+            frames, exps_act, gains, maxv = [], [], [], 4095.0
+            for e in exps:
+                c.set_params({"exposure_ns": e}); time.sleep(1.3)
+                fr, maxv = c.capture(); i2 = c.info()
+                frames.append(fr)
+                exps_act.append(int(i2.get("actual_exposure_ns", e) or e))
+                gains.append(float(i2.get("actual_gain", gain) or gain))
+            c.set_params({"exposure_ns": orig})       # restore
+        bl = hdr.estimate_black_level(frames, exps_act)
+        rad, _ = hdr.reconstruct_radiance(frames, exps_act, gains, float(maxv), black_level=bl)
+        bgr = cv2.cvtColor(hdr.full_preview(rad, wb=True), cv2.COLOR_RGB2BGR)
+        if bgr.shape[1] > width:
+            bgr = cv2.resize(bgr, (width, max(1, int(bgr.shape[0] * width / bgr.shape[1]))),
+                             interpolation=cv2.INTER_AREA)
+        ok, jb = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        preview = "data:image/jpeg;base64," + base64.b64encode(jb.tobytes()).decode()
+        legs_out = [round(e / 1e6, 3) for e in exps_act]
+        ratio_out = round(exps_act[-1] / max(exps_act[0], 1), 1)
+        if do_ccm:
+            u16, _ = hdr.radiance_to_u16(rad)
+            res = colorchecker.analyze(u16, 65535.0, black_level=0.0, rootpoly_degree=rp_deg)
+            res["preview_png"] = preview
+            res["hdr"] = {"legs_ms": legs_out, "bracket_ratio": ratio_out,
+                          "n_legs": len(frames), "black_level": float(bl)}
+            _last["colorchecker"] = {"frame": u16, "maxv": 65535.0, "results": res,
+                                     "meta": {"source": "hdr", "legs_ms": legs_out, "n_legs": len(frames)}}
+            return res
+        return {"preview_png": preview, "legs_ms": legs_out, "bracket_ratio": ratio_out,
+                "n_legs": len(frames), "black_level": float(bl)}
 
     try:
         return await run_in_threadpool(work)

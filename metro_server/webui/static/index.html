@@ -9,16 +9,17 @@
           --acc:#4ea1ff; --line:#2c303a; --ok:#5fd08a; --warn:#e6c15f; --bad:#e46a6a; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--ink);
-         font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; }
-  header { padding:10px 16px; border-bottom:1px solid var(--line);
+         font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif;
+         display:flex; flex-direction:column; height:100vh; overflow:hidden; }   /* fill the window */
+  header { flex:0 0 auto; padding:10px 16px; border-bottom:1px solid var(--line);
            display:flex; align-items:center; gap:12px; }
   header h1 { font-size:15px; margin:0; font-weight:600; }
   header .status { margin-left:auto; color:var(--mut); font-size:12px; }
-  .wrap { display:flex; gap:14px; padding:14px; align-items:flex-start; flex-wrap:wrap; }
-  .view { flex:1 1 620px; min-width:320px; }
-  .view img { width:100%; border-radius:8px; background:#000; display:block;
+  .wrap { flex:1 1 auto; min-height:0; display:flex; gap:14px; padding:14px; align-items:stretch; }
+  .view { flex:1 1 620px; min-width:320px; min-height:0; display:flex; flex-direction:column; }
+  .view img { width:100%; max-height:calc(100% - 26px); object-fit:contain; border-radius:8px; background:#000; display:block;
               border:1px solid var(--line); }
-  .side { flex:0 0 320px; display:flex; flex-direction:column; gap:14px; }
+  .side { flex:0 0 340px; display:flex; flex-direction:column; gap:14px; overflow-y:auto; min-height:0; }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 14px; }
   .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em;
              color:var(--mut); margin:0 0 10px; }
@@ -76,6 +77,16 @@
       </select>
       <label>FPS</label><input id="fps" type="number" step="1" min="1">
       <button id="applyMode" class="sec">Set mode / fps</button>
+    </div>
+
+    <div class="card">
+      <h2>Bracketed HDR</h2>
+      <div class="row">
+        <div><label>Ratio (:1)</label><input id="hdrRatio" type="number" step="1" min="2" value="8"></div>
+        <div><label>Legs</label><input id="hdrN" type="number" step="1" min="2" value="3"></div>
+      </div>
+      <button id="captureHDR">Capture HDR</button>
+      <div class="hint" id="hdrInfo">Merge an exposure bracket &rarr; tonemapped HDR image (a few seconds).</div>
     </div>
 
     <div class="card">
@@ -138,6 +149,24 @@ $("applyMode").onclick = () => {
   // reload the stream after a mode change (resolution changes)
   apply({ sensormode: parseInt($("mode").value), fps: parseInt($("fps").value) }, $("applyMode"))
     .then(()=> setTimeout(()=>{ $("live").src = "/stream.mjpg?width=960&t="+Date.now(); }, 1500));
+};
+
+$("captureHDR").onclick = async () => {
+  const b=$("captureHDR"), old=b.textContent; b.disabled=true; b.textContent="capturing bracket…";
+  setStatus("HDR: capturing bracket…","warn");
+  try{
+    const d = await (await fetch("/api/hdr",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ratio:+$("hdrRatio").value, n:+$("hdrN").value, width:960})})).json();
+    if(d.error){ setStatus("HDR: "+d.error,"bad"); }
+    else {
+      $("live").src = d.preview_png;                       // show the merged HDR (stops the live stream)
+      $("hdrInfo").innerHTML = `HDR · ${d.n_legs} legs · ${d.legs_ms.join(", ")} ms · ${d.bracket_ratio}:1 · `
+        + `<a href="#" id="resumeLive" style="color:var(--acc)">resume live</a>`;
+      $("resumeLive").onclick = (e)=>{ e.preventDefault(); $("live").src="/stream.mjpg?width=960&t="+Date.now(); $("hdrInfo").textContent="live"; };
+      setStatus("HDR captured","ok");
+    }
+  }catch(e){ setStatus("HDR failed: "+e.message,"bad"); }
+  b.disabled=false; b.textContent=old; refreshInfo();
 };
 
 function drawHist(d){

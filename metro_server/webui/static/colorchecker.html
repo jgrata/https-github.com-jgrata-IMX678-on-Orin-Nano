@@ -88,6 +88,15 @@
   </div>
 
   <div class="col right">
+    <div class="card">
+      <h2>Lighting (DMX)</h2>
+      <label>D65 (ch4) — <span id="dmxD65v">0</span></label>
+      <input id="dmxD65" type="range" min="0" max="255" value="0">
+      <label>Tungsten (ch5) — <span id="dmxTungv">0</span></label>
+      <input id="dmxTung" type="range" min="0" max="255" value="0">
+      <div class="row"><button id="dmxSet">Set lights</button><button class="sec" id="dmxOff">All off</button></div>
+      <div class="hint" id="dmxStatus">via PC DMX agent · close QLC+ to control</div>
+    </div>
     <div class="card" id="resultCard" style="display:none">
       <h2>Result <span class="pill" id="metricPill">CIEDE2000</span></h2>
       <div>vendor CCM &nbsp; <span class="big" id="deVend">–</span> <span class="pill">mean ΔE00</span></div>
@@ -274,6 +283,25 @@ function render(d){
 }
 $("copyCCM").onclick = () => { navigator.clipboard.writeText($("ccm").textContent);
   setStatus("CCM copied","ok"); };
+
+// --- DMX illuminant control (webui -> Jetson /api/dmx -> PC agent) ------------
+async function dmxApply(d65, tung){
+  $("dmxStatus").textContent = "setting…";
+  try{
+    const r = await (await fetch("/api/dmx",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({d65:d65, tungsten:tung})})).json();
+    $("dmxStatus").innerHTML = r.error ? `<span style="color:var(--bad)">${r.error}</span>`
+      : `D65=${r.d65}  Tungsten=${r.tungsten}  set`;
+  }catch(e){ $("dmxStatus").textContent = "DMX failed: "+e.message; }
+}
+$("dmxD65").oninput  = () => $("dmxD65v").textContent  = $("dmxD65").value;
+$("dmxTung").oninput = () => $("dmxTungv").textContent = $("dmxTung").value;
+$("dmxSet").onclick = () => dmxApply(+$("dmxD65").value, +$("dmxTung").value);
+$("dmxOff").onclick = () => { $("dmxD65").value=0; $("dmxTung").value=0;
+  $("dmxD65v").textContent="0"; $("dmxTungv").textContent="0"; dmxApply(0,0); };
+(async()=>{ try{ const r=await (await fetch("/api/dmx")).json();
+  if(!r.error){ $("dmxD65").value=r.d65; $("dmxTung").value=r.tungsten;
+    $("dmxD65v").textContent=r.d65; $("dmxTungv").textContent=r.tungsten; } }catch(e){} })();
 
 refreshInfo(); setInterval(refreshInfo, 4000);
 </script>

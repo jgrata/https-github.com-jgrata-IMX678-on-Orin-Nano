@@ -37,6 +37,8 @@ IMG_HOST = os.environ.get("IMG_HOST", "127.0.0.1")
 IMG_PORT = int(os.environ.get("IMG_PORT", "9000"))
 MTF_DEFAULTS_PATH = os.path.join(
     os.environ.get("METRO_CONFIG_DIR", os.path.expanduser("~/metro_sessions")), "mtf_defaults.json")
+# PC-side DMX agent (lights are on the PC's USB; the Jetson proxies over the direct link).
+DMX_AGENT_URL = os.environ.get("DMX_AGENT_URL", "http://192.168.99.1:9200")
 
 app = FastAPI(title="Metro Camera Web UI (skeleton)")
 
@@ -387,6 +389,48 @@ async def api_mtf_defaults_set(request: Request):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
     return {"saved": True, "defaults": d}
+
+
+@app.get("/api/dmx")
+async def api_dmx_get():
+    """Current illuminant levels from the PC-side DMX agent."""
+    def work():
+        import urllib.request
+        try:
+            with urllib.request.urlopen(DMX_AGENT_URL + "/dmx", timeout=5) as r:
+                import json as _j
+                return _j.loads(r.read())
+        except Exception as e:
+            return {"error": "DMX agent unreachable (%s): %s" % (DMX_AGENT_URL, e)}
+    return await run_in_threadpool(work)
+
+
+@app.post("/api/dmx")
+async def api_dmx_set(request: Request):
+    """Set illuminant levels via the PC-side DMX agent (d65/tungsten, 0-255)."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    fwd = {k: body[k] for k in ("d65", "tungsten") if k in body}
+
+    def work():
+        import json as _j
+        import urllib.request
+        import urllib.error
+        req = urllib.request.Request(DMX_AGENT_URL + "/dmx", data=_j.dumps(fwd).encode(),
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=12) as r:
+                return _j.loads(r.read())
+        except urllib.error.HTTPError as e:
+            try:
+                return _j.loads(e.read())
+            except Exception:
+                return {"error": "DMX agent HTTP %d" % e.code}
+        except Exception as e:
+            return {"error": "DMX agent unreachable (%s): %s" % (DMX_AGENT_URL, e)}
+    return await run_in_threadpool(work)
 
 
 @app.get("/api/sensor_timing")

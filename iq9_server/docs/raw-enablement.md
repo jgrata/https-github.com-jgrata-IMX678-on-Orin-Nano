@@ -49,6 +49,26 @@ So the RAW plumbing is designed in; it just isn't reachable for this sensor.
 usecase XMLs exist but the **IMX678's RDI/RAW output stream is not enabled / not selected** for it. i.e. the
 sensor→RDI capability and/or the usecase-to-sensor mapping for `cmk_imx678` is missing from the CamX config.
 
+### Deeper localization (2026-07-24, with the CHI-CDK on hand) — the fix is in usecase SELECTION
+
+The RAW infrastructure is **entirely present on the device**; it is simply not selected for this sensor:
+- **Sensor streams 12-bit RAW:** `cmk_imx678_sensor.xml` → `<dt>44</dt>` (0x2C = RAW12), `colorFilterArrangement
+  = BAYER_RGGB`, 3856×2180. (`<type>IMAGE</type>` is correct — *no* CHI-CDK sensor, incl. imx577, declares
+  `<type>BAYER…</type>`; RAW is produced by the IFE/usecase, not the sensor stream type.)
+- **Selector already contains the RAW usecases:** `strings /usr/lib/com.qti.chiusecaseselector.so` →
+  `RealTimeFeatureZSLPreviewRaw`, `RealTimeFeatureNZSLSnapshotRDI`, `TARGET_BUFFER_RAW16`,
+  `TARGET_BUFFER_RAW16_APP`, … So RAW is compiled in, not missing from the build.
+- **NOT the sensor config:** imx678 (901 lines, 1 NORMAL mode) vs the imx577 reference it was skeletoned from
+  (17.6k lines, 16 modes incl. ZZHDR/HFR/SHDR) — **neither declares RAW/RDI/PDAF in the sensor XML**. So the
+  sensor bin (the only thing `ParameterParser` rebuilds on-device) is not the lever.
+- **No on-target override lever** — no `camxoverridesettings*` file present to flip.
+
+**⇒ The gap is usecase SELECTION for `cmk_imx678`** — the `qtiqmmfsrc → QMMF recorder → CamX` path doesn't map
+a bayer-stream request to one of the RAW usecases for this sensor. That lives in the **compiled**
+`com.qti.chiusecaseselector.so` and/or the OSS `qmmfsrc` plugin's bayer request — **so a source build is
+required** (rebuild the selector and/or patch the plugin, then redeploy/reflash). There is no config-only or
+on-target fix. Start the fix at the selection layer, NOT the sensor config.
+
 ## Path A — enable the RDI/RAW usecase for `cmk_imx678` (recommended; this bundle supports it)
 
 This is the same flow that produced the sensor `.so` + module bins. Concretely:

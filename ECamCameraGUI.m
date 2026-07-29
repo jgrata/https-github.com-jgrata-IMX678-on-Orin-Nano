@@ -320,7 +320,7 @@ classdef ECamCameraGUI < handle
         end
 
         function buildToolsTab(app, tab)
-            gl = uigridlayout(tab,[5 1]); gl.RowHeight={'fit','fit','fit','fit','1x'}; gl.Scrollable='on';
+            gl = uigridlayout(tab,[6 1]); gl.RowHeight={'fit','fit','fit','fit','fit','1x'}; gl.Scrollable='on';
             p1 = uipanel(gl,'Title','ColorChecker');
             g1 = uigridlayout(p1,[1 2]);
             uibutton(g1,'Text','Pick chart & measure','ButtonPushedFcn',@(~,~)app.toolColorChecker());
@@ -397,6 +397,24 @@ classdef ECamCameraGUI < handle
             bWs.Layout.Row=4; bWs.Layout.Column=2;
             app.h.thisBtn=uibutton(g4,'Text','This image','Enable','off','ButtonPushedFcn',@(~,~)app.doSaveThis());
             app.h.thisBtn.Layout.Row=4; app.h.thisBtn.Layout.Column=3;
+            % ── Lighting (DMX): Waveform 3082 via ENTTEC Open DMX USB (PC-side, COM5) ──
+            % Shells out to lab/dmx_lights.py. Exclusive with QLC+ (close QLC+ first).
+            p5 = uipanel(gl,'Title','Lighting (DMX)  ch4=D65  ch5=Tungsten');
+            g5 = uigridlayout(p5,[3 4]); g5.ColumnWidth={'fit','1x','fit','fit'}; g5.RowHeight={'fit','fit','fit'};
+            app.h.dmxD65Lbl = uilabel(g5,'Text','D65 (ch4) 0'); app.h.dmxD65Lbl.Layout.Row=1; app.h.dmxD65Lbl.Layout.Column=1;
+            app.h.dmxD65 = uislider(g5,'Limits',[0 255],'Value',0,'MajorTicks',[0 64 128 192 255]);
+            app.h.dmxD65.Layout.Row=1; app.h.dmxD65.Layout.Column=[2 4];
+            app.h.dmxD65.ValueChangedFcn = @(s,~) set(app.h.dmxD65Lbl,'Text',sprintf('D65 (ch4) %d',round(s.Value)));
+            app.h.dmxTungLbl = uilabel(g5,'Text','Tungsten (ch5) 0'); app.h.dmxTungLbl.Layout.Row=2; app.h.dmxTungLbl.Layout.Column=1;
+            app.h.dmxTung = uislider(g5,'Limits',[0 255],'Value',0,'MajorTicks',[0 64 128 192 255]);
+            app.h.dmxTung.Layout.Row=2; app.h.dmxTung.Layout.Column=[2 4];
+            app.h.dmxTung.ValueChangedFcn = @(s,~) set(app.h.dmxTungLbl,'Text',sprintf('Tungsten (ch5) %d',round(s.Value)));
+            bDmxSet = uibutton(g5,'Text','Set lights','ButtonPushedFcn',@(~,~)app.dmxSet());
+            bDmxSet.Layout.Row=3; bDmxSet.Layout.Column=1;
+            bDmxOff = uibutton(g5,'Text','All off','ButtonPushedFcn',@(~,~)app.dmxOff());
+            bDmxOff.Layout.Row=3; bDmxOff.Layout.Column=2;
+            app.h.dmxStatus = uilabel(g5,'Text','close QLC+ to control','FontColor',[0.55 0.55 0.55]);
+            app.h.dmxStatus.Layout.Row=3; app.h.dmxStatus.Layout.Column=[3 4];
             app.h.toolOut = uitextarea(gl,'Editable','off','Value',{'Tool output appears here.'});
         end
 
@@ -932,6 +950,33 @@ classdef ECamCameraGUI < handle
 
     % ═══════════════════════════════ HISTORY / SAVE ═════════════════════════
     methods (Access = private)
+        function dmxSet(app)
+            app.dmxSend(round(app.h.dmxD65.Value), round(app.h.dmxTung.Value));
+        end
+        function dmxOff(app)
+            app.h.dmxD65.Value = 0; app.h.dmxTung.Value = 0;
+            set(app.h.dmxD65Lbl,'Text','D65 (ch4) 0');
+            set(app.h.dmxTungLbl,'Text','Tungsten (ch5) 0');
+            app.dmxSend(0, 0);
+        end
+        function dmxSend(app, d65, tung)
+            %DMXSEND  Set Waveform-3082 LED levels via lab/dmx_lights.py (ENTTEC Open
+            %  DMX USB on COM5). Exclusive with QLC+ -- close QLC+ first.
+            script = fullfile(fileparts(which('ECamCameraGUI')), 'lab', 'dmx_lights.py');
+            if ~isfile(script)
+                app.h.dmxStatus.Text = 'dmx_lights.py not found'; return
+            end
+            app.h.dmxStatus.Text = 'setting…'; drawnow;
+            cmd = sprintf('python "%s" --d65 %d --tungsten %d --hold 1.5', script, d65, tung);
+            [st, out] = system(cmd); out = strtrim(out);
+            if st == 0
+                app.h.dmxStatus.Text = sprintf('D65=%d  Tung=%d  set', d65, tung);
+            elseif contains(lower(out),'denied') || contains(out,'Access')
+                app.h.dmxStatus.Text = 'COM5 busy — close QLC+';
+            else
+                app.h.dmxStatus.Text = ['DMX err: ' out(1:min(48,numel(out)))];
+            end
+        end
         function togglePause(app)
             if ~strcmp(app.LiveMode,'mtf')
                 uialert(app.Fig,'Start Live MTF first, then Pause to browse.','Pause'); return

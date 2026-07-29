@@ -88,6 +88,31 @@ Cross-check with the **OSS `qmmfsrc` plugin source** (CodeLinaro / `qualcomm-lin
 → `validate_bayer_params` (why only 3856×2180) and `gst_qmmf_context_create_video_stream` /
 `gst_qmmf_context_start_video_streams` (the exact QMMF track params it sends — shows what CamX must accept).
 
+## Build + flash workflow (confirmed) & the remaining unknown
+
+**Build system** (`github.com/metropolis-io/iq9075-evk-yocto`, kas-based):
+```bash
+pip3 install "kas>=4.8"
+kas build kas/iq9075-evk.yml          # or: kas shell … ; bitbake metro-iq9075-edge-ai-image
+# outputs: build/tmp/deploy/images/iq-9075-evk/ ; flash with qdl (EDL mode):
+qdl --storage ufs prog_firehose_ddr.elf rawprogram*.xml patch*.xml   # + sail_nor/ separately
+```
+The kas manifest pins **meta-metro-mcs** (li-imx678) + the base **meta-qcom** (which provides the CamX
+camera stack via `ci/iq-9075-evk.yml`). A camera change = a bbappend/patch in a Metropolis layer over the
+meta-qcom CamX recipes, then rebuild + reflash.
+
+**⚠ Version mismatch to resolve first:** the GitHub repo targets **QLI 2.0 (Wrynose, kernel 6.18)**, but the
+device currently runs **QLI 1.7 (kernel 6.6)** and the build host's `~/Workspace/Qualcomm` tree is the **1.7**
+build. Decide whether to enable RAW on 1.7 (matching the device now) or move the device to the 2.0 build.
+
+**The remaining unknown (why this is still a CamX-expert task):** the Confluence "IMX678 Source Code Overview"
+documents only the **NV12** sensor bring-up (runtime path `IFE → BPS → IPE → NV12`; it confirms the **IFE holds
+RAW Bayer in DDR** = the RDI tap, but gives no RAW-enable procedure). The change to expose that IFE RDI output
+to a usecase `qtiqmmfsrc` can request lives in the **base-CamX** camera stack (usecase selector / QMMF /
+`qmmfsrc`), which is **fetched from meta-qcom (Qualcomm), not in any repo or doc on hand**. So the exact edit
+must be derived from the fetched CamX source + CamX expertise (or a Qualcomm support request) — it is not
+documented, and getting it wrong risks the working NV12 path. This is the piece for hvo / Qualcomm.
+
 ## Path B — direct QMMF-recorder app (fallback; needs the QMMF SDK)
 
 Bypass `qtiqmmfsrc`: a small C++ app on the QMMF **recorder** API creating a RAW track directly (this is what

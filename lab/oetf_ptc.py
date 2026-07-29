@@ -217,11 +217,26 @@ def snr1s_normalize(s1s, fnum, reflectance):
     return s1s * (SNR1S_FNUM / fnum) ** 2 * (reflectance / SNR1S_REFL)
 
 
+def snr1s_lux(lux, K, oetf_slope, readvar):
+    """SNR1s (target lux for SNR=1 at 1/60 s) from responsivity + read variance.
+    Single source of truth for the SNR1s formula. SNR is K-independent
+    (SNR = sig/sqrt(var)); SNR=1 signal S1 solves S1^2 = (1/K)*S1 + readvar; the
+    illuminance is S1/oetf_slope (ms) scaled by lux and referenced to 1/60 s.
+
+    IMPORTANT: `readvar` should be the DARK read variance (DN^2, lens capped). The
+    light-sweep PTC intercept is inflated by source flicker -- see readnoise_dark.py."""
+    if not (K == K and oetf_slope == oetf_slope and oetf_slope > 0 and readvar == readvar and readvar >= 0):
+        return float("nan")
+    slope = 1.0 / K
+    S1 = (slope + (slope * slope + 4 * readvar) ** 0.5) / 2.0
+    return (lux * (S1 / oetf_slope) / 1000.0) / SNR1S_EXP_S
+
+
 def compute_metrics(rows, maxv, lux=None):
     """Shared numeric core: per-Bayer-channel OETF + PTC + SNR1s from sweep rows.
-    Returns {chn: {black, K, readN, fullwell, oetf_r2, oetf_slope, S1, snr1s}};
-    snr1s is the raw (as-measured) SNR1s in lux at 1/60 s, nan if no lux. See
-    analyze() for the physics."""
+    Returns {chn: {black, K, readvar, readN, fullwell, oetf_r2, oetf_slope, S1, snr1s}}.
+    snr1s here uses the LIGHT-sweep read variance (readvar) -- flicker-contaminated;
+    for the true value recompute via snr1s_lux() with a dark readvar. See analyze()."""
     out = {}
     have_lux = lux is not None
     for chn in ("R", "Gr", "Gb", "B"):
@@ -249,11 +264,8 @@ def compute_metrics(rows, maxv, lux=None):
             exps = np.array([r["exp_ms"] for r in rows])[ok]
             p = np.polyfit(exps, m[ok], 1); oetf_slope = float(p[0]); fit = np.polyval(p, exps)
             oetf_r2 = 1 - np.sum((m[ok] - fit) ** 2) / max(np.sum((m[ok] - m[ok].mean()) ** 2), 1e-9)
-        # exposure at SNR=1 -> illuminance*time H1 = lux*t1 -> SNR1s = H1 / (1/60 s)
-        s1s = float("nan")
-        if S1 == S1 and oetf_slope == oetf_slope and oetf_slope > 0 and have_lux:
-            s1s = (lux * (S1 / oetf_slope) / 1000.0) / SNR1S_EXP_S   # lux at 1/60 s
-        out[chn] = dict(black=black, K=K, readN=readN, fullwell=fullwell,
+        s1s = snr1s_lux(lux, K, oetf_slope, readvar) if have_lux else float("nan")
+        out[chn] = dict(black=black, K=K, readvar=readvar, readN=readN, fullwell=fullwell,
                         oetf_r2=oetf_r2, oetf_slope=oetf_slope, S1=S1, snr1s=s1s)
     return out
 

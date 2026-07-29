@@ -8,18 +8,19 @@
   :root { --bg:#15171c; --panel:#1e2128; --ink:#e6e8ec; --mut:#9aa3b2;
           --acc:#4ea1ff; --line:#2c303a; --ok:#5fd08a; --warn:#e6c15f; --bad:#e46a6a; }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--ink); font:13px/1.4 system-ui,Segoe UI,Roboto,sans-serif; }
-  header { padding:8px 14px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:13px/1.4 system-ui,Segoe UI,Roboto,sans-serif;
+         display:flex; flex-direction:column; height:100vh; overflow:hidden; }   /* app fills the window, no page scroll */
+  header { flex:0 0 auto; padding:8px 14px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; }
   header h1 { font-size:14px; margin:0; font-weight:600; }
   header a { color:var(--acc); text-decoration:none; font-size:13px; }
   header .status { margin-left:auto; color:var(--mut); font-size:12px; }
-  .stage { display:flex; gap:10px; padding:10px 12px 0; align-items:stretch; }
-  .stage .imgwrap { flex:1 1 55%; min-width:300px; }
-  .stage .plotwrap { flex:1 1 45%; min-width:280px; display:flex; flex-direction:column; }
-  img.frame, canvas { width:100%; border-radius:6px; background:#0c0e12; border:1px solid var(--line); display:block; }
-  .imgwrap img { object-fit:contain; max-height:60vh; }
-  canvas { flex:1; min-height:240px; }
-  .ctrl { display:flex; flex-wrap:wrap; gap:10px; padding:10px 12px; align-items:flex-end; }
+  .stage { flex:1 1 auto; min-height:0; display:flex; gap:10px; padding:10px 12px 0; align-items:stretch; }
+  .stage .imgwrap { flex:1 1 55%; min-width:300px; min-height:0; display:flex; }
+  .stage .plotwrap { flex:1 1 45%; min-width:280px; min-height:0; display:flex; flex-direction:column; }
+  img.frame, canvas { border-radius:6px; background:#0c0e12; border:1px solid var(--line); display:block; }
+  .imgwrap img { width:100%; height:100%; object-fit:contain; }              /* scale to the flexible stage (letterboxed) */
+  canvas { width:100%; flex:1 1 auto; min-height:0; }
+  .ctrl { flex:0 0 auto; max-height:42vh; overflow-y:auto; display:flex; flex-wrap:wrap; gap:10px; padding:10px 12px; align-items:flex-start; }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
   .card h2 { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--mut); margin:0 0 6px; }
   .f { display:inline-flex; flex-direction:column; margin:0 6px 0 0; }

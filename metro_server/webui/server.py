@@ -19,6 +19,7 @@ import time
 import numpy as np
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from starlette.concurrency import run_in_threadpool   # keep heavy CPU work off the event loop
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # webui/
 from camera_client import CameraClient  # noqa: E402
@@ -222,13 +223,17 @@ async def api_colorchecker(request: Request):
         body = {}
     bl = body.get("black_level")
     rp_deg = int(body.get("rootpoly_degree", 2))
-    try:
+
+    def work():
         with _client() as c:
             frame, maxv = c.capture()
             meta = _capture_meta(c.info())
         res = colorchecker.analyze(frame, maxv, black_level=bl, rootpoly_degree=rp_deg)
         _last["colorchecker"] = {"frame": frame, "maxv": maxv, "results": res, "meta": meta}
         return res
+
+    try:
+        return await run_in_threadpool(work)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
 
@@ -322,7 +327,8 @@ async def api_mtf(request: Request):
         body = await request.json()
     except Exception:
         body = {}
-    try:
+
+    def work():                                   # runs in the threadpool (event loop stays free)
         if _isp_active():
             with _isp_lock:
                 s = _isp["stream"]
@@ -340,6 +346,9 @@ async def api_mtf(request: Request):
         res["frame_source"] = meta.get("source")
         _last["mtf"] = {"frame": frame, "maxv": maxv, "results": res, "meta": meta}
         return res
+
+    try:
+        return await run_in_threadpool(work)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
 
@@ -484,7 +493,8 @@ async def api_meter(request: Request):
     target_hi = float(body.get("target_hi", 0.90))     # brightest channel -> 90% FS (10% headroom)
     target_lo = float(body.get("target_lo", 0.35))     # darkest patch -> 35% FS (strong shadow SNR)
     MIN_NS, MAX_NS = 50_000, 500_000_000               # 0.05 ms .. 500 ms
-    try:
+
+    def work():
         with _client() as c:
             exp = int(c.info().get("exposure_ns", 8_000_000))
             lv = None
@@ -532,6 +542,9 @@ async def api_meter(request: Request):
                 "clamped": (t_short <= MIN_NS or t_long >= MAX_NS),
                 "note": note, "trace": trace,
             }
+
+    try:
+        return await run_in_threadpool(work)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
 
@@ -546,7 +559,8 @@ async def api_darkcheck(request: Request):
         body = {}
     exp_short_ms = float(body.get("exp_short_ms", 0.2))
     exp_long_ms = float(body.get("exp_long_ms", 30.0))
-    try:
+
+    def work():
         with _client() as c:
             orig = int(c.info().get("exposure_ns", 8_000_000))
 
@@ -566,6 +580,9 @@ async def api_darkcheck(request: Request):
                 "exp_short_ms": exp_short_ms, "exp_long_ms": exp_long_ms,
                 "short": s, "long": l, **v,
             }
+
+    try:
+        return await run_in_threadpool(work)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
 

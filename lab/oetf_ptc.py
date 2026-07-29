@@ -63,11 +63,31 @@ def uniformity(frame):
             roi.mean())
 
 
-def capture_pair(c, delay=0.12):
-    f1, maxv = c.capture()
-    time.sleep(delay)                                  # ensure an independent frame
-    f2, _ = c.capture()
-    return f1.astype(np.float64), f2.astype(np.float64), maxv
+def capture_frames(c, n, delay=0.08):
+    """Grab n independent frames; return (list of float64 arrays, white level)."""
+    frames, maxv = [], None
+    for i in range(n):
+        f, mv = c.capture()
+        frames.append(f.astype(np.float64))
+        maxv = mv if maxv is None else maxv
+        if i < n - 1:
+            time.sleep(delay)                          # ensure an independent frame
+    return frames, maxv
+
+
+def channel_stats(frames, chn, roi_frac):
+    """Robust central-ROI signal + temporal variance for one Bayer channel.
+
+    signal = median of per-frame ROI means (rejects an occasional bad frame).
+    var    = median of consecutive-pair difference variances var(f_k - f_{k+1})/2
+             -- the pair difference removes fixed-pattern noise, and the median
+             over pairs rejects a single torn/dropped frame (which corrupts <=2
+             of the n-1 pairs). This is what killed the old 2-frame PTC.
+    """
+    rois = [roi_of(plane(f, chn), roi_frac) for f in frames]
+    means = np.array([r.mean() for r in rois])
+    diffs = [((rois[k] - rois[k + 1]) ** 2).mean() / 2.0 for k in range(len(rois) - 1)]
+    return float(np.median(means)), float(np.median(diffs))
 
 
 def main():
@@ -78,7 +98,7 @@ def main():
     ap.add_argument("--emin", type=float, default=0.3, help="min exposure ms")
     ap.add_argument("--emax", type=float, default=120.0, help="max exposure ms")
     ap.add_argument("--points", type=int, default=22)
-    ap.add_argument("--frames", type=int, default=2, help="frames per exposure (>=2; pairs averaged)")
+    ap.add_argument("--frames", type=int, default=8, help="frames per exposure (>=2; median-of-pairs var)")
     ap.add_argument("--roi", type=float, default=0.25, help="central ROI fraction per plane")
     ap.add_argument("--settle", type=float, default=1.3, help="seconds after an exposure change")
     ap.add_argument("--out", default=os.path.join(_HERE, "ptc_result.csv"))
@@ -118,12 +138,10 @@ def main():
         print("\nexposure sweep (%d pts, %.2f-%.1f ms):" % (a.points, a.emin, a.emax))
         for e_ms in exps:
             c.set_params({"exposure_ns": int(e_ms * 1e6)}); time.sleep(a.settle)
-            f1, f2, maxv = capture_pair(c)
+            frames, maxv = capture_frames(c, a.frames)
             rec = {"exp_ms": round(float(e_ms), 4)}
             for chn in ("R", "Gr", "Gb", "B"):
-                p1, p2 = roi_of(plane(f1, chn), a.roi), roi_of(plane(f2, chn), a.roi)
-                mean = float(p1.mean())
-                var = float(((p1 - p2) ** 2).mean() / 2.0)      # temporal var, FPN removed
+                mean, var = channel_stats(frames, chn, a.roi)
                 rec["%s_mean" % chn] = round(mean, 3)
                 rec["%s_var" % chn] = round(var, 4)
             rows.append(rec)

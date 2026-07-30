@@ -69,7 +69,26 @@ a bayer-stream request to one of the RAW usecases for this sensor. That lives in
 required** (rebuild the selector and/or patch the plugin, then redeploy/reflash). There is no config-only or
 on-target fix. Start the fix at the selection layer, NOT the sensor config.
 
-## ⭐ EXACT fix located in the CHI-CDK source (2026-07-24)
+## ⚠️ BUILD REALITY (2026-07-24) — the selector is a Qualcomm PREBUILT; A2 is NOT a local rebuild
+
+Investigated the actual build on the host (`metropolis@10.70.0.227`, `~/Workspace/Qualcomm`, QLI 1.7 repo tree):
+- **Every CamX/CHI recipe is `qprebuilt`** — `camx`, `camxcommon`, `camxlib`, `camxapi`, `camx-autogen`, and
+  **`chicdk_1.0.qcom.bb`** (which contains `com.qti.chiusecaseselector.so`). They fetch prebuilt binary tarballs
+  from Qualcomm's artifactory (`${PBT_ARTIFACTORY}/…tar.gz`). Only `chicdk-autogen` (code generators) build from
+  source. **So the usecase selector is a Qualcomm prebuilt binary — there is NO source build of it in this tree,
+  and a `bbappend`/`bitbake` cannot rebuild it.**
+- **No cross-toolchain/SDK on the build host** (only Qualcomm GUI tools in `/opt/qcom`; no `aarch64-*-gcc`).
+- **No compiler on the IQ9** (`g++`/`gcc` absent; only `make`) — so no native on-device build either.
+- The CHI-CDK *source* hvo has is for OEM **sensor-plugin** dev (building `cmk_imx678_sensor.so`) + reference;
+  it is not wired to rebuild the whole CamX/CHI-CDK. Rebuilding just `chiusecaseselector.so` would mean
+  reproducing Qualcomm's entire CamX build and ABI-matching ~a dozen prebuilt `libcamx*`/`chicdk` binaries.
+
+**⇒ A2 (edit `GetMatchingUsecase` + rebuild) is NOT cleanly implementable by us on this stack.** The change
+itself is tiny and fully specified below, but applying it requires a Qualcomm CamX **source build** (not shipped
+here) or a Qualcomm-provided patched prebuilt. **Realistic path: a Qualcomm support request** carrying the exact
+change below (hvo to escalate), or Qualcomm enabling a CamX source-build. The precise, self-contained spec:
+
+## ⭐ EXACT change (fully specified — hand this to Qualcomm/whoever builds CamX from source)
 
 The "RDI-usecase change" is **not deep CamX arcana — it's a missing `if`-branch in the usecase selector**, and
 it's fully readable in the CHI-CDK on disk:

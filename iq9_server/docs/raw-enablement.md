@@ -69,7 +69,48 @@ a bayer-stream request to one of the RAW usecases for this sensor. That lives in
 required** (rebuild the selector and/or patch the plugin, then redeploy/reflash). There is no config-only or
 on-target fix. Start the fix at the selection layer, NOT the sensor config.
 
-## Path A — enable the RDI/RAW usecase for `cmk_imx678` (recommended; this bundle supports it)
+## ⭐ EXACT fix located in the CHI-CDK source (2026-07-24)
+
+The "RDI-usecase change" is **not deep CamX arcana — it's a missing `if`-branch in the usecase selector**, and
+it's fully readable in the CHI-CDK on disk:
+
+- **File:** `chi-cdk/core/chiusecase/chxusecaseutils.cpp` → `UsecaseSelector::GetMatchingUsecase()`
+  (builds into `/usr/lib/com.qti.chiusecaseselector.so`; QMMF/`qtiqmmfsrc` drive the CHI HAL underneath, so
+  this selector runs for every session).
+- **What it does** for a 2-stream config (`case 2:`, ~line 2119): `IsRawJPEGStreamConfig` → `RawJPEG`; else
+  `IsPreviewZSLStreamConfig` → `PreviewZSL`; else MFNR/Default. **RAW is only ever routed when paired with
+  JPEG (`RawJPEG`) or in XCFA/HEIC snapshot configs.**
+- **The gap:** there is **no branch that selects a preview(NV12)+RAW-bayer (no-JPEG) config**, so our request
+  falls through to `UsecaseId::Default` — whose pipeline has no `TARGET_BUFFER_RAW` output → `StartVideoTracks
+  Failed`. The `camxUsecasePreviewRaw.xml` usecase (NV12 + `ChiFormatRawMIPI`/`RawPlain16`) EXISTS but
+  `GetMatchingUsecase` never selects it (no code path to `UsecaseId::PreviewRaw`).
+
+**Two ways forward, both now concrete:**
+
+### Option A1 — no build: use the RawJPEG path that's already wired
+`GetMatchingUsecase` DOES select `RawJPEG` for a **RAW + JPEG** stream config (`IsRawJPEGStreamConfig` =
+`IsRawStream` (Raw10/Raw16) && JPEG present). The `RawJPEG` pipeline emits `TARGET_BUFFER_RAW`. So a
+`qtiqmmfsrc` request that includes **both a JPEG stream and a bayer stream** should select `RawJPEG` and deliver
+RAW — no rebuild. Worth testing (a raw+jpeg snapshot via the image pad). (Our earlier bayer-alone snapshot
+returned `capture-image=False` precisely because bayer-without-jpeg matches no RAW usecase.)
+
+### Option A2 — the "usecase change" (small, well-defined C++; hvo-friendly)
+Add a branch to `GetMatchingUsecase` mirroring the adjacent `RawJPEG` one, e.g. in `case 2:`:
+```cpp
+if (TRUE == IsRawJPEGStreamConfig(pStreamConfig)) { usecaseId = UsecaseId::RawJPEG; break; }
+// NEW: preview(NV12) + RAW(Raw10/Raw16), no JPEG  ->  PreviewRaw
+if (<one stream is NV12 preview> && <one stream IsRawStream> && <no JPEG stream>) {
+    usecaseId = UsecaseId::PreviewRaw;   // maps to camxUsecasePreviewRaw.xml
+    break;
+}
+```
+plus ensure `UsecaseId::PreviewRaw` exists and is wired to `camxUsecasePreviewRaw.xml` in the usecase
+factory/enum. Then rebuild `chiusecaseselector.so` (bitbake the camera-server/chi recipe) + redeploy to
+`/usr/lib/` + `systemctl restart cam-server` (no full reflash needed for the .so). This is an embedded-C++
+change mirroring existing code — not CamX-internal expertise. Helpers already in the file: `IsRawStream()`
+(line 441), `IsRawJPEGStreamConfig()` (975), `GetSnapshotStreamConfiguration()`.
+
+## Path A (older framing) — enable the RDI/RAW usecase for `cmk_imx678`
 
 This is the same flow that produced the sensor `.so` + module bins. Concretely:
 

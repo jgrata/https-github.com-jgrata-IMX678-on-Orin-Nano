@@ -87,12 +87,16 @@ it's fully readable in the CHI-CDK on disk:
 
 **Two ways forward, both now concrete:**
 
-### Option A1 — no build: use the RawJPEG path that's already wired
+### Option A1 — no build: RawJPEG path (TESTED — doesn't link via the plugin)
 `GetMatchingUsecase` DOES select `RawJPEG` for a **RAW + JPEG** stream config (`IsRawJPEGStreamConfig` =
-`IsRawStream` (Raw10/Raw16) && JPEG present). The `RawJPEG` pipeline emits `TARGET_BUFFER_RAW`. So a
-`qtiqmmfsrc` request that includes **both a JPEG stream and a bayer stream** should select `RawJPEG` and deliver
-RAW — no rebuild. Worth testing (a raw+jpeg snapshot via the image pad). (Our earlier bayer-alone snapshot
-returned `capture-image=False` precisely because bayer-without-jpeg matches no RAW usecase.)
+`IsRawStream` (Raw10/Raw16) && JPEG present); its pipeline emits `TARGET_BUFFER_RAW`. In principle a `qtiqmmfsrc`
+request with a JPEG stream + a bayer stream would select `RawJPEG` and deliver RAW with no rebuild. **Tested
+2026-07-24 and it does NOT work through the plugin:** `qtiqmmfsrc` refuses to link an `image/jpeg` pad
+alongside a `video/x-bayer` pad (`could not link q to j`, at 3856×2180 AND 1920×1080) — the plugin resists the
+multi-image-pad raw+JPEG config (same class of friction as the bayer-alone snapshot returning
+`capture-image=False`). So the no-build path is not reachable via the standard `qtiqmmfsrc`. **⇒ Option A2 is
+the reliable path.** (Note: the two-video-pad NV12+bayer request DOES link and reach `StartVideoTracks` — it
+fails only at usecase selection — so A2 targets exactly the request that already gets to the selector.)
 
 ### Option A2 — the "usecase change" (small, well-defined C++; hvo-friendly)
 Add a branch to `GetMatchingUsecase` mirroring the adjacent `RawJPEG` one, e.g. in `case 2:`:

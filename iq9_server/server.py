@@ -29,6 +29,7 @@ for _p in (HERE, os.path.join(HERE, "_shared"),
         sys.path.insert(0, _p)
 
 import camera_qmmf            # noqa: E402  (IQ9 capture backend)
+import raw_tools              # noqa: E402  (IQ9 RAW Bayer characterization + preview)
 import mtf_analyze            # noqa: E402  (shared: slanted-edge MTF, analyze_gray path)
 try:
     import colorchecker       # noqa: E402  (shared: detect + CIEDE2000; analyze_processed)
@@ -51,6 +52,16 @@ W = int(os.environ.get("IQ9_W", "1920"))
 H = int(os.environ.get("IQ9_H", "1080"))
 FPS = int(os.environ.get("IQ9_FPS", "30"))
 CAM = int(os.environ.get("IQ9_CAM", "0"))
+RAW_DIR = os.environ.get("IQ9_RAW_DIR", os.path.join(HERE, "raw_captures"))
+# RAW16 capture is PROVEN (verified 12-bit RGGB) but INTERMITTENTLY hangs the camera
+# subsystem on this firmware -> hard watchdog reboot (no kernel panic logged), seen both
+# with the NV12->RAW handoff and on an idle camera. Gate it OFF by default so a UI click
+# can't reboot a shared device; enable only for supervised testing:  IQ9_RAW_ENABLE=1
+RAW_ENABLE = os.environ.get("IQ9_RAW_ENABLE", "0") == "1"
+RAW_DISABLED_MSG = ("RAW capture is disabled (IQ9_RAW_ENABLE=0). RAW16 works and yields "
+                    "verified 12-bit RGGB, but on this firmware it intermittently hangs the "
+                    "camera subsystem and hard-reboots the board. Enable only for supervised "
+                    "testing (ideally with a serial console / hvo watching).")
 
 app = FastAPI(title="IMX678 on IQ9 — Web UI")
 
@@ -70,6 +81,35 @@ def _frame(timeout_s=3.0):
     """Latest BGR frame (thread-safe; qtiqmmfsrc is single-instance)."""
     with _cam_lock:
         return _get_cam().frame(timeout_s=timeout_s)
+
+
+def _grab_raw(n_frames=1):
+    """Capture native RAW16 Bayer frames. The camera is single-client, so this releases
+    the persistent NV12 capture, runs the isolated grab_raw16 subprocess, then resumes
+    NV12 -- all under the camera lock. Returns (frames, meta)."""
+    global _cam
+    with _cam_lock:
+        running = _cam is not None
+        if running:
+            # Fully DISPOSE the NV12 capture (not just stop) so the qtiqmmfsrc recorder
+            # client disconnects and cam-server runs its full release of the IFE/RDI --
+            # mirroring the process-death path that was stable. Then quiesce before RAW.
+            try:
+                _cam.stop()
+            except Exception:
+                pass
+            _cam = None
+            import gc
+            gc.collect()
+            time.sleep(2.0)                       # let cam-server fully release the camera
+        try:
+            return camera_qmmf.grab_raw16(n_frames=n_frames, camera=CAM)
+        finally:
+            if running:
+                try:
+                    _get_cam()                    # recreate NV12 fresh (includes 3A settle)
+                except Exception:
+                    _cam = None                   # lazy re-create on next NV12 use
 
 
 def _channel(bgr, chan):
@@ -116,6 +156,11 @@ def history_page():
     return _page("history.html")
 
 
+@app.get("/raw", response_class=HTMLResponse)
+def raw_page():
+    return _page("raw.html")
+
+
 # ── camera info / params ─────────────────────────────────────────────────────
 @app.get("/api/info")
 def api_info():
@@ -129,7 +174,13 @@ def api_info():
         "camera": CAM, "width": W, "height": H, "fps": FPS,
         "bit_depth": 8, "sensormode": 0, "exposure_ns": 0, "gain": 0,
         "exposure_compensation": exp_comp,
-        "note": "ISP-processed NV12; linear-RAW features await CamX RDI usecase",
+        "raw_available": True,
+        "raw_enabled": RAW_ENABLE,
+        "raw": {"width": camera_qmmf.RAW_W, "height": camera_qmmf.RAW_H,
+                "bit_depth": 12, "cfa": "RGGB", "format": "RAW16 (bpp=16)",
+                "caution": None if RAW_ENABLE else RAW_DISABLED_MSG},
+        "note": "ISP-processed NV12 live; native 12-bit RAW16 via /api/raw/capture"
+                + ("" if RAW_ENABLE else " (gated off — see raw.caution)"),
     }
 
 
@@ -184,6 +235,74 @@ def stream(width: int = 960):
                              media_type="multipart/x-mixed-replace; boundary=frame")
 
 
+# ── RAW (native 12-bit RGGB Bayer via qtiqmmfsrc RAW16) ──────────────────────
+@app.get("/api/raw/capture")
+def api_raw_capture(width: int = 960, wb: int = 1):
+    """Capture one native RAW16 frame; return characterization stats + a preview PNG."""
+    if not RAW_ENABLE:
+        return JSONResponse({"error": RAW_DISABLED_MSG}, status_code=503)
+    try:
+        frames, meta = _grab_raw(1)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+    raw = frames[0]
+    stats = raw_tools.characterize(raw)
+    bgr = raw_tools.preview_bgr8(raw, out_w=width, wb=bool(wb), black=stats["black_level"])
+    ok, buf = cv2.imencode(".png", bgr)
+    import base64
+    _last["raw"] = {"raw": raw, "results": stats,
+                    "meta": {"source": "raw16", "camera": CAM,
+                             "w": meta["width"], "h": meta["height"]}}
+    return {"stats": stats, "meta": meta,
+            "preview_png": "data:image/png;base64," + base64.b64encode(buf.tobytes()).decode()}
+
+
+@app.post("/api/raw/save")
+async def api_raw_save(request: Request):
+    """Capture N native RAW16 frames and save them (uint16 .npy + JSON sidecar) for
+    offline colour-science (derived-CCM / dark-integrity / HDR)."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not RAW_ENABLE:
+        return JSONResponse({"error": RAW_DISABLED_MSG}, status_code=503)
+    n = max(1, min(int(body.get("n_frames", 1)), 32))
+    label = "".join(c for c in str(body.get("label", "raw")) if c.isalnum() or c in "-_")[:40] or "raw"
+    try:
+        frames, meta = _grab_raw(n)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+    os.makedirs(RAW_DIR, exist_ok=True)
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    base = os.path.join(RAW_DIR, "%s_%s" % (ts, label))
+    arr = np.stack(frames, 0)                       # (n, H, W) uint16
+    np.save(base + ".npy", arr)
+    stats = raw_tools.characterize(frames[0])
+    import json
+    sidecar = dict(meta)
+    sidecar.update({"saved": ts, "label": label, "frames": len(frames),
+                    "file": os.path.basename(base) + ".npy", "dtype": "uint16",
+                    "stats_frame0": stats})
+    with open(base + ".json", "w", encoding="utf-8") as f:
+        json.dump(sidecar, f, indent=2)
+    return {"saved": True, "file": base + ".npy", "dir": RAW_DIR,
+            "frames": len(frames), "bytes": int(arr.nbytes), "stats": stats}
+
+
+@app.get("/api/raw/list")
+def api_raw_list():
+    import glob
+    if not os.path.isdir(RAW_DIR):
+        return {"dir": RAW_DIR, "captures": []}
+    items = []
+    for npy in sorted(glob.glob(os.path.join(RAW_DIR, "*.npy")), reverse=True)[:100]:
+        items.append({"file": os.path.basename(npy),
+                      "bytes": os.path.getsize(npy),
+                      "mtime": int(os.path.getmtime(npy))})
+    return {"dir": RAW_DIR, "captures": items}
+
+
 @app.get("/api/histogram")
 def api_histogram():
     bgr = _frame()
@@ -218,7 +337,7 @@ async def api_mtf(request: Request):
 
 
 # ── history / save (reused shared module; stores the processed frame) ────────
-_last = {"mtf": None, "colorchecker": None}
+_last = {"mtf": None, "colorchecker": None, "raw": None}
 
 
 @app.post("/api/history/save")

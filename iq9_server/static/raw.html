@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IMX678 on IQ9 — RAW</title>
+<style>
+  :root { --bg:#15171c; --panel:#1e2128; --ink:#e6e8ec; --mut:#9aa3b2;
+          --acc:#4ea1ff; --line:#2c303a; --ok:#5fd08a; --warn:#e6c15f; --bad:#e46a6a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:13px/1.45 system-ui,Segoe UI,Roboto,sans-serif; }
+  header { padding:8px 14px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; }
+  header h1 { font-size:14px; margin:0; font-weight:600; }
+  header .pill { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em;
+                 background:rgba(95,208,138,.16); color:var(--ok); padding:2px 7px; border-radius:20px; }
+  header a { color:var(--acc); text-decoration:none; font-size:13px; }
+  header .status { margin-left:auto; color:var(--mut); font-size:12px; }
+  .wrap { display:flex; gap:12px; padding:12px 14px; align-items:flex-start; flex-wrap:wrap; }
+  .viewwrap { flex:1 1 60%; min-width:320px; }
+  img.frame { width:100%; border-radius:8px; background:#0c0e12; border:1px solid var(--line); display:block; min-height:200px; }
+  .side { flex:1 1 300px; min-width:280px; display:flex; flex-direction:column; gap:12px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  .card h2 { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--mut); margin:0 0 8px; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:3px 12px; font-size:12px; }
+  .kv .k { color:var(--mut); } .kv .v { font-variant-numeric:tabular-nums; text-align:right; }
+  button { background:var(--acc); color:#08213d; border:0; border-radius:6px; padding:8px 12px; font-weight:600; cursor:pointer; font:inherit; }
+  button.sec { background:#2a2f3a; color:var(--ink); }
+  button:disabled { opacity:.5; cursor:default; }
+  input[type=text], input[type=number] { background:#0c0e12; color:var(--ink); border:1px solid var(--line);
+      border-radius:6px; padding:6px 8px; font:inherit; }
+  input[type=number] { width:4em; } input[type=text] { width:8em; }
+  .row { display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap; }
+  .note { font-size:10.5px; color:var(--mut); margin-top:8px; }
+  canvas { width:100%; height:90px; background:#0c0e12; border:1px solid var(--line); border-radius:6px; }
+  table.ch { width:100%; border-collapse:collapse; font-size:12px; font-variant-numeric:tabular-nums; }
+  table.ch th,table.ch td { text-align:right; padding:2px 4px; } table.ch th { color:var(--mut); font-weight:600; }
+  table.ch td:first-child,table.ch th:first-child { text-align:left; }
+  .swatch { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:-1px; }
+  ul.caps { list-style:none; margin:0; padding:0; font-size:11.5px; }
+  ul.caps li { display:flex; justify-content:space-between; padding:2px 0; border-bottom:1px solid var(--line); }
+  ul.caps a { color:var(--acc); text-decoration:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>IMX678 on IQ9 <span class="pill">RAW · 12-bit RGGB</span></h1>
+  <a href="/">&larr; Live</a> <a href="/mtf">MTF</a> <a href="/colorchecker">ColorChecker</a>
+  <div class="status" id="status">ready</div>
+</header>
+
+<div class="wrap">
+  <div class="viewwrap">
+    <img class="frame" id="view" alt="RAW preview — click Capture" src="">
+    <div class="note" id="pnote">Native <b>3856×2180</b> 12-bit RGGB via <code>qtiqmmfsrc</code> RAW16.
+      Capturing briefly pauses the live NV12 view (single-client camera).</div>
+  </div>
+  <div class="side">
+    <div class="card">
+      <h2>Capture</h2>
+      <div class="row">
+        <button id="cap">Capture RAW</button>
+        <label><input type="checkbox" id="wb" checked> gray-world WB (preview only)</label>
+      </div>
+      <div class="row">
+        <span>save</span><input type="number" id="nf" value="1" min="1" max="32">
+        <span>frames as</span><input type="text" id="label" value="raw">
+        <button class="sec" id="save">Save .npy</button>
+      </div>
+      <div class="note" id="saved"></div>
+    </div>
+    <div class="card">
+      <h2>Statistics <span id="dims" style="color:var(--mut)"></span></h2>
+      <div class="kv" id="glob"><div class="k">—</div><div class="v"></div></div>
+      <table class="ch" id="chtab" style="margin-top:8px"></table>
+    </div>
+    <div class="card">
+      <h2>Histogram (all pixels, 0–4095)</h2>
+      <canvas id="hist" width="280" height="90"></canvas>
+      <div class="note" id="hnote"></div>
+    </div>
+    <div class="card">
+      <h2>Saved captures</h2>
+      <ul class="caps" id="caps"><li><span>—</span></li></ul>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+function setStatus(t,c){ const s=$("status"); s.textContent=t;
+  s.style.color = c==="bad"?"var(--bad)":c==="ok"?"var(--ok)":c==="busy"?"var(--warn)":"var(--mut)"; }
+const f2 = x => (x==null?"—":Number(x).toFixed(1));
+
+function fillStats(st){
+  $("dims").textContent = st.shape ? "· "+st.shape[1]+"×"+st.shape[0] : "";
+  const g = st.global, bl = st.black_level;
+  $("glob").innerHTML = [
+    ["global min / max", g.min+" / "+g.max+" of "+st.maxv],
+    ["global mean", f2(g.mean)],
+    ["black level (mean)", f2(st.black_level_mean)],
+    ["saturated", (g.sat_frac*100).toFixed(2)+"%"],
+    ["black-clipped", (g.black_clip_frac*100).toFixed(2)+"%"],
+    ["G1–G2 balance", f2(st.green_balance)],
+  ].map(([k,v])=>`<div class="k">${k}</div><div class="v">${v}</div>`).join("");
+  const cols=["R","G1","G2","B"], colr={R:"#e46a6a",G1:"#5fd08a",G2:"#3aa06a",B:"#4ea1ff"};
+  let h = "<tr><th>ch</th><th>mean</th><th>std</th><th>max</th><th>sat%</th><th>black</th></tr>";
+  cols.forEach(c=>{ const s=st.channels[c];
+    h += `<tr><td><span class="swatch" style="background:${colr[c]}"></span>${c}</td>`+
+         `<td>${f2(s.mean)}</td><td>${f2(s.std)}</td><td>${s.max}</td>`+
+         `<td>${(s.sat_frac*100).toFixed(2)}</td><td>${f2(bl[c])}</td></tr>`; });
+  $("chtab").innerHTML = h;
+  drawHist(st.hist, st.maxv);
+}
+
+function drawHist(hist,maxv){
+  const c=$("hist"), ctx=c.getContext("2d"), W=c.width, H=c.height;
+  ctx.clearRect(0,0,W,H);
+  const counts=hist.counts, n=counts.length, mx=Math.max(...counts,1), bw=W/n;
+  // log scale so black level + tail are both visible
+  const lg = v => Math.log10(1+v)/Math.log10(1+mx);
+  ctx.fillStyle="#4ea1ff";
+  counts.forEach((v,i)=>{ const h=lg(v)*(H-2); ctx.fillRect(i*bw,H-h,Math.max(1,bw-0.4),h); });
+  $("hnote").textContent = "log-scaled · "+n+" bins";
+}
+
+async function capture(){
+  setStatus("capturing (live paused)…","busy"); $("cap").disabled=true;
+  try{
+    const d = await (await fetch("/api/raw/capture?wb="+($("wb").checked?1:0)+"&width=1000")).json();
+    if(d.error){ setStatus("capture failed","bad"); $("pnote").textContent="Error: "+d.error; return; }
+    $("view").src = d.preview_png;
+    fillStats(d.stats);
+    setStatus("captured","ok");
+  }catch(e){ setStatus("capture failed","bad"); }
+  finally{ $("cap").disabled=false; }
+}
+
+async function save(){
+  const n=parseInt($("nf").value)||1;
+  setStatus("saving "+n+" frame(s)…","busy"); $("save").disabled=true;
+  try{
+    const d = await (await fetch("/api/raw/save",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({n_frames:n,label:$("label").value})})).json();
+    if(d.error){ setStatus("save failed","bad"); $("saved").textContent="Error: "+d.error; return; }
+    $("saved").innerHTML = "saved <b>"+d.file.split(/[\\/]/).pop()+"</b> — "+
+       d.frames+" frame(s), "+(d.bytes/1048576).toFixed(1)+" MB";
+    if(d.stats) fillStats(d.stats);
+    setStatus("saved","ok"); listCaps();
+  }catch(e){ setStatus("save failed","bad"); }
+  finally{ $("save").disabled=false; }
+}
+
+async function listCaps(){
+  try{
+    const d = await (await fetch("/api/raw/list")).json();
+    if(!d.captures || !d.captures.length){ $("caps").innerHTML="<li><span>none yet</span></li>"; return; }
+    $("caps").innerHTML = d.captures.slice(0,12).map(c=>
+      `<li><span>${c.file}</span><span>${(c.bytes/1048576).toFixed(1)} MB</span></li>`).join("");
+  }catch(e){}
+}
+
+async function initGate(){
+  try{
+    const d = await (await fetch("/api/info")).json();
+    if(d && d.raw_available && d.raw_enabled === false){
+      $("cap").disabled = true; $("save").disabled = true;
+      const c = (d.raw && d.raw.caution) || "RAW capture is disabled on this device.";
+      $("pnote").innerHTML = "<b style='color:var(--warn)'>RAW capture disabled.</b> " + c +
+        " <br>Set <code>IQ9_RAW_ENABLE=1</code> for supervised testing.";
+      setStatus("RAW gated off","busy");
+    }
+  }catch(e){}
+}
+
+$("cap").onclick = capture;
+$("save").onclick = save;
+initGate();
+listCaps();
+</script>
+</body>
+</html>

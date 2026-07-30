@@ -1,3 +1,14 @@
+> ⚠️ **SUPERSEDED / DO NOT SEND — 2026-07-30.** This case's root cause is **wrong**. RAW (RDI)
+> capture **works today** on this device with no CamX/CHI change. The request never reaches the
+> CHI usecase selector: it is rejected earlier at CamX `configure_streams` → `CheckValidStreamConfig`
+> because the plugin defaulted to **RAW10** (HAL fmt 37), whose advertised max is **3840×2160** —
+> smaller than the sensor's 3856×2180. Requesting **RAW16** at native resolution validates and
+> streams verified 12-bit RGGB bayer:
+> ```
+> qtiqmmfsrc ! video/x-bayer,format=rggb,bpp=(string)16,width=3856,height=2180,framerate=30/1 ! identity eos-after=N ! filesink location=...
+> ```
+> See `raw-enablement.md` for the corrected analysis. Kept only for history — **do not act on the request below.**
+
 # Support request: enable RAW (RDI) capture for a custom sensor on QCS9075
 
 **Summary.** On QCS9075 (IQ-9075 EVK) with Qualcomm Linux, a **preview (NV12) + RAW-Bayer** capture request via

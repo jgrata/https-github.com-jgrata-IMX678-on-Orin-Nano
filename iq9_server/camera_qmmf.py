@@ -6,20 +6,88 @@ AND ISP-processed (NV12/NV16/RGB) from one source, up to 120fps, coordinated by 
 system `cam-server`. Frames come to Python through a GStreamer appsink -- no CUDA,
 no EGLStream, no C++ (unlike the Tegra path).
 
-Status (2026-07-24, QCS9075 IQ-9075 EVK, Leopard Imaging IMX678, sensor mode
+Status (2026-07-30, QCS9075 IQ-9075 EVK, Leopard Imaging IMX678, sensor mode
 3856x2180 12-bit 30fps):
   - mode="nv12"  -> VALIDATED: processed frames as BGR (for live view / MTF focus).
-  - mode="bayer" -> caps expose video/x-bayer up to 120fps, but naive caps deliver
-    NO frame yet (RAW stream needs explicit camx/QMMF config -- the color/CCM path
-    depends on this; see README "Open: RAW Bayer").
+  - RAW Bayer    -> VALIDATED via grab_raw16(): native 3856x2180 12-bit RGGB. The key
+    was requesting RAW16 (bpp=(string)16) -- the plugin's default RAW10 is rejected by
+    CamX (max 3840x2160 < 3856x2180). RAW12 crashes cam-server; use RAW16 (12-bit data
+    in a 16-bit container). See docs/raw-enablement.md.
 
 Caveat: qtiqmmfsrc does NOT tolerate multiple instances in one process
-(`qmmfsrc_init` asserts context!=NULL) -- use ONE QmmfCapture per process.
+(`qmmfsrc_init` asserts context!=NULL) -- use ONE QmmfCapture per process. RAW capture
+therefore runs in an isolated `gst-launch-1.0` SUBPROCESS (grab_raw16), so the caller
+must first release the camera (stop its own QmmfCapture) -- the camera is single-client.
 
     with QmmfCapture(1920, 1080, 30) as cam:
         bgr = cam.frame()          # HxWx3 uint8 BGR, or None on timeout
+
+    cam.stop()                     # free the camera (single-client)
+    frames = grab_raw16(n_frames=1)  # list of HxW uint16 RGGB (12-bit, max 4095)
+    cam.start()                    # resume NV12
 """
+import glob
+import os
+import subprocess
+import tempfile
+
 import numpy as np
+
+# Sensor-native RAW readout (Leopard IMX678 on this EVK): full RGGB, 12-bit.
+RAW_W, RAW_H, RAW_FPS = 3856, 2180, 30
+
+
+def grab_raw16(n_frames=1, width=RAW_W, height=RAW_H, fps=RAW_FPS, camera=0,
+               timeout_s=25, retries=1):
+    """Capture native RAW16 Bayer frames via an isolated gst-launch subprocess.
+
+    Returns (frames, meta): frames is a list of HxW uint16 arrays (RGGB, 12-bit,
+    values 0..4095); meta carries the exact pipeline + per-frame raw byte size.
+    The caller MUST have released the camera first (single-client). Raises
+    RuntimeError with the gst stderr tail if nothing was captured.
+
+    Why RAW16 (not RAW10/12): RAW10's advertised max is 3840x2160 < 3856x2180 so
+    CamX rejects it at CheckValidStreamConfig; RAW12 destabilises cam-server. RAW16
+    validates at native res and carries the 12-bit data in a 16-bit container.
+    """
+    caps = ("video/x-bayer,format=rggb,bpp=(string)16,"
+            "width=%d,height=%d,framerate=%d/1" % (width, height, fps))
+    last_err = ""
+    for _attempt in range(retries + 1):
+        tmp = tempfile.mkdtemp(prefix="iq9raw_")
+        pat = os.path.join(tmp, "f_%03d.bin")
+        cam = [] if camera == 0 else ["camera=%d" % camera]
+        argv = (["gst-launch-1.0", "-e", "qtiqmmfsrc"] + cam +
+                ["!", caps,
+                 "!", "identity", "eos-after=%d" % int(n_frames),
+                 "!", "multifilesink", "location=%s" % pat])
+        try:
+            p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout_s)
+            stderr = p.stderr or ""
+        except subprocess.TimeoutExpired as e:
+            stderr = (e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or ""))
+        files = sorted(glob.glob(os.path.join(tmp, "f_*.bin")))
+        frames, raw_bytes = [], 0
+        for fp in files:
+            a = np.fromfile(fp, dtype="<u2")
+            raw_bytes = max(raw_bytes, a.size * 2)
+            if a.size >= width * height:
+                frames.append(a[:width * height].reshape(height, width).copy())
+            try:
+                os.remove(fp)
+            except OSError:
+                pass
+        try:
+            os.rmdir(tmp)
+        except OSError:
+            pass
+        if frames:
+            return frames, {"caps": caps, "width": width, "height": height,
+                            "fps": fps, "raw_bytes_per_buffer": raw_bytes,
+                            "n": len(frames), "bit_depth": 12, "cfa": "RGGB"}
+        last_err = "\n".join(l for l in stderr.splitlines()
+                             if "MESA" not in l and "driver name" not in l)[-1500:]
+    raise RuntimeError("RAW capture produced no frame. gst-launch stderr tail:\n" + last_err)
 
 try:
     import gi
@@ -52,8 +120,11 @@ class QmmfCapture:
                     "! appsink name=s max-buffers=2 drop=true sync=false"
                     % (cam, width, height, fps))
         elif mode == "bayer":
-            # RAW Bayer -> uint16. NOTE: not yet delivering frames (camx/QMMF config WIP).
-            desc = ("qtiqmmfsrc name=c %s! video/x-bayer,format=rggb,width=%d,height=%d,framerate=%d/1 "
+            # RAW16 Bayer -> uint16. bpp MUST be a caps string; RAW16 (not RAW10/12).
+            # Prefer grab_raw16() (isolated subprocess); this in-process path is for tools
+            # that own the camera exclusively.
+            desc = ("qtiqmmfsrc name=c %s! video/x-bayer,format=rggb,bpp=(string)16,"
+                    "width=%d,height=%d,framerate=%d/1 "
                     "! appsink name=s max-buffers=2 drop=true sync=false"
                     % (cam, width, height, fps))
         else:
@@ -112,6 +183,10 @@ class QmmfCapture:
                 stride = mi.size // h
                 a = np.frombuffer(mi.data, np.uint8, count=stride * h).reshape(h, stride)
                 return a[:, :w * 4].reshape(h, w, 4)[:, :, :3].copy()      # -> BGR
-            return np.frombuffer(mi.data, np.uint8).copy()                 # bayer: unpack TBD
+            # bayer (RAW16): uint16 LE, stride == width (no line pad); take the h image rows.
+            a = np.frombuffer(mi.data, dtype="<u2")
+            if a.size < w * h:
+                return None
+            return a[:w * h].reshape(h, w).copy()
         finally:
             buf.unmap(mi)

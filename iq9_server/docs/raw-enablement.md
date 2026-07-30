@@ -1,5 +1,51 @@
 # RAW capture on IQ9 (IMX678) — findings & enablement
 
+> ## ✅ 2026-07-30 — RAW capability demonstrated (read this first; old TL;DR + table below are superseded)
+>
+> **Linear RAW Bayer DOES come out of `qtiqmmfsrc`** at native 3856×2180. No CamX/CHI rebuild, no
+> Qualcomm change. Verified capture = genuine 12-bit RGGB (max 4095, G1≈G2, R/B distinct, inter-row
+> corr 0.988).
+>
+> ⚠️ **Stability caveat — RAW is not yet dependable on this firmware (r1.0_00114.0).** RAW capture
+> **intermittently hard-hangs the camera subsystem and reboots the board** (watchdog reset; no kernel
+> panic/Call trace logged — reproduced ~4×, both with the NV12→RAW handoff and on an idle camera). The
+> IQ9 tool therefore **gates RAW OFF by default** (`IQ9_RAW_ENABLE=1` to enable) so a UI click can't
+> reboot a shared device. Treat RAW as a demonstrated capability, not a reliable feature, until the
+> hang is root-caused — best done with a serial console (hvo) and/or the source-built recorder/plugin
+> (`le-services` / `gst-plugins-qti-oss`, both ours to build). NV12 live view is the stable path.
+>
+> **Working recipe:**
+> ```bash
+> gst-launch-1.0 -e qtiqmmfsrc ! \
+>   "video/x-bayer,format=rggb,bpp=(string)16,width=3856,height=2180,framerate=30/1" ! \
+>   identity eos-after=2 ! filesink location=/tmp/r16.bin
+> # -> uint16 LE, stride 3856 (unpacked, no line pad), ~5 embedded-data lines after the 2180 image rows
+> ```
+>
+> **Corrected root cause.** The failure was NOT the CHI usecase selector (`GetMatchingUsecase`) — the
+> request never reaches selection. It is rejected earlier at CamX `configure_streams` →
+> `CheckValidStreamConfig` (`camxhaldevice.cpp:2016`):
+> ```
+> format:37 (HAL_PIXEL_FORMAT_RAW10)  max Res(3840 x 2160)  requested Res(3856 x 2180)
+> Invalid streamStype: 0, format: 37 (3856 x 2180)
+> ```
+> With bpp unspecified the plugin defaults to **RAW10**, whose advertised max (3840×2160 = 4K) is below
+> the sensor's 3856×2180. **RAW16** validates at native resolution. ⇒ `qualcomm-raw-support-case.md` is
+> retracted (do not send).
+>
+> **Gotchas:** `bpp` must be a caps **string** (`bpp=(string)16`); `qtiqmmfsrc` has **no `num-buffers`**
+> (use `identity eos-after=N`); **avoid `bpp=12`/RAW12** — it crashed `cam-server` and rebooted the device.
+>
+> **Source vs prebuilt** (correct `iq9075-evk-yocto` checkout = branch `qualcomm-linux-1.7` + submodules):
+> qmmfsrc plugin (CodeLinaro `gst-plugins-qti-oss`) and `qcom-camera-server`/QMMF recorder (CodeLinaro
+> `le-services`) are **source-built**; only `camx` + `chicdk` are `qprebuilt` binaries. So the whole
+> GStreamer→recorder path is ours to modify if needed (e.g. the RAW12 crash, or NV12+RAW16 simultaneous).
+>
+> ---
+> _Original (pre-2026-07-30) analysis below — kept for history; the RDI-not-wired / StartVideoTracks
+> conclusion was wrong._
+
+
 **Platform:** QCS9075 IQ-9075 EVK · Qualcomm Linux 1.7 · IMX678 (LI-IMX678-FLEX-114H) on JCAM0–3 ·
 camera stack = CAMSS/CamX + `cam-server` + GStreamer `qtiqmmfsrc`.
 

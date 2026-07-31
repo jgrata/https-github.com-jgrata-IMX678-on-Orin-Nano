@@ -67,6 +67,10 @@ app = FastAPI(title="IMX678 on IQ9 — Web UI")
 
 _cam = None
 _cam_lock = threading.Lock()
+# Cold RAW mode: NV12 is fully released and the camera left idle, so RAW captures run
+# WITHOUT the per-capture NV12<->RAW handoff churn (which most reliably triggers the
+# CAMSS/RDI hang). Live view is unavailable while cold. See docs/qualcomm-raw-dlkm-stability.md.
+_raw_mode = False
 
 
 def _get_cam():
@@ -77,31 +81,56 @@ def _get_cam():
     return _cam
 
 
-def _frame(timeout_s=3.0):
-    """Latest BGR frame (thread-safe; qtiqmmfsrc is single-instance)."""
+def _dispose_cam():
+    """Fully dispose the NV12 capture so the qtiqmmfsrc recorder client disconnects and
+    cam-server runs its complete IFE/RDI release; then quiesce. Caller holds _cam_lock."""
+    global _cam
+    if _cam is not None:
+        try:
+            _cam.stop()
+        except Exception:
+            pass
+        _cam = None
+        import gc
+        gc.collect()
+        time.sleep(2.0)                           # let cam-server fully release the camera
+
+
+def _set_raw_mode(on):
+    """Enter/exit cold RAW mode (releases / restores the NV12 live view)."""
+    global _raw_mode
     with _cam_lock:
+        if on and not _raw_mode:
+            _dispose_cam()
+            _raw_mode = True
+        elif not on and _raw_mode:
+            _raw_mode = False
+            try:
+                _get_cam()                        # bring NV12 live view back
+            except Exception:
+                pass
+    return _raw_mode
+
+
+def _frame(timeout_s=3.0):
+    """Latest BGR frame (thread-safe; qtiqmmfsrc is single-instance). None while cold."""
+    with _cam_lock:
+        if _raw_mode:
+            return None                           # camera released for RAW; no live view
         return _get_cam().frame(timeout_s=timeout_s)
 
 
 def _grab_raw(n_frames=1):
-    """Capture native RAW16 Bayer frames. The camera is single-client, so this releases
-    the persistent NV12 capture, runs the isolated grab_raw16 subprocess, then resumes
-    NV12 -- all under the camera lock. Returns (frames, meta)."""
+    """Capture native RAW16 Bayer frames (single-client camera). In cold RAW mode the
+    camera is already idle -> capture directly (no churn). Otherwise fall back to the
+    dispose-NV12 -> capture -> restore-NV12 handoff (riskier; see the DLKM stability doc)."""
     global _cam
     with _cam_lock:
+        if _raw_mode:
+            return camera_qmmf.grab_raw16(n_frames=n_frames, camera=CAM)
         running = _cam is not None
         if running:
-            # Fully DISPOSE the NV12 capture (not just stop) so the qtiqmmfsrc recorder
-            # client disconnects and cam-server runs its full release of the IFE/RDI --
-            # mirroring the process-death path that was stable. Then quiesce before RAW.
-            try:
-                _cam.stop()
-            except Exception:
-                pass
-            _cam = None
-            import gc
-            gc.collect()
-            time.sleep(2.0)                       # let cam-server fully release the camera
+            _dispose_cam()
         try:
             return camera_qmmf.grab_raw16(n_frames=n_frames, camera=CAM)
         finally:
@@ -165,10 +194,11 @@ def raw_page():
 @app.get("/api/info")
 def api_info():
     exp_comp = None
-    try:
-        exp_comp = _get_cam().get_prop("exposure-compensation")
-    except Exception:
-        pass
+    if not _raw_mode:
+        try:
+            exp_comp = _get_cam().get_prop("exposure-compensation")
+        except Exception:
+            pass
     return {
         "platform": "IQ9 QCS9075", "source": "nv12-isp (qtiqmmfsrc)",
         "camera": CAM, "width": W, "height": H, "fps": FPS,
@@ -176,6 +206,8 @@ def api_info():
         "exposure_compensation": exp_comp,
         "raw_available": True,
         "raw_enabled": RAW_ENABLE,
+        "raw_mode": _raw_mode,
+        "live_view": (not _raw_mode),
         "raw": {"width": camera_qmmf.RAW_W, "height": camera_qmmf.RAW_H,
                 "bit_depth": 12, "cfa": "RGGB", "format": "RAW16 (bpp=16)",
                 "caution": None if RAW_ENABLE else RAW_DISABLED_MSG},
@@ -194,6 +226,9 @@ async def api_params(request: Request):
         body = {}
     applied = {}
     with _cam_lock:
+        if _raw_mode:
+            return JSONResponse({"error": "camera is in cold RAW mode; exit RAW mode for NV12 controls"},
+                                status_code=409)
         cam = _get_cam()
         if "exposure_compensation" in body:
             applied["exposure_compensation"] = cam.set_prop(
@@ -236,6 +271,24 @@ def stream(width: int = 960):
 
 
 # ── RAW (native 12-bit RGGB Bayer via qtiqmmfsrc RAW16) ──────────────────────
+@app.post("/api/raw/mode")
+async def api_raw_mode(request: Request):
+    """Enter/exit cold RAW mode. Cold mode releases the NV12 live view and leaves the
+    camera idle so RAW captures avoid the NV12<->RAW handoff churn (the most reliable
+    trigger of the CAMSS/RDI hang). Entering requires RAW enabled; exiting is always OK."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    want = bool(body.get("raw", False))
+    if want and not RAW_ENABLE:
+        return JSONResponse({"error": RAW_DISABLED_MSG}, status_code=503)
+    on = _set_raw_mode(want)
+    return {"raw_mode": on, "live_view": (not on),
+            "note": ("camera idle — RAW captures run without NV12 handoff churn" if on
+                     else "NV12 live view active")}
+
+
 @app.get("/api/raw/capture")
 def api_raw_capture(width: int = 960, wb: int = 1):
     """Capture one native RAW16 frame; return characterization stats + a preview PNG."""

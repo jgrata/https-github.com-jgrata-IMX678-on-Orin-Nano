@@ -10,9 +10,19 @@
 > **intermittently hard-hangs the camera subsystem and reboots the board** (watchdog reset; no kernel
 > panic/Call trace logged — reproduced ~4×, both with the NV12→RAW handoff and on an idle camera). The
 > IQ9 tool therefore **gates RAW OFF by default** (`IQ9_RAW_ENABLE=1` to enable) so a UI click can't
-> reboot a shared device. Treat RAW as a demonstrated capability, not a reliable feature, until the
-> hang is root-caused — best done with a serial console (hvo) and/or the source-built recorder/plugin
-> (`le-services` / `gst-plugins-qti-oss`, both ours to build). NV12 live view is the stable path.
+> reboot a shared device, and offers a **cold RAW mode** (`POST /api/raw/mode {raw:true}`) that releases
+> NV12 and captures from an idle camera to avoid the handoff churn. Treat RAW as a demonstrated
+> capability, not a reliable feature.
+>
+> **Root cause (kernel-level, captured via on-device `dmesg` — see `qualcomm-raw-dlkm-stability.md`):**
+> the CAMSS driver `camera_qcs9100` goes into ISP scheduling congestion under RDI —
+> `cam_ife_csid_ver2_ipp_bottom_half delay in schedule` (growing 7→14→27), `CAM-CRM: WQ congestion,
+> Skip Frame`, `CAM-ISP: … SOF recovery / bubble` — and when it fails to recover the CSID tasklet stalls
+> and the 30 s `qcom_wdt` hard-resets the board (no panic logged). This is the **prebuilt camera DLKM**
+> (`cameradlkm`), i.e. Qualcomm's layer — NOT our userspace recorder/plugin. A real fix is a
+> camera-DLKM/SPF update (hvo/Qualcomm). NV12 live view is the stable path in practice.
+> (Note: a separate reboot observed while the camera was idle was **unrelated** to the camera/webui —
+> not evidence that NV12 alone triggers this.)
 >
 > **Working recipe:**
 > ```bash

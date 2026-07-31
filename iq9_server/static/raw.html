@@ -58,6 +58,12 @@
     <div class="card">
       <h2>Capture</h2>
       <div class="row">
+        <button class="sec" id="mode">Enter cold RAW mode</button>
+        <span id="modestate" class="note" style="margin:0">live view active</span>
+      </div>
+      <div class="note">Cold mode releases the NV12 live view and captures RAW from an idle camera —
+        avoids the handoff churn that most reliably triggers the CAMSS/RDI hang.</div>
+      <div class="row" style="margin-top:10px">
         <button id="cap">Capture RAW</button>
         <label><input type="checkbox" id="wb" checked> gray-world WB (preview only)</label>
       </div>
@@ -159,11 +165,30 @@ async function listCaps(){
   }catch(e){}
 }
 
+let rawMode = false;
+function reflectMode(){
+  $("mode").textContent = rawMode ? "Exit cold RAW mode (resume live)" : "Enter cold RAW mode";
+  $("modestate").textContent = rawMode ? "camera idle · live view released" : "live view active";
+  $("modestate").style.color = rawMode ? "var(--ok)" : "var(--mut)";
+}
+async function setMode(on){
+  setStatus(on ? "entering cold RAW mode…" : "resuming live…","busy"); $("mode").disabled = true;
+  try{
+    const d = await (await fetch("/api/raw/mode",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({raw:on})})).json();
+    if(d.error){ setStatus("mode change failed","bad"); $("modestate").textContent = d.error; return; }
+    rawMode = !!d.raw_mode; reflectMode();
+    setStatus(rawMode ? "cold RAW mode" : "live","ok");
+  }catch(e){ setStatus("mode change failed","bad"); }
+  finally{ $("mode").disabled = false; }
+}
+
 async function initGate(){
   try{
     const d = await (await fetch("/api/info")).json();
+    rawMode = !!(d && d.raw_mode); reflectMode();
     if(d && d.raw_available && d.raw_enabled === false){
-      $("cap").disabled = true; $("save").disabled = true;
+      $("cap").disabled = true; $("save").disabled = true; $("mode").disabled = true;
       const c = (d.raw && d.raw.caution) || "RAW capture is disabled on this device.";
       $("pnote").innerHTML = "<b style='color:var(--warn)'>RAW capture disabled.</b> " + c +
         " <br>Set <code>IQ9_RAW_ENABLE=1</code> for supervised testing.";
@@ -172,6 +197,7 @@ async function initGate(){
   }catch(e){}
 }
 
+$("mode").onclick = () => setMode(!rawMode);
 $("cap").onclick = capture;
 $("save").onclick = save;
 initGate();

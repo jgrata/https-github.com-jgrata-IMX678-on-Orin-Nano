@@ -1,0 +1,50 @@
+4975:[Fri Jul 31 20:00:03 2026] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-5f0200-db0304 cb: cam_req_mgr_process_flush_req [camera_qcs9100] delay in execution detected 8683:511190 cur 8683:552134
+4986:[Fri Jul 31 20:00:03 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_release_hw: 9282: 20:0:3.414 Release HW success ctx id: 3 
+4988:[Fri Jul 31 20:00:03 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1436: CAM_RELEASE_DEV Success for cmk_imx678 sensor_id:0x64, slave_addr:0x34 
+5010:[Fri Jul 31 20:00:04 2026] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-c80200-740306 cb: cam_req_mgr_process_flush_req [camera_qcs9100] delay in execution detected 8684:844933 cur 8684:885746
+5021:[Fri Jul 31 20:00:04 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_release_hw: 9282: 20:0:4.735 Release HW success ctx id: 4 
+5023:[Fri Jul 31 20:00:04 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1436: CAM_RELEASE_DEV Success for cmk_imx678 sensor_id:0x64, slave_addr:0x34 
+5043:[Fri Jul 31 20:00:07 2026] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-fa0200-9c0304 cb: cam_req_mgr_process_flush_req [camera_qcs9100] delay in execution detected 8688:250717 cur 8688:291495
+5054:[Fri Jul 31 20:00:08 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_release_hw: 9282: 20:0:8.153 Release HW success ctx id: 5 
+5056:[Fri Jul 31 20:00:08 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1436: CAM_RELEASE_DEV Success for cmk_imx678 sensor_id:0x64, slave_addr:0x34 
+5078:[Fri Jul 31 20:00:09 2026] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-5d0200-4d0306 cb: cam_req_mgr_process_flush_req [camera_qcs9100] delay in execution detected 8689:576954 cur 8689:617746
+5089:[Fri Jul 31 20:00:09 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_release_hw: 9282: 20:0:9.453 Release HW success ctx id: 6 
+5091:[Fri Jul 31 20:00:09 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1436: CAM_RELEASE_DEV Success for cmk_imx678 sensor_id:0x64, slave_addr:0x34 
+5110:[Fri Jul 31 20:00:12 2026] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-900200-e40304 cb: cam_req_mgr_process_flush_req [camera_qcs9100] delay in execution detected 8693:001668 cur 8693:042605
+5121:[Fri Jul 31 20:00:12 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_release_hw: 9282: 20:0:12.897 Release HW success ctx id: 7 
+5123:[Fri Jul 31 20:00:12 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1436: CAM_RELEASE_DEV Success for cmk_imx678 sensor_id:0x64, slave_addr:0x34 
+5145:[Fri Jul 31 20:00:13 2026] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-100200-c0306 cb: cam_req_mgr_process_flush_req [camera_qcs9100] delay in execution detected 8694:300973 cur 8694:341822
+5156:[Fri Jul 31 20:00:14 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_release_hw: 9282: 20:0:14.190 Release HW success ctx id: 8 
+5158:[Fri Jul 31 20:00:14 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1436: CAM_RELEASE_DEV Success for cmk_imx678 sensor_id:0x64, slave_addr:0x34 
+5175:[Fri Jul 31 20:00:17 2026] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-350200-210304 cb: cam_req_mgr_process_flush_req [camera_qcs9100] delay in execution detected 8697:728386 cur 8697:769299
+5186:[Fri Jul 31 20:00:17 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_release_hw: 9282: 20:0:17.630 Release HW success ctx id: 9 
+5188:[Fri Jul 31 20:00:17 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1436: CAM_RELEASE_DEV Success for cmk_imx678 sensor_id:0x64, slave_addr:0x34 
+5210:[Fri Jul 31 20:00:18 2026] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-9a0200-570306 cb: cam_req_mgr_process_flush_req [camera_qcs9100] delay in execution detected 8699:036127 cur 8699:077141
+5221:[Fri Jul 31 20:00:18 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_release_hw: 9282: 20:0:18.923 Release HW success ctx id: 10 
+5223:[Fri Jul 31 20:00:18 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1436: CAM_RELEASE_DEV Success for cmk_imx678 sensor_id:0x64, slave_addr:0x34 
+5240:[Fri Jul 31 20:00:22 2026] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-230200-150304 cb: cam_req_mgr_process_flush_req [camera_qcs9100] delay in execution detected 8702:482113 cur 8702:523322
+5251:[Fri Jul 31 20:00:22 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_release_hw: 9282: 20:0:22.376 Release HW success ctx id: 11 
+5253:[Fri Jul 31 20:00:22 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1436: CAM_RELEASE_DEV Success for cmk_imx678 sensor_id:0x64, slave_addr:0x34 
+5275:[Fri Jul 31 20:00:23 2026] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-d20200-ac0306 cb: cam_req_mgr_process_flush_req [camera_qcs9100] delay in execution detected 8703:784091 cur 8703:825052
+5286:[Fri Jul 31 20:00:23 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_release_hw: 9282: 20:0:23.668 Release HW success ctx id: 12 
+5288:[Fri Jul 31 20:00:23 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1436: CAM_RELEASE_DEV Success for cmk_imx678 sensor_id:0x64, slave_addr:0x34 
+5307:[Fri Jul 31 20:00:26 2026] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-f40200-a50304 cb: cam_req_mgr_process_flush_req [camera_qcs9100] delay in execution detected 8707:223357 cur 8707:247922
+5310:[Fri Jul 31 20:00:26 2026] iommu_get_fault_ids unimplemented
+5311:[Fri Jul 31 20:00:26 2026] WARNING: CPU: 0 PID: 559 at /usr/src/debug/cameradlkm/1.0.qcom/common/cam_compat.c:393 cam_check_iommu_faults+0x88/0x90 [camera_qcs9100]
+5313:[Fri Jul 31 20:00:26 2026] Modules linked in: michael_mic usb_f_uvc videobuf2_vmalloc uvc videobuf2_dma_sg videobuf2_memops overlay tz_log qcom_smcinvoke mem_object si_core_module rfcomm 8021q garp mrp stp llc bnep snd_soc_hdmi_codec qrtr_mhi phy_qcom_edp fastrpc tpm_tis_spi rpmsg_ctrl rpmsg_char tpm_tis_core qrtr_smd camera_qcs9100(O) qcom_edac qmi_cooling msm_display snd_soc_sc8280xp ocmem snd_soc_qcom_sdw gpu_sched snd_soc_qcom_common drm_display_helper qca808x snd_soc_simple_card_utils
+5326:[Fri Jul 31 20:00:27 2026] CPU: 0 PID: 559 Comm: irq/40-arm-smmu Tainted: G           O       6.6.116-qli-1.7-ver.1.1-05801-gde229c16e2aa-dirty #1
+5329:[Fri Jul 31 20:00:27 2026] pc : cam_check_iommu_faults+0x88/0x90 [camera_qcs9100]
+5331:[Fri Jul 31 20:00:27 2026] lr : cam_check_iommu_faults+0x88/0x90 [camera_qcs9100]
+5332:[Fri Jul 31 20:00:27 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_release_hw: 9282: 20:0:27.246 Release HW success ctx id: 13 
+5346:[Fri Jul 31 20:00:27 2026] Call trace:
+5347:[Fri Jul 31 20:00:27 2026]  cam_check_iommu_faults+0x88/0x90 [camera_qcs9100]
+5348:[Fri Jul 31 20:00:27 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1436: CAM_RELEASE_DEV Success for cmk_imx678 sensor_id:0x64, slave_addr:0x34 
+5349:[Fri Jul 31 20:00:27 2026]  cam_smmu_page_fault_work+0xa4/0x3f0 [camera_qcs9100]
+5350:[Fri Jul 31 20:00:27 2026]  cam_smmu_iommu_fault_handler+0x120/0x29c [camera_qcs9100]
+5351:[Fri Jul 31 20:00:27 2026]  report_iommu_fault+0x30/0xe8
+5352:[Fri Jul 31 20:00:27 2026]  qcom_smmu_context_fault+0x214/0x890
+5353:[Fri Jul 31 20:00:27 2026]  arm_smmu_context_fault+0x70/0x548
+5359:[Fri Jul 31 20:00:27 2026] CAM_ERR: CAM-SMMU: cam_check_iommu_faults: 404: smmu fault ids bid:0 pid:0 mid:0 
+5360:[Fri Jul 31 20:00:27 2026] CAM_ERR: CAM-SMMU: cam_smmu_find_closest_mapping: 868: Cannot find vaddr:f6e80e80 in SMMU ife virt address 
+5363:                           CAM_ERR : CAM-CTXT:	PF Evt: faulting buffer not found, PF Type: faulting addr out of bounds, PF Stage: stage 1 (non-secure)
+5365:[Fri Jul 31 20:00:27 2026] CAM_ERR: CAM-SMMU: cam_smmu_dump_cb_info: 744: ********** 20:0:27:525 Context bank dump for ife ********** 

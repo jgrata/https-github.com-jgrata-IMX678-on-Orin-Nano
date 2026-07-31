@@ -1,25 +1,35 @@
 # Support request: RAW/RDI capture intermittently hangs the CAMSS driver → watchdog reboot (QCS9075)
 
-> ## UPDATE 2026-07-31 — reframed: recoverable + workaroundable, not a hard blocker
-> After making the RAW capture fully release the camera (kill the NV12-owning process, not an in-process
-> `Gst NULL`) and adding a **~3 s release quiesce** before starting the RDI stream, **27 consecutive RAW16
-> captures succeeded with no hang** — including **25 back-to-back live-mode captures that each do the full
-> NV12↔RDI handoff** (the worst-case churn). So RAW DAQ is **workable now** on our side.
+> ## UPDATE 2026-07-31 — ROOT CAUSE FOUND: IFE SMMU/IOMMU page fault (use-after-unmap) on RDI release
+> A 100-capture soak (live-mode NV12↔RDI handoff, ~3 s release quiesce) ran **49 clean captures, then a
+> hard reboot from a kernel ARM-SMMU (IOMMU) context fault in the IFE.** Each capture acquires+releases an
+> IFE HW context; at ~capture 49 (IFE ctx ~13) a release **raced an in-flight IFE access to an already
+> unmapped buffer** → stage-1 SMMU page fault → watchdog reset. **Captured kernel call trace
+> (`camera_qcs9100` DLKM):**
+> ```
+> irq/40-arm-smmu  pc: cam_check_iommu_faults [camera_qcs9100]
+>   cam_smmu_page_fault_work → cam_smmu_iommu_fault_handler → report_iommu_fault
+>     → qcom_smmu_context_fault → arm_smmu_context_fault → irq_thread
+> CAM-SMMU: smmu fault ids bid:0 pid:0 mid:0 ; Cannot find vaddr:f6e80e80 in SMMU ife virt address
+> CAM-CTXT: PF Evt: faulting buffer not found; PF Type: faulting addr out of bounds; PF Stage: stage 1 (non-secure)
+> ```
+> …logged **concurrently with** `cam_ife_mgr_release_hw: Release HW success ctx 13` and
+> `CAM_RELEASE_DEV Success for cmk_imx678`, i.e. during teardown between captures.
 >
-> The kernel still logs the congestion signature (`cam_ife_csid_ver2_ipp_bottom_half` /
-> `..._discard_sof_pix_bottom_half` "delay in schedule detected", CRM "WQ congestion, Skip Frame")
-> **31× during that run — and it RECOVERED every time.** The same warnings also appear during plain NV12
-> preview (the ZSL usecase) and recover. So the mechanism is a camera-driver **ISP-tasklet / workqueue
-> scheduling-delay** condition that is normally recoverable; the **hard hang is the tail case where the
-> delay grows unbounded** (previously seen as 7→14→27) and the CSID tasklet fully stalls → `qcom_wdt`.
-> Starting an RDI stream too soon after the prior camera client releases (short quiesce / incomplete
-> release) made the fatal case far more likely.
+> **This corrects the earlier framing.** The `cam_ife_csid_ver2_*_bottom_half` "delay in schedule" /
+> "WQ congestion" warnings are a *separate, recoverable* symptom (they also fire during plain NV12 preview
+> and recover). **The actual reboot is the IFE SMMU page fault on release.** A longer release quiesce only
+> *reduces* the odds (it shrinks the race window) — it cannot eliminate it, because this is a
+> **use-after-unmap race in the RDI release path**, not a fixed-timing issue. Observed rate ≈ 1 hang per
+> ~49 RDI acquire/release cycles at 3 s quiesce (was far more frequent with short quiesce / incomplete
+> release). NV12-only (no repeated RDI acquire/release) is unaffected.
 >
-> **Revised ask for Qualcomm/hvo (robustness, not a blocker):** (1) Is the `cameradlkm`
-> ISP-tasklet/workqueue scheduling-delay-under-load a known issue on QCS9075, and is there a fixed DLKM/SPF
-> or a scheduling/priority/affinity fix? (2) Is there a proper "camera released / RDI-safe-to-start" signal
-> so we needn't rely on a fixed quiesce? (3) Any required clock/bandwidth vote for full-res 12-bit RDI.
-> The original blocker framing below is superseded; the technical detail remains accurate.
+> **Ask for Qualcomm/hvo (specific DLKM bug):** the IFE SMMU/IOMMU context fault above during repeated RDI
+> HW-context acquire/release — is it known on QCS9075 `cameradlkm` (`camera_qcs9100`), and is there a
+> fixed DLKM/SPF? The fault (`cam_check_iommu_faults` / `cam_smmu_iommu_fault_handler`, "faulting buffer
+> not found / addr out of bounds" on the **ife** context bank, during `cam_ife_mgr_release_hw`) points to a
+> buffer being unmapped from the IFE SMMU while an IFE access is still in flight on RDI teardown.
+> The original blocker framing below is superseded; the config/repro detail remains accurate.
 
 
 **Summary.** On QCS9075 (IQ-9075 EVK, Qualcomm Linux 1.7) we can capture native RAW Bayer from the

@@ -57,6 +57,9 @@ H = int(os.environ.get("IQ9_H", "1080"))
 FPS = int(os.environ.get("IQ9_FPS", "30"))
 CAM = int(os.environ.get("IQ9_CAM", "0"))
 RAW_DIR = os.environ.get("IQ9_RAW_DIR", os.path.join(HERE, "raw_captures"))
+# Quiesce (seconds) after fully killing the NV12 worker before starting an RDI capture, to let
+# cam-server complete the IFE/RDI release. 3.0 gave 27/27 clean; a short value is the causality test.
+RAW_QUIESCE_S = float(os.environ.get("IQ9_RAW_QUIESCE_S", "3.0"))
 # RAW16 capture is PROVEN (verified 12-bit RGGB) but INTERMITTENTLY hangs the camera
 # subsystem on this firmware -> hard watchdog reboot (no kernel panic logged), seen both
 # with the NV12->RAW handoff and on an idle camera. Gate it OFF by default so a UI click
@@ -135,7 +138,7 @@ def _kill_worker():
         os.remove(SHM)
     except OSError:
         pass
-    time.sleep(3.0)                                 # let cam-server fully complete the IFE/RDI release
+    time.sleep(RAW_QUIESCE_S)                       # let cam-server fully complete the IFE/RDI release
                                                     # (short quiesce correlated with the RDI hang)
 
 

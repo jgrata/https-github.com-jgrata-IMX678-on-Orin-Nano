@@ -1,5 +1,27 @@
 # Support request: RAW/RDI capture intermittently hangs the CAMSS driver → watchdog reboot (QCS9075)
 
+> ## UPDATE 2026-07-31 — reframed: recoverable + workaroundable, not a hard blocker
+> After making the RAW capture fully release the camera (kill the NV12-owning process, not an in-process
+> `Gst NULL`) and adding a **~3 s release quiesce** before starting the RDI stream, **27 consecutive RAW16
+> captures succeeded with no hang** — including **25 back-to-back live-mode captures that each do the full
+> NV12↔RDI handoff** (the worst-case churn). So RAW DAQ is **workable now** on our side.
+>
+> The kernel still logs the congestion signature (`cam_ife_csid_ver2_ipp_bottom_half` /
+> `..._discard_sof_pix_bottom_half` "delay in schedule detected", CRM "WQ congestion, Skip Frame")
+> **31× during that run — and it RECOVERED every time.** The same warnings also appear during plain NV12
+> preview (the ZSL usecase) and recover. So the mechanism is a camera-driver **ISP-tasklet / workqueue
+> scheduling-delay** condition that is normally recoverable; the **hard hang is the tail case where the
+> delay grows unbounded** (previously seen as 7→14→27) and the CSID tasklet fully stalls → `qcom_wdt`.
+> Starting an RDI stream too soon after the prior camera client releases (short quiesce / incomplete
+> release) made the fatal case far more likely.
+>
+> **Revised ask for Qualcomm/hvo (robustness, not a blocker):** (1) Is the `cameradlkm`
+> ISP-tasklet/workqueue scheduling-delay-under-load a known issue on QCS9075, and is there a fixed DLKM/SPF
+> or a scheduling/priority/affinity fix? (2) Is there a proper "camera released / RDI-safe-to-start" signal
+> so we needn't rely on a fixed quiesce? (3) Any required clock/bandwidth vote for full-res 12-bit RDI.
+> The original blocker framing below is superseded; the technical detail remains accurate.
+
+
 **Summary.** On QCS9075 (IQ-9075 EVK, Qualcomm Linux 1.7) we can capture native RAW Bayer from the
 custom IMX678 sensor via `qtiqmmfsrc` (`video/x-bayer, RAW16, 3856×2180`) — it produces **valid 12-bit
 RGGB** data. However, RAW/RDI capture is **not reliable**: the same request intermittently yields (a) a

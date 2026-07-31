@@ -57,9 +57,13 @@ def grab_raw16(n_frames=1, width=RAW_W, height=RAW_H, fps=RAW_FPS, camera=0,
         tmp = tempfile.mkdtemp(prefix="iq9raw_")
         pat = os.path.join(tmp, "f_%03d.bin")
         cam = [] if camera == 0 else ["camera=%d" % camera]
+        # eos-after must be n_frames+1: `identity eos-after=N` fires EOS as the Nth buffer
+        # passes, and that EOS races the sink -> the Nth buffer is often torn down unwritten.
+        # Grabbing one extra buffer guarantees n_frames complete files (verified: eos-after=1
+        # yields 0 bytes; eos-after=2 yields a full frame).
         argv = (["gst-launch-1.0", "-e", "qtiqmmfsrc"] + cam +
                 ["!", caps,
-                 "!", "identity", "eos-after=%d" % int(n_frames),
+                 "!", "identity", "eos-after=%d" % (int(n_frames) + 1),
                  "!", "multifilesink", "location=%s" % pat])
         try:
             p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout_s)

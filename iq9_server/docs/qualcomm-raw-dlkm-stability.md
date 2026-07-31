@@ -43,16 +43,25 @@ gst-launch-1.0 -e qtiqmmfsrc ! \
 and RAW12 destabilizes `cam-server`; RAW16 is the working format and yields verified 12-bit RGGB:
 `max=4095`, `G1≈G2`, inter-row correlation 0.988.)
 
-The instability appears when RAW/RDI is (re)configured, and is worst when transitioning from an active
-NV12 preview session to a RAW capture. The identical request, repeated, produced three different
-outcomes:
-- valid RAW frame returned;
-- "no frame" (pipeline reaches PLAYING, no buffer delivered, recovers);
-- **hard hang → `qcom_wdt` reboot** during/just after the RAW capture.
+The instability appears when the RDI stream actually **delivers a frame**. Two outcomes from the
+identical request, repeated: a valid RAW frame, or a **hard hang → `qcom_wdt` reboot** during/just after
+the capture. Crucially, the hang occurs even from a **COLD / idle camera** (a fresh `qtiqmmfsrc` RDI
+pipeline with no concurrent preview) — not only across a preview→RDI transition, though the transition
+makes it worse. So this is not merely a reconfigure-ordering issue; steady RDI frame delivery itself can
+hang the CSID.
 
-The primary evidence below is not the reboot tally (some resets on this bring-up unit have had unrelated
-causes) but the **kernel CAMSS signature captured in the ring buffer at the moment of the RAW capture**,
-via an on-device `/dev/kmsg` trigger marker placed immediately before the capture.
+(An earlier "no frame" outcome was a **client-side bug on our side**, not a platform symptom:
+`identity eos-after=1` fires EOS as the first buffer passes and tears the sink down before it is written
+— `eos-after=1` yields 0 bytes, `eos-after=2` yields a full frame. Fixed with `eos-after=n+1`. Mentioned
+only so it is not confused with the hang.)
+
+The primary evidence below is not the reboot tally (some resets on this bring-up unit had unrelated
+causes — e.g. cable reroutes) but the **kernel CAMSS signature captured in the ring buffer at the moment
+of the RAW capture**, via an on-device `/dev/kmsg` trigger marker placed immediately before the capture.
+
+Operational note: after such a watchdog reboot, `cam-server` sometimes comes back **wedged** — any process
+that opens the camera then blocks — until `systemctl restart cam-server` is run. Recovering the rig after
+a RAW hang therefore needs a cam-server restart, not just a webui restart.
 
 ---
 

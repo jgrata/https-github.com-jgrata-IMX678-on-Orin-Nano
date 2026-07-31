@@ -420,6 +420,7 @@ classdef ECamCameraGUI < handle
             lUnif = uilabel(g5,'Text','flat-field hot-spot view (close its window to stop)','FontColor',[0.55 0.55 0.55]);
             lUnif.Layout.Row=4; lUnif.Layout.Column=[3 4];
             app.h.toolOut = uitextarea(gl,'Editable','off','Value',{'Tool output appears here.'});
+            app.ensureDmxAgent();   % bring up the PC-side DMX agent so the Jetson webui's Lighting card works
         end
 
         function buildColorTab(app, tab)
@@ -979,6 +980,31 @@ classdef ECamCameraGUI < handle
                 app.h.dmxStatus.Text = 'COM5 busy — close QLC+';
             else
                 app.h.dmxStatus.Text = ['DMX err: ' out(1:min(48,numel(out)))];
+            end
+        end
+        function ensureDmxAgent(app)
+            %ENSUREDMXAGENT  Start the PC-side DMX HTTP agent (lab/dmx_agent.py, :9200)
+            %  if it is not already listening, so the Jetson webui's Lighting card works
+            %  without manually running it. Burst-and-latch => coexists with this GUI's
+            %  direct dmx_lights.py control and QLC+ (just not sending simultaneously).
+            try
+                webread('http://127.0.0.1:9200/dmx', weboptions('Timeout',1));
+                return   % agent already running
+            catch
+                % not up -> launch it below
+            end
+            script = fullfile(fileparts(which('ECamCameraGUI')), 'lab', 'dmx_agent.py');
+            if ~isfile(script), return, end
+            % launch detached & windowless (pythonw) so it outlives this call
+            system(sprintf('start "DMXAgent" /B pythonw "%s"', script));
+            pause(1.5);   % let it bind :9200
+            try
+                webread('http://127.0.0.1:9200/dmx', weboptions('Timeout',1));
+                if isfield(app.h,'dmxStatus'), app.h.dmxStatus.Text = 'DMX agent started'; end
+            catch
+                if isfield(app.h,'dmxStatus')
+                    app.h.dmxStatus.Text = 'agent start failed — run lab/dmx_agent.py';
+                end
             end
         end
         function liveUniformityView(app)

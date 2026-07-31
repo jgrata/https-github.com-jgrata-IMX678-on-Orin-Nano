@@ -11,7 +11,11 @@ opened for the server's lifetime; frame pulls are serialised with a lock.
 
 Run:  IQ9_W=1920 IQ9_H=1080 IQ9_FPS=30 IQ9_CAM=0 PORT=8080 python3 server.py
 """
+import ctypes
 import os
+import signal
+import struct
+import subprocess
 import sys
 import threading
 import time
@@ -65,80 +69,148 @@ RAW_DISABLED_MSG = ("RAW capture is disabled (IQ9_RAW_ENABLE=0). RAW16 works and
 
 app = FastAPI(title="IMX678 on IQ9 — Web UI")
 
-_cam = None
+# NV12 live view runs in a KILLABLE child process (camera_worker.py) that owns qtiqmmfsrc
+# and publishes BGR frames to POSIX shm. An in-process Gst NULL does NOT fully disconnect
+# the cam-server recorder client, so the camera stays claimed and RAW capture gets no frame;
+# fully KILLING the worker is the only reliable path to release it for RAW. The server kills
+# the worker for the RAW window, then respawns it. See docs/qualcomm-raw-dlkm-stability.md.
+_worker = None
 _cam_lock = threading.Lock()
-# Cold RAW mode: NV12 is fully released and the camera left idle, so RAW captures run
-# WITHOUT the per-capture NV12<->RAW handoff churn (which most reliably triggers the
-# CAMSS/RDI hang). Live view is unavailable while cold. See docs/qualcomm-raw-dlkm-stability.md.
-_raw_mode = False
+_raw_mode = False                                   # cold RAW mode: worker killed, camera idle
+_exposure_comp = None                               # last-requested exposure-compensation (cached)
+SHM = os.environ.get("IQ9_SHM", "/dev/shm/iq9_nv12")
+CTL = SHM + ".ctl"
+_MAGIC = b"IQ9N"
+_HDR = len(_MAGIC) + 12                              # magic + u32 width,height,seq
 
 
-def _get_cam():
-    global _cam
-    if _cam is None:
-        _cam = camera_qmmf.QmmfCapture(W, H, FPS, mode="nv12", camera=CAM).start()
-        time.sleep(1.2)                       # let 3A (AE/AWB) settle
-    return _cam
+def _pdeathsig():
+    """Child preexec (Linux): die if the server process dies, so no orphan holds the camera."""
+    try:
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, signal.SIGKILL)   # PR_SET_PDEATHSIG
+    except Exception:
+        pass
 
 
-def _dispose_cam():
-    """Fully dispose the NV12 capture so the qtiqmmfsrc recorder client disconnects and
-    cam-server runs its complete IFE/RDI release; then quiesce. Caller holds _cam_lock."""
-    global _cam
-    if _cam is not None:
+def _worker_alive():
+    return _worker is not None and _worker.poll() is None
+
+
+def _start_worker():
+    """Spawn the NV12 worker if not running (caller holds _cam_lock)."""
+    global _worker
+    if _raw_mode or _worker_alive():
+        return
+    subprocess.run(["pkill", "-9", "-f", "camera_worker.py"],
+                   capture_output=True)             # reap any orphan from a prior server
+    for p in (SHM, CTL):
         try:
-            _cam.stop()
+            os.remove(p)
+        except OSError:
+            pass
+    env = dict(os.environ, IQ9_W=str(W), IQ9_H=str(H), IQ9_FPS=str(FPS),
+               IQ9_CAM=str(CAM), IQ9_SHM=SHM)
+    if _exposure_comp is not None:
+        _write_ctl(_exposure_comp)
+    _worker = subprocess.Popen([sys.executable, os.path.join(HERE, "camera_worker.py")],
+                               env=env, preexec_fn=_pdeathsig)
+
+
+def _kill_worker():
+    """Fully kill the NV12 worker so cam-server releases the camera (caller holds _cam_lock)."""
+    global _worker
+    if _worker is not None:
+        try:
+            _worker.terminate()
+            try:
+                _worker.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                _worker.kill()
+                _worker.wait(timeout=3)
         except Exception:
             pass
-        _cam = None
-        import gc
-        gc.collect()
-        time.sleep(2.0)                           # let cam-server fully release the camera
+        _worker = None
+    subprocess.run(["pkill", "-9", "-f", "camera_worker.py"], capture_output=True)
+    try:
+        os.remove(SHM)
+    except OSError:
+        pass
+    time.sleep(3.0)                                 # let cam-server fully complete the IFE/RDI release
+                                                    # (short quiesce correlated with the RDI hang)
+
+
+def _write_ctl(exposure_comp):
+    try:
+        import json
+        with open(CTL, "w") as f:
+            json.dump({"exposure_compensation": int(exposure_comp)}, f)
+    except Exception:
+        pass
+
+
+def _read_shm(timeout_s=5.0):
+    """Latest BGR frame from the worker's shm, or None. Waits up to timeout for a fresh one."""
+    deadline = time.monotonic() + timeout_s
+    while True:
+        try:
+            with open(SHM, "rb") as f:
+                buf = f.read()
+            if len(buf) >= _HDR and buf[:4] == _MAGIC:
+                w, h, _seq = struct.unpack("<III", buf[4:_HDR])
+                need = _HDR + w * h * 3
+                if len(buf) >= need:
+                    return (np.frombuffer(buf, np.uint8, count=w * h * 3, offset=_HDR)
+                            .reshape(h, w, 3).copy())
+        except (FileNotFoundError, ValueError):
+            pass
+        except Exception:
+            pass
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(0.05)
 
 
 def _set_raw_mode(on):
-    """Enter/exit cold RAW mode (releases / restores the NV12 live view)."""
+    """Enter/exit cold RAW mode (kills / restores the NV12 worker)."""
     global _raw_mode
     with _cam_lock:
         if on and not _raw_mode:
-            _dispose_cam()
+            _kill_worker()
             _raw_mode = True
         elif not on and _raw_mode:
             _raw_mode = False
-            try:
-                _get_cam()                        # bring NV12 live view back
-            except Exception:
-                pass
+            _start_worker()
     return _raw_mode
 
 
-def _frame(timeout_s=3.0):
-    """Latest BGR frame (thread-safe; qtiqmmfsrc is single-instance). None while cold."""
+def _frame(timeout_s=5.0):
+    """Latest BGR frame from the NV12 worker (via shm). None while cold."""
     with _cam_lock:
         if _raw_mode:
-            return None                           # camera released for RAW; no live view
-        return _get_cam().frame(timeout_s=timeout_s)
+            return None
+        if not _worker_alive():
+            _start_worker()
+    return _read_shm(timeout_s=timeout_s)           # lock-free read (may wait for first frame)
 
 
 def _grab_raw(n_frames=1):
-    """Capture native RAW16 Bayer frames (single-client camera). In cold RAW mode the
-    camera is already idle -> capture directly (no churn). Otherwise fall back to the
-    dispose-NV12 -> capture -> restore-NV12 handoff (riskier; see the DLKM stability doc)."""
-    global _cam
+    """Capture native RAW16 Bayer frames. Fully KILLS the NV12 worker first (the only
+    reliable way to release the camera from cam-server), captures, then respawns it
+    (unless in cold RAW mode)."""
     with _cam_lock:
-        if _raw_mode:
-            return camera_qmmf.grab_raw16(n_frames=n_frames, camera=CAM)
-        running = _cam is not None
-        if running:
-            _dispose_cam()
+        cold = _raw_mode
+        _kill_worker()                              # full camera release
         try:
             return camera_qmmf.grab_raw16(n_frames=n_frames, camera=CAM)
         finally:
-            if running:
-                try:
-                    _get_cam()                    # recreate NV12 fresh (includes 3A settle)
-                except Exception:
-                    _cam = None                   # lazy re-create on next NV12 use
+            if not cold:
+                _start_worker()
+
+
+@app.on_event("shutdown")
+def _shutdown():
+    with _cam_lock:
+        _kill_worker()
 
 
 def _channel(bgr, chan):
@@ -193,12 +265,7 @@ def raw_page():
 # ── camera info / params ─────────────────────────────────────────────────────
 @app.get("/api/info")
 def api_info():
-    exp_comp = None
-    if not _raw_mode:
-        try:
-            exp_comp = _get_cam().get_prop("exposure-compensation")
-        except Exception:
-            pass
+    exp_comp = _exposure_comp
     return {
         "platform": "IQ9 QCS9075", "source": "nv12-isp (qtiqmmfsrc)",
         "camera": CAM, "width": W, "height": H, "fps": FPS,
@@ -224,18 +291,15 @@ async def api_params(request: Request):
         body = await request.json()
     except Exception:
         body = {}
+    global _exposure_comp
+    if _raw_mode:
+        return JSONResponse({"error": "camera is in cold RAW mode; exit RAW mode for NV12 controls"},
+                            status_code=409)
     applied = {}
-    with _cam_lock:
-        if _raw_mode:
-            return JSONResponse({"error": "camera is in cold RAW mode; exit RAW mode for NV12 controls"},
-                                status_code=409)
-        cam = _get_cam()
-        if "exposure_compensation" in body:
-            applied["exposure_compensation"] = cam.set_prop(
-                "exposure-compensation", int(body["exposure_compensation"]))
-        for k in ("antibanding", "white-balance-mode", "control-mode"):
-            if k in body:
-                applied[k] = cam.set_prop(k, body[k])
+    if "exposure_compensation" in body:
+        _exposure_comp = max(-12, min(12, int(body["exposure_compensation"])))
+        _write_ctl(_exposure_comp)                  # NV12 worker polls the control file and applies it
+        applied["exposure_compensation"] = True
     info = api_info()
     info["applied"] = applied
     return info

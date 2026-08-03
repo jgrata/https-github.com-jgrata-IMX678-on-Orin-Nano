@@ -1,5 +1,28 @@
 # Support request: RAW/RDI capture intermittently hangs the CAMSS driver → watchdog reboot (QCS9075)
 
+> ## UPDATE 2026-07-31 (b) — `cameradlkm` is OPEN SOURCE; a likely fix is already upstream (correction)
+> Earlier text calling the camera kernel driver "prebuilt / not buildable by us" is **WRONG** (thanks hvo).
+> `cameradlkm_1.0.qcom.bb` = `inherit module`, GPL-2.0, built from **CodeLinaro `camera-kernel.git`**, branch
+> `camera-kernel.qclinux.1.0.r1-rel`, pinned `SRCREV 69cdd66`. Only `camx` + `chicdk` are `qprebuilt`; the
+> GStreamer plugin, the QMMF recorder, **and this camera kernel driver are all source we can build.** So the
+> IFE-SMMU-on-release fault is **ours (with hvo's kernel build) to patch — not blocked on a Qualcomm binary.**
+>
+> Better: our pinned rev is **71 commits behind the branch HEAD (`f4491100`)**, and several of those fixes
+> target our exact fault class — the `cam_smmu` driver itself is unchanged, so the fault is a buffer-lifecycle
+> bug in the layers above it, which these fix:
+> - **`f7b70309` msm: camera: isp: Fix KMD buffer handle in IFE prepare** (CRs 4399397/4424334) — KMD buffer
+>   handle kept in a stack var, never stored in the persistent `prepare_hw_data`, so `cam_mem_put_kref` runs
+>   with an **invalid handle during request cleanup** → ref leaks → **"camera stream freeze after several
+>   iterations."** This maps directly onto our "faulting buffer not found on `cam_ife_mgr_release_hw` after
+>   ~49 iterations."
+> - `f5ba6da2` (isp: RDI-only ctx on non-EPOCH targets), `cf4196d5` (sync: UAF), `56a8c196` (reqmgr: UAF),
+>   `0b4e1bf8`/`4dd96c13` (UAF), `8134e5f4` (buffer validation).
+>
+> **Action (on current QLI 1.7, no need to wait for QLI 2.0):** bump `cameradlkm` `SRCREV` `69cdd66 → f4491100`
+> (or cherry-pick `f7b70309` + the UAF fixes), rebuild the DLKM, and re-run the 100-capture soak.
+> **Reframed ask to Qualcomm/hvo:** confirm `f7b70309` et al. address this IFE-SMMU-on-release fault, and
+> whether moving to `camera-kernel.qclinux.1.0.r1-rel` HEAD is the recommended fix.
+
 > ## UPDATE 2026-07-31 — ROOT CAUSE FOUND: IFE SMMU/IOMMU page fault (use-after-unmap) on RDI release
 > A 100-capture soak (live-mode NV12↔RDI handoff, ~3 s release quiesce) ran **49 clean captures, then a
 > hard reboot from a kernel ARM-SMMU (IOMMU) context fault in the IFE.** Each capture acquires+releases an

@@ -54,7 +54,7 @@ the customlib `.so`; use it for planning.
 | **A0** | 3856×2180 | 12 | 30 | linear | 0x2C | OETF/PTC/SNR/CCM baseline; dark noise | **HAVE** (current compiled mode) |
 | **A1** | 3856×2180 | 10 | ~60* | linear | 0x2B | 10-bit OETF/PTC; fps headroom; verify 10-bit RDI | need Sony 10-bit all-pixel table |
 | **A2** | 3856×2180 | 12 | ~15 | linear | 0x2C | long-integration / low-noise floor; dark-current baseline | derive from A0 (VMAX↑) |
-| **A3** | 3856×2180 | 10 | 30 | **DOL** 2-exp | 0x2B×2 | DOL OETF/PTC/SNR/CCM (long+short legs + stitch) | need Sony/LI DOL table (**Jetson DOL = reference**) |
+| **A3** | 3856×**4450** | 10 | 30 | **DOL** 2-exp | 0x2B | DOL OETF/PTC/SNR/CCM (long+short legs + stitch) | **register table from Sony SRM** (Jetson e-con is MCU-abstracted — not portable; see §5) |
 | **A4** | 3856×2180 | 12 | 30 | **DCG** (Clear HDR) | 0x2C | DCG HDR: HCG+LCG combine; conversion-gain ratio | need Sony DCG/Clear-HDR table |
 | **A5**† | 1928×1090 | 12 | ~60* | linear (2×2 bin) | 0x2C | binned SNR/sensitivity; fps | need Sony binning table |
 | **A6**† | 1920×1080 | 12 | ~90* | linear (center ROI) | 0x2C | ROI/windowed DAQ; fps | derive (crop window) |
@@ -99,9 +99,22 @@ solver, OETF/PTC) ports directly; the DAQ just feeds it RDI `.npy` frames via `i
 
 - **DOL (A3):** long (SHR0) + short (SHR1) exposures, ratio configurable (start **16:1** → +24 dB
   DR). Characterize **each leg as a linear sensor** (own OETF/PTC/K/read-noise), then the stitch
-  knee & blending. RDI delivers the raw DOL stream; **RISK: confirm qtiqmmfsrc/CamX exposes both
-  VC0/VC1 (or line-interleaved) over RDI** — the Jetson used a different transport. Reconstruction
-  reuses the Jetson `reconstructRadiance` path.
+  knee & blending.
+  - **What the Jetson (e-con e-CAM86) taught us — geometry & exposure model (portable), registers (NOT):**
+    the e-con module is **MCU-mediated** (`e-con_cam` @0x42) with high-level controls
+    (`sensor_mode=3`, `hdr_enable=1`, `exposure` long 450–400001 µs, `exposure_short` 28–25000 µs,
+    ratio ≤16×, mode-3 max 30 fps). So there is **no raw IMX678 register table to lift** — the A3
+    register/mode sequence must come from the **Sony IMX678 SRM DOL/Clear-HDR table** (the IQ9
+    Leopard path is register-level; `SHR1` 0x3058–5A already present in init = DOL-capable).
+  - **DOL frame geometry (from Jetson `IDolWdrSensorMode`/DT):** physical **3856×4450**, 2 exposures
+    stacked, VBP 65, line-info-marker width 16, ~16.6 MB/frame @30 fps. So A3's `<frameDimension>`
+    height must be the **full 4450**, not 2180.
+  - **CRITICAL pitfall (the exact Jetson failure to avoid):** the Jetson VI **clamped the DOL
+    readout to 3840×2160**, so it captured a 2160-row slice of the 4450-row frame → every buffer
+    `V4L2_BUF_FLAG_ERROR` → zero usable RAW. **On the IQ9, the RDI/IFE stream config for A3 must
+    accept the full 4450 height** (validate `CheckValidStreamConfig` doesn't clamp it — analogous
+    to the RAW10 3840-max rejection we already hit). This is the #1 risk for A3.
+  - Reconstruction (long/short → linear radiance) reuses the Jetson `reconstructRadiance` path.
 - **DCG (A4):** per-pixel HCG+LCG. The key parameter is the **conversion-gain ratio K_LCG/K_HCG**,
   obtained directly from the two Layer-B PTCs (LCG vs HCG). HCG leg → shadow read-noise; LCG leg →
   highlight full-well. If the sensor outputs a companded "Clear HDR" single stream, capture the
@@ -109,10 +122,14 @@ solver, OETF/PTC) ports directly; the DAQ just feeds it RDI `.npy` frames via `i
 
 ## 6. Gaps / risks / to-source
 
-1. **Register tables to source** for A1/A3/A4/A5 (and HCG/gain/exposure deltas): Sony *IMX678
-   Software Reference Manual* mode tables + Leopard driver. Our **Jetson IMX678 driver mode tables
-   are the reference for the DOL sequence** (DOL was proven there). Lead: `ATG-IMX678 Source Code
-   Overview` PDF in the repo root.
+1. **Register tables to source** for A1/A3/A4/A5 (and HCG/gain/exposure deltas): **Sony *IMX678
+   Software Reference Manual* mode tables** are the authoritative source (register-level, matches
+   the Leopard/IQ9 path). **NOTE: the Jetson is NOT a source for the register tables** — its e-con
+   e-CAM86 module is MCU-abstracted (no register tables) and raw DOL never captured there; it
+   contributes only the DOL geometry/exposure model + the geometry-clamp pitfall (§5). Cross-check
+   Leopard's own driver if they publish a DOL/DCG mode. Leads: Sony SRM (user has it), the e-con
+   `IMX678Standard_vs_HDR` docs (Data/imx678/econ) for the HDR behaviour, and the `ATG-IMX678
+   Source Code Overview` PDF in the repo root.
 2. **ParameterParser** (QLI 1.7 V5.5.1) needed to compile XML→`.bin` — build host / hvo (same
    toolchain class as the cameradlkm rebuild).
 3. **RDI over HDR modes unverified** — validate A3/A4 actually stream over the RDI/bayer path on

@@ -1,0 +1,4 @@
+# build outputs — regenerate with build_variants.py / compile.sh
+generated/
+bins/
+.deploy_stage/

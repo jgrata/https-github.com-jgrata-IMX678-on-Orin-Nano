@@ -1,0 +1,901 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--========================================================================-->
+<!-- Copyright (c) 2016-2019 Qualcomm Technologies, Inc.                    -->
+<!-- All Rights Reserved.                                                   -->
+<!-- Confidential and Proprietary - Qualcomm Technologies, Inc.             -->
+<!--========================================================================-->
+<sensorDriverData
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:noNamespaceSchemaLocation="../../../../api/sensor/camxsensordriver.xsd">
+  <module_version major_revision="1" minor_revision="0" incr_revision="0"/>
+
+  <!--Sensor slave information imx678 -->
+  <slaveInfo>
+    <!--Name of the sensor -->
+    <sensorName>cmk_imx678</sensorName>
+    <!--8-bit or 10-bit write slave address -->
+    <slaveAddress>0x34</slaveAddress>
+    <!--Register address / data size in bytes -->
+    <regAddrType range="[1,4]">2</regAddrType>
+    <!--Register address / data size in bytes -->
+    <regDataType range="[1,4]">1</regDataType>
+    <!--Register address for sensor Id -->
+    <sensorIdRegAddr>0x3A02</sensorIdRegAddr>
+    <!--Sensor Id -->
+    <sensorId>0x64</sensorId>
+    <!--Mask for sensor id. Sensor Id may only be few bits -->
+    <sensorIdMask>4294967295</sensorIdMask>
+    <!--I2C frequency mode of slave
+        Supported modes are: STANDARD (100 KHz), FAST (400 KHz), FAST_PLUS (1 MHz), CUSTOM (Custom frequency in DTSI) -->
+    <i2cFrequencyMode>FAST</i2cFrequencyMode>
+    <!--Sequence of power configuration type and configuration value required to control power to the device -->
+    <powerUpSequence>
+      <!--Power setting configuration
+          Contains: configType, configValue and delay in milli seconds -->
+      <powerSetting>
+        <!--Power configuration type
+            Supported types are: MCLK, VANA, VDIG, VIO, VAF, RESET, STANDBY -->
+        <configType>CUSTOM_GPIO1</configType>
+        <!--Configuration value for the type of configuration -->
+        <configValue>1</configValue>
+        <!--Delay in milli seconds -->
+        <delayMs>0</delayMs>
+      </powerSetting>
+      <powerSetting>
+        <!--Power configuration type
+            Supported types are: MCLK, VANA, VDIG, VIO, VAF, RESET, STANDBY -->
+        <configType>VIO</configType>
+        <!--Configuration value for the type of configuration -->
+        <configValue>1</configValue>
+        <!--Delay in milli seconds -->
+        <delayMs>1</delayMs>
+      </powerSetting>
+      <powerSetting>
+        <!--Power configuration type
+            Supported types are: MCLK, VANA, VDIG, VIO, VAF, RESET, STANDBY -->
+        <configType>RESET</configType>
+        <!--Configuration value for the type of configuration -->
+        <configValue>0</configValue>
+        <!--Delay in milli seconds -->
+        <delayMs>3</delayMs>
+      </powerSetting>
+      <!--Power setting configuration
+          Contains: configType, configValue and delay in milli seconds -->
+      <powerSetting>
+        <!--Power configuration type
+            Supported types are: MCLK, VANA, VDIG, VIO, VAF, RESET, STANDBY -->
+        <configType>RESET</configType>
+        <!--Configuration value for the type of configuration -->
+        <configValue>1</configValue>
+        <!--Delay in milli seconds -->
+        <delayMs>5</delayMs>
+      </powerSetting>
+      <powerSetting>
+        <!--Power configuration type
+            Supported types are: MCLK, VANA, VDIG, VIO, VAF, RESET, STANDBY -->
+        <configType>MCLK</configType>
+        <!--Configuration value for the type of configuration -->
+        <configValue>24000000</configValue>
+        <!--Delay in milli seconds -->
+        <delayMs>5</delayMs>
+      </powerSetting>
+    </powerUpSequence>
+    <!--Sequence of power configuration type and configuration value required to control power to the device -->
+    <powerDownSequence>
+      <!--Power setting configuration
+          Contains: configType, configValue and delay in milli seconds -->
+      <powerSetting>
+        <!--Power configuration type
+            Supported types are: MCLK, VANA, VDIG, VIO, VAF, RESET, STANDBY -->
+        <configType>MCLK</configType>
+        <!--Configuration value for the type of configuration -->
+        <configValue>0</configValue>
+        <!--Delay in milli seconds -->
+        <delayMs>1</delayMs>
+      </powerSetting>
+      <!--Power setting configuration
+          Contains: configType, configValue and delay in milli seconds -->
+      <powerSetting>
+        <!--Power configuration type
+            Supported types are: MCLK, VANA, VDIG, VIO, VAF, RESET, STANDBY -->
+        <configType>RESET</configType>
+        <!--Configuration value for the type of configuration -->
+        <configValue>0</configValue>
+        <!--Delay in milli seconds -->
+        <delayMs>1</delayMs>
+      </powerSetting>
+      <!--Power setting configuration
+          Contains: configType, configValue and delay in milli seconds -->
+      <powerSetting>
+        <!--Power configuration type
+            Supported types are: MCLK, VANA, VDIG, VIO, VAF, RESET, STANDBY -->
+        <configType>VIO</configType>
+        <!--Configuration value for the type of configuration -->
+        <configValue>0</configValue>
+        <!--Delay in milli seconds -->
+        <delayMs>1</delayMs>
+      </powerSetting>
+      <powerSetting>
+        <!--Power configuration type
+            Supported types are: MCLK, VANA, VDIG, VIO, VAF, RESET, STANDBY -->
+        <configType>CUSTOM_GPIO1</configType>
+        <!--Configuration value for the type of configuration -->
+        <configValue>0</configValue>
+        <!--Delay in milli seconds -->
+        <delayMs>0</delayMs>
+      </powerSetting>
+    </powerDownSequence>
+  </slaveInfo>
+  <!--Addresses for various sensor registers -->
+  <regAddrInfo>
+    <!--Register address to program width -->
+    <xOutput>0x332</xOutput>
+    <!--Register address to program height -->
+    <yOutput>0x332</yOutput>
+    <!--Register address to program Frame length lines -->
+    <frameLengthLines>0x332</frameLengthLines>
+    <!--Register address to program Line length pixel clock -->
+    <lineLengthPixelClock>0x332</lineLengthPixelClock>
+    <!--Register address to program coarse integration time -->
+    <coarseIntgTimeAddr>0x332</coarseIntgTimeAddr>
+    <!--Register address to program gain channel -->
+    <globalGainAddr>0x332</globalGainAddr>
+    <!--Register address to program manual test pattern value for Red channel -->
+    <testPatternRAddr>0x332</testPatternRAddr>
+    <!--Register address to program manual test pattern value for Green Red channel -->
+    <testPatternGRAddr>0x332</testPatternGRAddr>
+    <!--Register address to program manual test pattern value for Blue channel -->
+    <testPatternBAddr>0x332</testPatternBAddr>
+    <!--Register address to program manual test pattern value for Green Blue channel -->
+    <testPatternGBAddr>0x332</testPatternGBAddr>
+  </regAddrInfo>
+  <!--Information of all the resolutions
+      Number of resolutions is detected from number of resolutionData nodes -->
+  <resolutionInfo>
+    <!--Specify which sensor version can support this setting-->
+    <sensorVersion>0</sensorVersion>
+    <!-- Res 1: (Reg-10)Mode: Full 16:9 30 fps -->
+    <resolutionData>
+      <!--Color filter arrangement of the sensor
+          Supported filter arrangements are: BAYER_BGGR, BAYER_GBRG, BAYER_GRBG, BAYER_RGGB, BAYER_Y, YUV_UYVY, YUV_YUYV -->
+      <colorFilterArrangement>BAYER_RGGB</colorFilterArrangement>
+      <!--Stream information -->
+      <streamInfo>
+        <!--Information for a stream data -->
+        <streamConfiguration>
+          <!--Virtual Channel of the data
+              Valid values for virtual channel are: 0, 1, 2 and 3 -->
+          <vc range="[0,3]">0</vc>
+          <!--Data type of the stream. Default value is 0x2B (10-bit RAW) -->
+          <dt>44</dt>
+          <!--Frame dimension: contains xStart, yStart, width and height -->
+          <frameDimension>
+            <xStart>0</xStart>
+            <yStart>0</yStart>
+            <width>3856</width>
+            <height>2180</height>
+          </frameDimension>
+          <!--Bit width of the data -->
+          <bitWidth>12</bitWidth>
+          <!--Type of the stream
+              Supported stream types are: BLOB, IMAGE, BAYER_GRBG, BAYER_RGGB, BAYER_Y, YUV_UYVY, YUV_YUYV -->
+          <type>IMAGE</type>
+        </streamConfiguration>
+      </streamInfo>
+      <!--Line length pixel clock of frame
+          Typically this value is the active width + blanking width -->
+      <lineLengthPixelClock>1100</lineLengthPixelClock>
+      <!--Frame length lines of frame
+          Typically this value is the active height + blanking height -->
+      <frameLengthLines>2250</frameLengthLines>
+      <!--Minimum horizontal blanking interval in pixels -->
+      <minHorizontalBlanking>0</minHorizontalBlanking>
+      <!--Minimum horizontal blanking interval in lines -->
+      <minVerticalBlanking>0</minVerticalBlanking>
+      <!--Output pixel clock -->
+      <outputPixelClock>900000000</outputPixelClock>
+      <!--Horizontal binning value -->
+      <horizontalBinning>1</horizontalBinning>
+      <!--Vertical binning value -->
+      <verticalBinning>1</verticalBinning>
+      <!--Maximum frame rate -->
+      <frameRate>30</frameRate>
+      <!--Number of lanes in which the data is streamed -->
+      <laneCount>4</laneCount>
+      <!--Settle time in nano seconds -->
+      <settleTimeNs>28</settleTimeNs>
+      <!--Flag to know if the sensor is a 3phase sensor -->
+      <is3Phase>0</is3Phase>
+      <!--Sequence of register settings to configure the device -->
+      <resSettings>
+        <regSetting><registerAddr>0x3014</registerAddr><registerData>0x04</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3015</registerAddr><registerData>0x04</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3018</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x301A</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x301B</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x301C</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x301E</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x1</delayUs></regSetting>
+        <regSetting><registerAddr>0x3020</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3021</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3022</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3023</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3028</registerAddr><registerData>0xCA</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3029</registerAddr><registerData>0x08</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x302A</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x302C</registerAddr><registerData>0x4C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x302D</registerAddr><registerData>0x04</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3030</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3031</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3032</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x303C</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x303D</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x303E</registerAddr><registerData>0x10</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x303F</registerAddr><registerData>0x0F</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3040</registerAddr><registerData>0x03</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3042</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3043</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3044</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3045</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3046</registerAddr><registerData>0x84</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3047</registerAddr><registerData>0x08</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3050</registerAddr><registerData>0x84</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3051</registerAddr><registerData>0x03</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3052</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3054</registerAddr><registerData>0x0E</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3055</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3056</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3058</registerAddr><registerData>0x8A</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3059</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x305A</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3060</registerAddr><registerData>0x16</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3061</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3062</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3064</registerAddr><registerData>0xC4</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3065</registerAddr><registerData>0x0C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3066</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3069</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x306B</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3070</registerAddr><registerData>0x14</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3071</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3072</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3073</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3074</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3075</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3081</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x308C</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x308D</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3094</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3095</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x309C</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x309D</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x30A4</registerAddr><registerData>0xAA</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x30A6</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x30CC</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x30CD</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x30DC</registerAddr><registerData>0x32</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x30DD</registerAddr><registerData>0x40</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3400</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3460</registerAddr><registerData>0x22</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x355A</registerAddr><registerData>0x64</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A02</registerAddr><registerData>0x7A</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A10</registerAddr><registerData>0xEC</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A12</registerAddr><registerData>0x71</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A14</registerAddr><registerData>0xDE</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A20</registerAddr><registerData>0x2B</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A24</registerAddr><registerData>0x22</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A25</registerAddr><registerData>0x25</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A26</registerAddr><registerData>0x2A</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A27</registerAddr><registerData>0x2C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A28</registerAddr><registerData>0x39</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A29</registerAddr><registerData>0x38</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A30</registerAddr><registerData>0x04</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A31</registerAddr><registerData>0x04</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A32</registerAddr><registerData>0x03</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A33</registerAddr><registerData>0x03</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A34</registerAddr><registerData>0x09</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A35</registerAddr><registerData>0x06</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A38</registerAddr><registerData>0xCD</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A3A</registerAddr><registerData>0x4C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A3C</registerAddr><registerData>0xB9</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A3E</registerAddr><registerData>0x30</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A40</registerAddr><registerData>0x2C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A42</registerAddr><registerData>0x39</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A4E</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A52</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A56</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A5A</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A5E</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A62</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A64</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A6E</registerAddr><registerData>0xA0</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A70</registerAddr><registerData>0x50</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A8C</registerAddr><registerData>0x04</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A8D</registerAddr><registerData>0x03</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A8E</registerAddr><registerData>0x09</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A90</registerAddr><registerData>0x38</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A91</registerAddr><registerData>0x42</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3A92</registerAddr><registerData>0x3C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B0E</registerAddr><registerData>0xF3</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B12</registerAddr><registerData>0xE5</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B27</registerAddr><registerData>0xC0</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B2E</registerAddr><registerData>0xEF</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B30</registerAddr><registerData>0x6A</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B32</registerAddr><registerData>0xF6</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B36</registerAddr><registerData>0xE1</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B3A</registerAddr><registerData>0xE8</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B5A</registerAddr><registerData>0x17</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B5E</registerAddr><registerData>0xEF</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B60</registerAddr><registerData>0x6A</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B62</registerAddr><registerData>0xF6</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B66</registerAddr><registerData>0xE1</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B6A</registerAddr><registerData>0xE8</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B88</registerAddr><registerData>0xEC</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B8A</registerAddr><registerData>0xED</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B94</registerAddr><registerData>0x71</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B96</registerAddr><registerData>0x72</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B98</registerAddr><registerData>0xDE</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3B9A</registerAddr><registerData>0xDF</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C0F</registerAddr><registerData>0x06</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C10</registerAddr><registerData>0x06</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C11</registerAddr><registerData>0x06</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C12</registerAddr><registerData>0x06</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C13</registerAddr><registerData>0x06</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C18</registerAddr><registerData>0x20</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C37</registerAddr><registerData>0x10</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C3A</registerAddr><registerData>0x7A</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C40</registerAddr><registerData>0xF4</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C48</registerAddr><registerData>0xE6</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C54</registerAddr><registerData>0xCE</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C56</registerAddr><registerData>0xD0</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C6C</registerAddr><registerData>0x53</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C6E</registerAddr><registerData>0x55</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C70</registerAddr><registerData>0xC0</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C72</registerAddr><registerData>0xC2</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C7E</registerAddr><registerData>0xCE</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C8C</registerAddr><registerData>0xCF</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C8E</registerAddr><registerData>0xEB</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C98</registerAddr><registerData>0x54</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C9A</registerAddr><registerData>0x70</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C9C</registerAddr><registerData>0xC1</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3C9E</registerAddr><registerData>0xDD</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CB0</registerAddr><registerData>0x7A</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CB2</registerAddr><registerData>0xBA</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CC8</registerAddr><registerData>0xBC</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CCA</registerAddr><registerData>0x7C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CD4</registerAddr><registerData>0xEA</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CD5</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CD6</registerAddr><registerData>0x4A</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CD8</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CD9</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CDA</registerAddr><registerData>0xFF</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CDB</registerAddr><registerData>0x03</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CDC</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CDD</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CDE</registerAddr><registerData>0xFF</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CDF</registerAddr><registerData>0x03</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CE4</registerAddr><registerData>0x4C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CE6</registerAddr><registerData>0xEC</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CE7</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CE8</registerAddr><registerData>0xFF</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CE9</registerAddr><registerData>0x03</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CEA</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CEB</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CEC</registerAddr><registerData>0xFF</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CED</registerAddr><registerData>0x03</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CEE</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CEF</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CF2</registerAddr><registerData>0xFF</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CF3</registerAddr><registerData>0x03</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3CF4</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3E28</registerAddr><registerData>0x82</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3E2A</registerAddr><registerData>0x80</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3E30</registerAddr><registerData>0x85</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3E32</registerAddr><registerData>0x7D</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3E5C</registerAddr><registerData>0xCE</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3E5E</registerAddr><registerData>0xD3</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3E70</registerAddr><registerData>0x53</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3E72</registerAddr><registerData>0x58</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3E74</registerAddr><registerData>0xC0</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3E76</registerAddr><registerData>0xC5</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3E78</registerAddr><registerData>0xC0</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3E79</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3E7A</registerAddr><registerData>0xD4</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3E7B</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3EB4</registerAddr><registerData>0x0B</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3EB5</registerAddr><registerData>0x02</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3EB6</registerAddr><registerData>0x4D</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3EB7</registerAddr><registerData>0x42</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3EEC</registerAddr><registerData>0xF3</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3EEE</registerAddr><registerData>0xE7</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3F01</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3F24</registerAddr><registerData>0x10</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3F28</registerAddr><registerData>0x2D</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3F2A</registerAddr><registerData>0x2D</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3F2C</registerAddr><registerData>0x2D</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3F2E</registerAddr><registerData>0x2D</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3F30</registerAddr><registerData>0x23</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3F38</registerAddr><registerData>0x2D</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3F3A</registerAddr><registerData>0x2D</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3F3C</registerAddr><registerData>0x2D</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3F3E</registerAddr><registerData>0x28</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3F40</registerAddr><registerData>0x1E</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3F48</registerAddr><registerData>0x2D</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3F4A</registerAddr><registerData>0x2D</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3F4C</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4004</registerAddr><registerData>0xE4</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4006</registerAddr><registerData>0xFF</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4018</registerAddr><registerData>0x69</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x401A</registerAddr><registerData>0x84</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x401C</registerAddr><registerData>0xD6</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x401E</registerAddr><registerData>0xF1</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4038</registerAddr><registerData>0xDE</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x403A</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x403B</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x404C</registerAddr><registerData>0x63</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x404E</registerAddr><registerData>0x85</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4050</registerAddr><registerData>0xD0</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4052</registerAddr><registerData>0xF2</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4108</registerAddr><registerData>0xDD</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x410A</registerAddr><registerData>0xF7</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x411C</registerAddr><registerData>0x62</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x411E</registerAddr><registerData>0x7C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4120</registerAddr><registerData>0xCF</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4122</registerAddr><registerData>0xE9</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4138</registerAddr><registerData>0xE6</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x413A</registerAddr><registerData>0xF1</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x414C</registerAddr><registerData>0x6B</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x414E</registerAddr><registerData>0x76</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4150</registerAddr><registerData>0xD8</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4152</registerAddr><registerData>0xE3</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x417E</registerAddr><registerData>0x03</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x417F</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4186</registerAddr><registerData>0xE0</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4190</registerAddr><registerData>0xF3</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4192</registerAddr><registerData>0xF7</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x419C</registerAddr><registerData>0x78</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x419E</registerAddr><registerData>0x7C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x41A0</registerAddr><registerData>0xE5</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x41A2</registerAddr><registerData>0xE9</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x41C8</registerAddr><registerData>0xE2</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x41CA</registerAddr><registerData>0xFD</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x41DC</registerAddr><registerData>0x67</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x41DE</registerAddr><registerData>0x82</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x41E0</registerAddr><registerData>0xD4</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x41E2</registerAddr><registerData>0xEF</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4200</registerAddr><registerData>0xDE</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4202</registerAddr><registerData>0xDA</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4218</registerAddr><registerData>0x63</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x421A</registerAddr><registerData>0x5F</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x421C</registerAddr><registerData>0xD0</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x421E</registerAddr><registerData>0xCC</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x425A</registerAddr><registerData>0x82</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x425C</registerAddr><registerData>0xEF</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4348</registerAddr><registerData>0xFE</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4349</registerAddr><registerData>0x06</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4352</registerAddr><registerData>0xCE</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4420</registerAddr><registerData>0x0B</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4421</registerAddr><registerData>0x02</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4422</registerAddr><registerData>0x4D</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4423</registerAddr><registerData>0x0A</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4426</registerAddr><registerData>0xF5</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x442A</registerAddr><registerData>0xE7</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4432</registerAddr><registerData>0xF5</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4436</registerAddr><registerData>0xE7</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4466</registerAddr><registerData>0xB4</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x446E</registerAddr><registerData>0x32</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x449F</registerAddr><registerData>0x1C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x44A4</registerAddr><registerData>0x2C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x44A6</registerAddr><registerData>0x2C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x44A8</registerAddr><registerData>0x2C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x44AA</registerAddr><registerData>0x2C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x44B4</registerAddr><registerData>0x2C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x44B6</registerAddr><registerData>0x2C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x44B8</registerAddr><registerData>0x2C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x44BA</registerAddr><registerData>0x2C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x44C4</registerAddr><registerData>0x2C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x44C6</registerAddr><registerData>0x2C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x44C8</registerAddr><registerData>0x2C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4506</registerAddr><registerData>0xF3</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x450E</registerAddr><registerData>0xE5</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4516</registerAddr><registerData>0xF3</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4522</registerAddr><registerData>0xE5</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4524</registerAddr><registerData>0xF3</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x452C</registerAddr><registerData>0xE5</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x453C</registerAddr><registerData>0x22</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x453D</registerAddr><registerData>0x1B</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x453E</registerAddr><registerData>0x1B</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x453F</registerAddr><registerData>0x15</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4540</registerAddr><registerData>0x15</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4541</registerAddr><registerData>0x15</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4542</registerAddr><registerData>0x15</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4543</registerAddr><registerData>0x15</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4544</registerAddr><registerData>0x15</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4548</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4549</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x454A</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x454B</registerAddr><registerData>0x06</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x454C</registerAddr><registerData>0x06</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x454D</registerAddr><registerData>0x06</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x454E</registerAddr><registerData>0x06</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x454F</registerAddr><registerData>0x06</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4550</registerAddr><registerData>0x06</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4554</registerAddr><registerData>0x55</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4555</registerAddr><registerData>0x02</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4556</registerAddr><registerData>0x42</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4557</registerAddr><registerData>0x05</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4558</registerAddr><registerData>0xFD</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4559</registerAddr><registerData>0x05</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x455A</registerAddr><registerData>0x94</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x455B</registerAddr><registerData>0x06</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x455D</registerAddr><registerData>0x06</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x455E</registerAddr><registerData>0x49</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x455F</registerAddr><registerData>0x07</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4560</registerAddr><registerData>0x7F</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4561</registerAddr><registerData>0x07</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4562</registerAddr><registerData>0xA5</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4564</registerAddr><registerData>0x55</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4565</registerAddr><registerData>0x02</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4566</registerAddr><registerData>0x42</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4567</registerAddr><registerData>0x05</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4568</registerAddr><registerData>0xFD</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4569</registerAddr><registerData>0x05</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x456A</registerAddr><registerData>0x94</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x456B</registerAddr><registerData>0x06</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x456D</registerAddr><registerData>0x06</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x456E</registerAddr><registerData>0x49</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x456F</registerAddr><registerData>0x07</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4572</registerAddr><registerData>0xA5</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x460C</registerAddr><registerData>0x7D</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x460E</registerAddr><registerData>0xB1</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4614</registerAddr><registerData>0xA8</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4616</registerAddr><registerData>0xB2</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x461C</registerAddr><registerData>0x7E</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x461E</registerAddr><registerData>0xA7</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4624</registerAddr><registerData>0xA8</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4626</registerAddr><registerData>0xB2</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x462C</registerAddr><registerData>0x7E</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x462E</registerAddr><registerData>0x8A</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4630</registerAddr><registerData>0x94</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4632</registerAddr><registerData>0xA7</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4634</registerAddr><registerData>0xFB</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4636</registerAddr><registerData>0x2F</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4638</registerAddr><registerData>0x81</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4639</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x463A</registerAddr><registerData>0xB5</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x463B</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x463C</registerAddr><registerData>0x26</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x463E</registerAddr><registerData>0x30</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4640</registerAddr><registerData>0xAC</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4641</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4642</registerAddr><registerData>0xB6</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4643</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4644</registerAddr><registerData>0xFC</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4646</registerAddr><registerData>0x25</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4648</registerAddr><registerData>0x82</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4649</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x464A</registerAddr><registerData>0xAB</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x464B</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x464C</registerAddr><registerData>0x26</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x464E</registerAddr><registerData>0x30</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4654</registerAddr><registerData>0xFC</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4656</registerAddr><registerData>0x08</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4658</registerAddr><registerData>0x12</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x465A</registerAddr><registerData>0x25</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4662</registerAddr><registerData>0xFC</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x46A2</registerAddr><registerData>0xFB</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x46D6</registerAddr><registerData>0xF3</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x46E6</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x46E8</registerAddr><registerData>0xFF</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x46E9</registerAddr><registerData>0x03</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x46EC</registerAddr><registerData>0x7A</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x46EE</registerAddr><registerData>0xE5</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x46F4</registerAddr><registerData>0xEE</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x46F6</registerAddr><registerData>0xF2</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x470C</registerAddr><registerData>0xFF</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x470D</registerAddr><registerData>0x03</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x470E</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4714</registerAddr><registerData>0xE0</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4716</registerAddr><registerData>0xE4</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x471E</registerAddr><registerData>0xED</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x472E</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4730</registerAddr><registerData>0xFF</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4731</registerAddr><registerData>0x03</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4734</registerAddr><registerData>0x7B</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4736</registerAddr><registerData>0xDF</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4754</registerAddr><registerData>0x7D</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4756</registerAddr><registerData>0x8B</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4758</registerAddr><registerData>0x93</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x475A</registerAddr><registerData>0xB1</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x475C</registerAddr><registerData>0xFB</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x475E</registerAddr><registerData>0x09</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4760</registerAddr><registerData>0x11</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4762</registerAddr><registerData>0x2F</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4766</registerAddr><registerData>0xCC</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4776</registerAddr><registerData>0xCB</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x477E</registerAddr><registerData>0x4A</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x478E</registerAddr><registerData>0x49</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4794</registerAddr><registerData>0x7C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4796</registerAddr><registerData>0x8F</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4798</registerAddr><registerData>0xB3</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x4799</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x479A</registerAddr><registerData>0xCC</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x479C</registerAddr><registerData>0xC1</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x479E</registerAddr><registerData>0xCB</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47A4</registerAddr><registerData>0x7D</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47A6</registerAddr><registerData>0x8E</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47A8</registerAddr><registerData>0xB4</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47A9</registerAddr><registerData>0x00</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47AA</registerAddr><registerData>0xC0</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47AC</registerAddr><registerData>0xFA</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47AE</registerAddr><registerData>0x0D</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47B0</registerAddr><registerData>0x31</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47B1</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47B2</registerAddr><registerData>0x4A</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47B3</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47B4</registerAddr><registerData>0x3F</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47B6</registerAddr><registerData>0x49</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47BC</registerAddr><registerData>0xFB</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47BE</registerAddr><registerData>0x0C</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47C0</registerAddr><registerData>0x32</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47C1</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47C2</registerAddr><registerData>0x3E</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x47C3</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <!--
+        <regSetting>
+          <registerAddr>0x3000</registerAddr>
+          <registerData>0x00</registerData>
+          <regAddrType range="[1,4]">2</regAddrType>
+          <regDataType range="[1,4]">1</regDataType>
+          <operation>WRITE</operation>
+          <delayUs>24000</delayUs>
+        </regSetting>
+        <regSetting>
+          <registerAddr>0x3002</registerAddr>
+          <registerData>0x00</registerData>
+          <regAddrType range="[1,4]">2</regAddrType>
+          <regDataType range="[1,4]">1</regDataType>
+          <operation>WRITE</operation>
+          <delayUs>0</delayUs>
+        </regSetting>
+	    -->
+	  </resSettings>
+      <!--Crop information for the frame -->
+      <cropInfo>
+        <left>0</left>
+        <right>0</right>
+        <top>0</top>
+        <bottom>0</bottom>
+      </cropInfo>
+      <!--List of features / capabilities supported by sensor -->
+      <capability>NORMAL</capability>
+    </resolutionData>
+    <!-- Res 1: (Reg-10)Mode: Full 16:9 30 fps -->
+  </resolutionInfo>
+  <!--Exposure control information -->
+  <exposureControlInfo>
+    <!--Maximum analog again supported by sensor -->
+    <maxAnalogGain>72</maxAnalogGain>
+    <!--Maximum digital again supported by sensor -->
+    <maxDigitalGain>2</maxDigitalGain>
+    <!--Minimum offset to be maintained between line count and frame length lines -->
+    <verticalOffset>20</verticalOffset>
+    <!--Minimum line count supported by sensor -->
+    <minLineCount>1</minLineCount>
+    <!--Maximum line count supported by sensor -->
+    <maxLineCount>65515</maxLineCount>
+    <!--Conversion factor to convert real digital gain to register digital gain -->
+    <realToRegDigitalGainConversionFactor>3</realToRegDigitalGainConversionFactor>
+    <!--Real gain to register gain equation
+        The equation must contain "realGain" in its equation
+        Ex:= 512 - (512 / realGain) -->
+    <realToRegGain></realToRegGain>
+    <!--Register gain to real gain equation
+        The equation must contain "regGain" in its equation
+        Ex:= 512 / (512 - regGain) -->
+    <regToRealGain></regToRealGain>
+  </exposureControlInfo>
+  <!--Sequence of register settings to configure the device -->
+  <streamOnSettings>
+    <!--Register setting configuration
+        Contains: register address, register data, register address type, register data type, operation and delay in micro seconds -->
+    <regSetting>
+      <registerAddr>0x3000</registerAddr>
+      <registerData>0x00</registerData>
+      <regAddrType range="[1,4]">2</regAddrType>
+      <regDataType range="[1,4]">1</regDataType>
+      <operation>WRITE</operation>
+      <delayUs>24000</delayUs>
+    </regSetting>
+    <regSetting>
+      <registerAddr>0x3002</registerAddr>
+      <registerData>0x00</registerData>
+      <regAddrType range="[1,4]">2</regAddrType>
+      <regDataType range="[1,4]">1</regDataType>
+      <operation>WRITE</operation>
+      <delayUs>0</delayUs>
+    </regSetting>
+  </streamOnSettings>
+  <!--Sequence of register settings to configure the device -->
+  <streamOffSettings>
+    <!--Register setting configuration
+        Contains: register address, register data, register address type, register data type, operation and delay in micro seconds -->
+    <regSetting>
+      <!--Register address that is accessed -->
+      <registerAddr>0x3000</registerAddr>
+      <!--If operation is WRITE, registerData is the data value to be written into the specified register address
+          If operation is READ, registerData is the number of bytes to be read from the specified register address -->
+      <registerData>0x01</registerData>
+      <!--Register address / data size in bytes -->
+      <regAddrType range="[1,4]">2</regAddrType>
+      <!--Register address / data size in bytes -->
+      <regDataType range="[1,4]">1</regDataType>
+      <!--Type of the operation
+          Valid values are: WRITE, READ, POLL -->
+      <operation>WRITE</operation>
+      <!--Delay in micro seconds. Delay is 0 if not explicitly provided -->
+      <delayUs>0</delayUs>
+    </regSetting>
+    <regSetting>
+      <!--Register address that is accessed -->
+      <registerAddr>0x3002</registerAddr>
+      <!--If operation is WRITE, registerData is the data value to be written into the specified register address
+          If operation is READ, registerData is the number of bytes to be read from the specified register address -->
+      <registerData>0x01</registerData>
+      <!--Register address / data size in bytes -->
+      <regAddrType range="[1,4]">2</regAddrType>
+      <!--Register address / data size in bytes -->
+      <regDataType range="[1,4]">1</regDataType>
+      <!--Type of the operation
+          Valid values are: WRITE, READ, POLL -->
+      <operation>WRITE</operation>
+      <!--Delay in micro seconds. Delay is 0 if not explicitly provided -->
+      <delayUs>0</delayUs>
+    </regSetting>
+  </streamOffSettings>
+  <!--Sequence of register settings to configure the device -->
+  <groupHoldOnSettings>
+    <!--Register setting configuration
+        Contains: register address, register data, register address type, register data type, operation and delay in micro seconds -->
+    <regSetting>
+      <!--Register address that is accessed -->
+      <registerAddr>0x3001</registerAddr>
+      <!--If operation is WRITE, registerData is the data value to be written into the specified register address
+          If operation is READ, registerData is the number of bytes to be read from the specified register address -->
+      <registerData>0x1</registerData>
+      <!--Register address / data size in bytes -->
+      <regAddrType range="[1,4]">2</regAddrType>
+      <!--Register address / data size in bytes -->
+      <regDataType range="[1,4]">1</regDataType>
+      <!--Type of the operation
+          Valid values are: WRITE, READ, POLL -->
+      <operation>WRITE</operation>
+      <!--Delay in micro seconds. Delay is 0 if not explicitly provided -->
+      <delayUs>0</delayUs>
+    </regSetting>
+  </groupHoldOnSettings>
+  <!--Sequence of register settings to configure the device -->
+  <groupHoldOffSettings>
+    <!--Register setting configuration
+        Contains: register address, register data, register address type, register data type, operation and delay in micro seconds -->
+    <regSetting>
+      <!--Register address that is accessed -->
+      <registerAddr>0x3001</registerAddr>
+      <!--If operation is WRITE, registerData is the data value to be written into the specified register address
+          If operation is READ, registerData is the number of bytes to be read from the specified register address -->
+      <registerData>0x0</registerData>
+      <!--Register address / data size in bytes -->
+      <regAddrType range="[1,4]">2</regAddrType>
+      <!--Register address / data size in bytes -->
+      <regDataType range="[1,4]">1</regDataType>
+      <!--Type of the operation
+          Valid values are: WRITE, READ, POLL -->
+      <operation>WRITE</operation>
+      <!--Delay in micro seconds. Delay is 0 if not explicitly provided -->
+      <delayUs>0</delayUs>
+    </regSetting>
+  </groupHoldOffSettings>
+    <!--Sequence of register settings to configure the device -->
+  <!--Sequence of register settings to configure the device -->
+  <initSettings>
+      <!--Specify which sensor version can support this setting-->
+      <sensorVersion>0</sensorVersion>
+	  <initSetting>
+	        <!--Register setting configuration
+          Contains: register address, register data, register address type, register data type, operation and delay in micro seconds -->
+        <regSetting><registerAddr>0x3000</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+        <regSetting><registerAddr>0x3002</registerAddr><registerData>0x01</registerData><regAddrType range="[1,4]">2</regAddrType><regDataType range="[1,4]">1</regDataType><operation>WRITE</operation><delayUs>0x0</delayUs></regSetting>
+	  </initSetting>
+  </initSettings>
+  <testPatternInfo>
+    <testPatternData>
+      <!--Test pattern mode
+          Supported modes are: OFF, SOLID_COLOR, COLOR_BARS, COLOR_BARS_FADE_TO_GRAY, PN9, CUSTOM1 -->
+      <mode>OFF</mode>
+      <!--Sequence of register settings to configure the device -->
+      <settings>
+        <!--Register setting configuration
+            Contains: register address, register data, register address type, register data type, operation and delay in micro seconds -->
+        <regSetting>
+          <!--Register address that is accessed -->
+          <registerAddr>0</registerAddr>
+          <!--If operation is WRITE, registerData is the data value to be written into the specified register address
+              If operation is READ, registerData is the number of bytes to be read from the specified register address -->
+          <registerData>0</registerData>
+          <!--Register address / data size in bytes -->
+          <regAddrType range="[1,4]">2</regAddrType>
+          <!--Register address / data size in bytes -->
+          <regDataType range="[1,4]">1</regDataType>
+          <!--Type of the operation
+              Valid values are: WRITE, READ, POLL -->
+          <operation>WRITE</operation>
+          <!--Delay in micro seconds. Delay is 0 if not explicitly provided -->
+          <delayUs>0</delayUs>
+        </regSetting>
+      </settings>
+    </testPatternData>
+  </testPatternInfo>
+  <!--Color level information
+      These are the default currents in various channels in complete dark light -->
+  <colorLevelInfo>
+    <!--White level value -->
+    <whiteLevel>1023</whiteLevel>
+    <!--Pedestal value for Red channel -->
+    <rPedestal>64</rPedestal>
+    <!--Pedestal value for GreenRed channel -->
+    <grPedestal>64</grPedestal>
+    <!--Pedestal value for Blue channel -->
+    <bPedestal>64</bPedestal>
+    <!--Pedestal value for Green Blue channel -->
+    <gbPedestal>64</gbPedestal>
+  </colorLevelInfo>
+  <!--Information about black regions
+      Multiple black regions can be provided if applicable -->
+  <opticalBlackRegionInfo>
+    <!--Frame dimension: contains xStart, yStart, width and height -->
+    <dimension>
+      <xStart>0</xStart>
+      <yStart>0</yStart>
+      <width>0</width>
+      <height>0</height>
+    </dimension>
+  </opticalBlackRegionInfo>
+  <!--Information about the pixel array
+      Active dimension and dummy pixels width are provided -->
+  <pixelArrayInfo>
+    <!--Width and height of the frame or subframe -->
+    <activeDimension>
+      <width>3856</width>
+      <height>2180</height>
+    </activeDimension>
+    <!--Dummy pixels surrounding the active pixel array -->
+    <dummyInfo>
+      <left>0</left>
+      <right>0</right>
+      <top>0</top>
+      <bottom>0</bottom>
+    </dummyInfo>
+  </pixelArrayInfo>
+  <!--Application delay information -->
+  <delayInfo>
+    <!--Number of frames required to apply the linecount -->
+    <linecount>0</linecount>
+    <!--Number of frames required to apply the gain -->
+    <gain>0</gain>
+    <!--Maximum pipeline delay in number of frames -->
+    <maxPipeline>2</maxPipeline>
+    <!--Number of frames to skip -->
+    <frameSkip>8</frameSkip>
+  </delayInfo>
+  <sensorProperty>
+    <!--Pixel size in micro meters -->
+    <pixelSize>1.25</pixelSize>
+    <!--Crop factor -->
+    <cropFactor>1.0</cropFactor>
+    <!--Sensing method of senosor
+        Supported sensing methods: UNDEFINED, ONE_CHIP_COLOR_AREA, TWO_CHIP_COLOR_AREA
+        THREE_CHIP_COLOR_AREA, COLOR_SEQUENCE_AREA, TRILINEAR, COLOR_SEQUENCE_LINEAR -->
+    <sensingMethod>ONE_CHIP_COLOR_AREA</sensingMethod>
+	<ADCReadoutTime>0</ADCReadoutTime>
+  </sensorProperty>
+</sensorDriverData>
+

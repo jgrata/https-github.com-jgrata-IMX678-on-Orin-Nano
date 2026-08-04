@@ -54,8 +54,9 @@ the customlib `.so`; use it for planning.
 | **A0** | 3856×2180 | 12 | 30 | linear | 0x2C | OETF/PTC/SNR/CCM baseline; dark noise | **HAVE** (current compiled mode) |
 | **A1** | 3856×2180 | 10 | ~60* | linear | 0x2B | 10-bit OETF/PTC; fps headroom; verify 10-bit RDI | need Sony 10-bit all-pixel table |
 | **A2** | 3856×2180 | 12 | ~15 | linear | 0x2C | long-integration / low-noise floor; dark-current baseline | derive from A0 (VMAX↑) |
-| **A3** | 3856×**4450** | 10 | 30 | **DOL** 2-exp | 0x2B | DOL OETF/PTC/SNR/CCM (long+short legs + stitch) | **register table from Sony SRM** (Jetson e-con is MCU-abstracted — not portable; see §5) |
-| **A4** | 3856×2180 | 12 | 30 | **DCG** (Clear HDR) | 0x2C | DCG HDR: HCG+LCG combine; conversion-gain ratio | need Sony DCG/Clear-HDR table |
+| **A4** | 3856×2180 | 12 | 30 | **DCG (Clear HDR) — PRIMARY HDR** | 0x2C | Sony's headline IMX678 feature; single-exposure HCG+LCG combine, no motion artifacts; conversion-gain-ratio knee | Sony SRM DCG/Clear-HDR table (**expect first-class support**) |
+| **A3** | 3856×**4450** | 10 | 30 | **DOL** 2-exp — *secondary/optional* | 0x2B | multi-exposure HDR (exposure-ratio knee, temporal → motion artifacts) | Sony SRM DOL table (may be less-supported than DCG); Jetson e-con not portable (see §5) |
+| **A4b**† | 3856×2180 | 12 | 30 | **DCG + DEXP** (combined) | 0x2C | max-DR: dual-conversion-gain × dual-exposure, if the SRM defines it | Sony SRM combined table (confirm existence) |
 | **A5**† | 1928×1090 | 12 | ~60* | linear (2×2 bin) | 0x2C | binned SNR/sensitivity; fps | need Sony binning table |
 | **A6**† | 1920×1080 | 12 | ~90* | linear (center ROI) | 0x2C | ROI/windowed DAQ; fps | derive (crop window) |
 
@@ -95,11 +96,26 @@ handles the restart+recovery). Keep the set small and purposeful:
 tonemap/denoise contamination). The existing Jetson lab science (`lab/snr1s_vs_gain.py`, CCM
 solver, OETF/PTC) ports directly; the DAQ just feeds it RDI `.npy` frames via `iq9_client.py`.
 
-## 5. DOL & DCG specifics
+## 5. DCG (Clear HDR — primary) & DOL specifics
 
-- **DOL (A3):** long (SHR0) + short (SHR1) exposures, ratio configurable (start **16:1** → +24 dB
-  DR). Characterize **each leg as a linear sensor** (own OETF/PTC/K/read-noise), then the stitch
-  knee & blending.
+- **DCG / Clear HDR (A4) — the IMX678's headline HDR.** Per-pixel **dual conversion gain**: one
+  integration read at **HCG** (low read-noise → shadows) and **LCG** (high full-well → highlights),
+  then combined. Being **single-exposure**, it is **free of the motion/ghosting** that DOL's
+  multi-exposure stitch introduces — the reason Sony markets the IMX678 on it.
+  - **Characterization:** the combine knee is a **conversion-gain knee** (HCG low, LCG high), not an
+    exposure-ratio knee. The key parameter, the **conversion-gain ratio K_LCG / K_HCG**, drops
+    straight out of the two **Layer-B linear PTCs (LCG-only and HCG-only)** — i.e. **the no-SRM
+    builds we can make now directly parameterize A4.** HCG leg → shadow read-noise; LCG leg →
+    highlight full-well/saturation.
+  - **Raw output:** confirm from the SRM whether Clear HDR emits the HCG & LCG components (two
+    sub-frames / interleaved) or a **companded single stream**; if companded, capture its
+    companding OETF and invert before PTC. (`FDG_SEL0` 0x3030 selects LCG/HCG per read; the DCG mode
+    enables both reads per frame — SRM register table needed.)
+- **A4b — DCG + DEXP (if the SRM defines it):** dual-conversion-gain × dual-exposure for maximum DR
+  (4-component). Optional — only if DCG-alone DR is insufficient.
+- **DOL (A3) — secondary/fallback.** long (SHR0) + short (SHR1) exposures, ratio start **16:1**
+  (+24 dB DR); characterize **each leg as a linear sensor**, then the stitch. Multi-exposure ⇒
+  motion artifacts, so it's the path only where DCG's DR falls short.
   - **What the Jetson (e-con e-CAM86) taught us — geometry & exposure model (portable), registers (NOT):**
     the e-con module is **MCU-mediated** (`e-con_cam` @0x42) with high-level controls
     (`sensor_mode=3`, `hdr_enable=1`, `exposure` long 450–400001 µs, `exposure_short` 28–25000 µs,
@@ -115,10 +131,6 @@ solver, OETF/PTC) ports directly; the DAQ just feeds it RDI `.npy` frames via `i
     accept the full 4450 height** (validate `CheckValidStreamConfig` doesn't clamp it — analogous
     to the RAW10 3840-max rejection we already hit). This is the #1 risk for A3.
   - Reconstruction (long/short → linear radiance) reuses the Jetson `reconstructRadiance` path.
-- **DCG (A4):** per-pixel HCG+LCG. The key parameter is the **conversion-gain ratio K_LCG/K_HCG**,
-  obtained directly from the two Layer-B PTCs (LCG vs HCG). HCG leg → shadow read-noise; LCG leg →
-  highlight full-well. If the sensor outputs a companded "Clear HDR" single stream, capture the
-  companding curve (its OETF) and invert before PTC.
 
 ## 6. Gaps / risks / to-source
 

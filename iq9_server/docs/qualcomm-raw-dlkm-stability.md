@@ -1,5 +1,17 @@
 # Support request: RAW/RDI capture intermittently hangs the CAMSS driver → watchdog reboot (QCS9075)
 
+> ## ✅ RESOLVED 2026-08-04 — confirmed fixed by camera-kernel `f7b70309`
+> Rebuilt `cameradlkm` at `camera-kernel.qclinux.1.0.r1-rel` HEAD (`f4491100`, which includes
+> `f7b70309` "isp: Fix KMD buffer handle in IFE prepare"), installed on the QLI-1.7 device (vermagic
+> matches `6.6.116-qli-1.7-ver.1.1`). A **100/100 live-mode NV12↔RDI handoff soak (3 s quiesce) ran
+> clean: 0 reboots, 0 SMMU faults, 1 benign scheduling-delay warning.** The unpatched module (`69cdd66`)
+> faulted at ~49 with the `cam_check_iommu_faults` IFE-SMMU trace and 18–31 congestion lines. Root cause
+> and fix are as analyzed below: the uninitialized `hw_update_data.kmd_cmd_buff_info` handle drove
+> `cam_mem_put_kref` onto the wrong buffer during release → premature IFE-SMMU unmap → page fault;
+> `f7b70309` populates the persistent handle correctly. **RAW DAQ is unblocked on QLI 1.7.** (Recommend
+> landing the SRCREV bump in the layer + carrying it into QLI 2.0 so it's not a manual module overlay.)
+
+
 > ## UPDATE 2026-07-31 (b) — `cameradlkm` is OPEN SOURCE; a likely fix is already upstream (correction)
 > Earlier text calling the camera kernel driver "prebuilt / not buildable by us" is **WRONG** (thanks hvo).
 > `cameradlkm_1.0.qcom.bb` = `inherit module`, GPL-2.0, built from **CodeLinaro `camera-kernel.git`**, branch

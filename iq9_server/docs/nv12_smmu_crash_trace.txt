@@ -1,0 +1,200 @@
+[Tue Aug  4 17:22:04 2026] ===EXPDISC-START=== uptime=2723s
+[Tue Aug  4 17:22:04 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_acquire_dev_in_available: 7816: Acquire success: session_hdl 0xbc0200 num_rsrces -16843010 ctx 25 link: 0xffffffff 
+[Tue Aug  4 17:22:04 2026] CAM_INFO: CAM-ICP: cam_icp_v2_download_fw: 873: Loading Secure PIL : Y 
+[Tue Aug  4 17:22:04 2026] CAM_WARN: CAM-CCI: cam_cci_master_lock_handler: 27: CCI is not enabled, bypassing master lock state processing 
+[Tue Aug  4 17:22:04 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1377: CAM_ACQUIRE_DEV Success for cmk_imx678 sensor_id:0x64,sensor_slave_addr:0x34 
+[Tue Aug  4 17:22:04 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_core_cfg: 2333: CAM_ACQUIRE_DEV: 0 Type: DPHY acquire_count: 1 combo: 0 cphy+dphy combo: 0 
+[Tue Aug  4 17:22:04 2026] CAM_INFO: CAM-ICP: cam_icp_mgr_process_dbg_buf: 2995: [icp]: FW_DBG:CICP_FW_E : HFI  :QC_IMAGE_VERSION_STRING=CICP.FW.7.8-00002,OEM_IMAGE_VERSION_STRING=CRM,BUILD_TIME: Apr 10 2025 23:00:32,CACHE_ENABLED at icphostinterface.c:880 QC_IMAGE_VERSION_STRING=CICP.FW.7.8-00002 OEM_IMAGE_VERSION_STRING=CRM 
+[Tue Aug  4 17:22:04 2026] CAM_INFO: CAM-ICP: cam_icp_mgr_process_dbg_buf: 2995: [icp]: FW_DBG:CICP_FW_E : HFI  :ELF variant: T480:USE_CDM_1_1:TCM_ENABLED: , API version: 0x2490000 at icphostinterface.c:881 QC_IMAGE_VERSION_STRING=CICP.FW.7.8-00002 OEM_IMAGE_VERSION_STRING=CRM 
+[Tue Aug  4 17:22:04 2026] CAM_INFO: CAM-SENSOR: cam_sensor_handle_res_info: 196: Sensor[cmk_imx678-20] Feature: 0x0 updated for request id: 0, res index: 0, width: 0xf10, height: 0x884, capability: NORMAL , fps: 30 
+[Tue Aug  4 17:22:04 2026] cam_common_util_thread_switch_delay_detect: 6 callbacks suppressed
+[Tue Aug  4 17:22:04 2026] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-icp_message_queue cb: cam_icp_mgr_process_msg [camera_qcs9100] delay in execution detected 2723:615878 cur 2723:658232
+                           diff 42: threshold 10 
+[Tue Aug  4 17:22:04 2026] CAM_INFO: CAM-ICP: cam_icp_mgr_hw_open: 5018: [icp] FW download done successfully 
+[Tue Aug  4 17:22:04 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_v_acquire: 18772: is FE 0 Offline 0 ctx id 0 
+[Tue Aug  4 17:22:04 2026] CAM_INFO: CAM-ISP: cam_ife_hw_mgr_print_acquire_info: 1730: 17:22:4.797 Acquired Single IFE[1] with [9 pix] [0 pd] [1 rdi] ports for ctx:25 per_port_enabled :0 
+[Tue Aug  4 17:22:04 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_acquire_hw_v2: 8263: Acquire success: session_hdl 0xbc0200s ctx_type 3 ctx 25 link 0x3f0306 hw_mgr_ctx 25 is_shdr 0 is_shdr_master 0 offline_isp :0 
+[Tue Aug  4 17:22:04 2026] CAM_WARN: CAM-ISP: __cam_isp_ctx_process_evt: 9076: Get unexpect evt:2 in acquired state, ctx: 25 on link: 0x3f0306 
+[Tue Aug  4 17:22:04 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_update_lane_selection: 1652: lane_reg_addr: 0x814, lane_assign: 0x3210, lane_enable: 0xd5, delay: 0 
+[Tue Aug  4 17:22:04 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_core_cfg: 2865: CAM_START_PHYDEV: 0, CSID:1, Type: DPHY, dev_cnt: 1, slot: 0, combo: 0, cphy+dphy: 0, skew_en: 0, sec_mode: 0, Datarate: 2700000000, Settletime: 5600000000 
+[Tue Aug  4 17:22:04 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1504: 17:22:4.901 CAM_START_DEV Success for cmk_imx678 sensor_id:0x64,sensor_slave_addr:0x34 num_batched_frames:1 
+[Tue Aug  4 17:22:05 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 22 on link 0x3f0306 
+[Tue Aug  4 17:22:05 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_flush_req_in_top_state: 6191: Last request id to flush is 22, ctx_id:25 link: 0x3f0306 
+[Tue Aug  4 17:22:05 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_flush_req_in_top_state: 6208: Stop HW complete. Reset HW next.Ctx_id:25 link: 0x3f0306 
+[Tue Aug  4 17:22:05 2026] cam_common_util_thread_switch_delay_detect: 1 callbacks suppressed
+[Tue Aug  4 17:22:05 2026] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-bc0200-3f0306 cb: cam_req_mgr_process_flush_req [camera_qcs9100] delay in execution detected 2724:815236 cur 2724:856551
+                           diff 41: threshold 10 
+[Tue Aug  4 17:22:05 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 22 on link 0x3f0306 
+[Tue Aug  4 17:22:05 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 22 on link 0x3f0306 
+[Tue Aug  4 17:22:05 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 22 on link 0x3f0306 
+[Tue Aug  4 17:22:05 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 22 on link 0x3f0306 
+[Tue Aug  4 17:22:05 2026] CAM_INFO: CAM-SENSOR: cam_sensor_stream_off: 1135: 17:22:5.985 CAM_STOP_DEV Success for cmk_imx678 sensor_id:0x64,sensor_slave_addr:0x34 
+[Tue Aug  4 17:22:05 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_update_lane_selection: 1652: lane_reg_addr: 0x814, lane_assign: 0x3210, lane_enable: 0x0, delay: 0 
+[Tue Aug  4 17:22:05 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_update_lane_selection: 1652: lane_reg_addr: 0x814, lane_assign: 0x3210, lane_enable: 0x0, delay: 0 
+[Tue Aug  4 17:22:05 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_core_cfg: 2459: CAM_STOP_PHYDEV: 0, CSID:1, Type: DPHY, slot: 0, Datarate: 2700000000, Settletime: 5600000000 
+[Tue Aug  4 17:22:06 2026] CAM_WARN: CAM-ISP: __cam_isp_ctx_process_evt: 9076: Get unexpect evt:1 in acquired state, ctx: 25 on link: 0x3f0306 
+[Tue Aug  4 17:22:06 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_release_hw: 9295: 17:22:6.55 Release HW success ctx id: 25 
+[Tue Aug  4 17:22:06 2026] CAM_WARN: CAM-CCI: cam_cci_master_lock_handler: 27: CCI is not enabled, bypassing master lock state processing 
+[Tue Aug  4 17:22:06 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1436: CAM_RELEASE_DEV Success for cmk_imx678 sensor_id:0x64, slave_addr:0x34 
+[Tue Aug  4 17:22:06 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_acquire_dev_in_available: 7816: Acquire success: session_hdl 0x130200 num_rsrces -16843010 ctx 26 link: 0xffffffff 
+[Tue Aug  4 17:22:06 2026] CAM_INFO: CAM-ICP: cam_icp_v2_download_fw: 873: Loading Secure PIL : Y 
+[Tue Aug  4 17:22:06 2026] CAM_WARN: CAM-CCI: cam_cci_master_lock_handler: 27: CCI is not enabled, bypassing master lock state processing 
+[Tue Aug  4 17:22:06 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1377: CAM_ACQUIRE_DEV Success for cmk_imx678 sensor_id:0x64,sensor_slave_addr:0x34 
+[Tue Aug  4 17:22:06 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_core_cfg: 2333: CAM_ACQUIRE_DEV: 0 Type: DPHY acquire_count: 1 combo: 0 cphy+dphy combo: 0 
+[Tue Aug  4 17:22:06 2026] CAM_INFO: CAM-ICP: cam_icp_mgr_process_dbg_buf: 2995: [icp]: FW_DBG:CICP_FW_E : HFI  :QC_IMAGE_VERSION_STRING=CICP.FW.7.8-00002,OEM_IMAGE_VERSION_STRING=CRM,BUILD_TIME: Apr 10 2025 23:00:32,CACHE_ENABLED at icphostinterface.c:880 QC_IMAGE_VERSION_STRING=CICP.FW.7.8-00002 OEM_IMAGE_VERSION_STRING=CRM 
+[Tue Aug  4 17:22:06 2026] CAM_INFO: CAM-ICP: cam_icp_mgr_hw_open: 5018: [icp] FW download done successfully 
+[Tue Aug  4 17:22:06 2026] CAM_INFO: CAM-ICP: cam_icp_mgr_process_dbg_buf: 2995: [icp]: FW_DBG:CICP_FW_E : HFI  :ELF variant: T480:USE_CDM_1_1:TCM_ENABLED: , API version: 0x2490000 at icphostinterface.c:881 QC_IMAGE_VERSION_STRING=CICP.FW.7.8-00002 OEM_IMAGE_VERSION_STRING=CRM 
+[Tue Aug  4 17:22:06 2026] CAM_INFO: CAM-SENSOR: cam_sensor_handle_res_info: 196: Sensor[cmk_imx678-20] Feature: 0x0 updated for request id: 0, res index: 0, width: 0xf10, height: 0x884, capability: NORMAL , fps: 30 
+[Tue Aug  4 17:22:06 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_v_acquire: 18772: is FE 0 Offline 0 ctx id 0 
+[Tue Aug  4 17:22:06 2026] CAM_INFO: CAM-ISP: cam_ife_hw_mgr_print_acquire_info: 1730: 17:22:6.383 Acquired Single IFE[1] with [9 pix] [0 pd] [1 rdi] ports for ctx:26 per_port_enabled :0 
+[Tue Aug  4 17:22:06 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_acquire_hw_v2: 8263: Acquire success: session_hdl 0x130200s ctx_type 3 ctx 26 link 0xcb0306 hw_mgr_ctx 26 is_shdr 0 is_shdr_master 0 offline_isp :0 
+[Tue Aug  4 17:22:06 2026] CAM_WARN: CAM-ISP: __cam_isp_ctx_process_evt: 9076: Get unexpect evt:2 in acquired state, ctx: 26 on link: 0xcb0306 
+[Tue Aug  4 17:22:06 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_update_lane_selection: 1652: lane_reg_addr: 0x814, lane_assign: 0x3210, lane_enable: 0xd5, delay: 0 
+[Tue Aug  4 17:22:06 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_core_cfg: 2865: CAM_START_PHYDEV: 0, CSID:1, Type: DPHY, dev_cnt: 1, slot: 0, combo: 0, cphy+dphy: 0, skew_en: 0, sec_mode: 0, Datarate: 2700000000, Settletime: 5600000000 
+[Tue Aug  4 17:22:06 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1504: 17:22:6.500 CAM_START_DEV Success for cmk_imx678 sensor_id:0x64,sensor_slave_addr:0x34 num_batched_frames:1 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 22 on link 0xcb0306 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_flush_req_in_top_state: 6191: Last request id to flush is 22, ctx_id:26 link: 0xcb0306 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_flush_req_in_top_state: 6208: Stop HW complete. Reset HW next.Ctx_id:26 link: 0xcb0306 
+[Tue Aug  4 17:22:07 2026] cam_common_util_thread_switch_delay_detect: 7 callbacks suppressed
+[Tue Aug  4 17:22:07 2026] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-130200-cb0306 cb: cam_req_mgr_process_flush_req [camera_qcs9100] delay in execution detected 2726:409662 cur 2726:450877
+                           diff 41: threshold 10 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 22 on link 0xcb0306 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 22 on link 0xcb0306 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 22 on link 0xcb0306 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 22 on link 0xcb0306 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-SENSOR: cam_sensor_stream_off: 1135: 17:22:7.581 CAM_STOP_DEV Success for cmk_imx678 sensor_id:0x64,sensor_slave_addr:0x34 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_update_lane_selection: 1652: lane_reg_addr: 0x814, lane_assign: 0x3210, lane_enable: 0x0, delay: 0 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_update_lane_selection: 1652: lane_reg_addr: 0x814, lane_assign: 0x3210, lane_enable: 0x0, delay: 0 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_core_cfg: 2459: CAM_STOP_PHYDEV: 0, CSID:1, Type: DPHY, slot: 0, Datarate: 2700000000, Settletime: 5600000000 
+[Tue Aug  4 17:22:07 2026] CAM_WARN: CAM-ISP: __cam_isp_ctx_process_evt: 9076: Get unexpect evt:1 in acquired state, ctx: 26 on link: 0xcb0306 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_release_hw: 9295: 17:22:7.653 Release HW success ctx id: 26 
+[Tue Aug  4 17:22:07 2026] CAM_WARN: CAM-CCI: cam_cci_master_lock_handler: 27: CCI is not enabled, bypassing master lock state processing 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1436: CAM_RELEASE_DEV Success for cmk_imx678 sensor_id:0x64, slave_addr:0x34 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-ICP: cam_icp_v2_download_fw: 873: Loading Secure PIL : Y 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_acquire_dev_in_available: 7816: Acquire success: session_hdl 0x700200 num_rsrces -16843010 ctx 27 link: 0xffffffff 
+[Tue Aug  4 17:22:07 2026] CAM_WARN: CAM-CCI: cam_cci_master_lock_handler: 27: CCI is not enabled, bypassing master lock state processing 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1377: CAM_ACQUIRE_DEV Success for cmk_imx678 sensor_id:0x64,sensor_slave_addr:0x34 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_core_cfg: 2333: CAM_ACQUIRE_DEV: 0 Type: DPHY acquire_count: 1 combo: 0 cphy+dphy combo: 0 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-ICP: cam_icp_mgr_process_dbg_buf: 2995: [icp]: FW_DBG:CICP_FW_E : HFI  :QC_IMAGE_VERSION_STRING=CICP.FW.7.8-00002,OEM_IMAGE_VERSION_STRING=CRM,BUILD_TIME: Apr 10 2025 23:00:32,CACHE_ENABLED at icphostinterface.c:880 QC_IMAGE_VERSION_STRING=CICP.FW.7.8-00002 OEM_IMAGE_VERSION_STRING=CRM 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-ICP: cam_icp_mgr_hw_open: 5018: [icp] FW download done successfully 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-ICP: cam_icp_mgr_process_dbg_buf: 2995: [icp]: FW_DBG:CICP_FW_E : HFI  :ELF variant: T480:USE_CDM_1_1:TCM_ENABLED: , API version: 0x2490000 at icphostinterface.c:881 QC_IMAGE_VERSION_STRING=CICP.FW.7.8-00002 OEM_IMAGE_VERSION_STRING=CRM 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-SENSOR: cam_sensor_handle_res_info: 196: Sensor[cmk_imx678-20] Feature: 0x0 updated for request id: 0, res index: 0, width: 0xf10, height: 0x884, capability: NORMAL , fps: 30 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_v_acquire: 18772: is FE 0 Offline 0 ctx id 0 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-ISP: cam_ife_hw_mgr_print_acquire_info: 1730: 17:22:8.3 Acquired Single IFE[1] with [9 pix] [0 pd] [1 rdi] ports for ctx:27 per_port_enabled :0 
+[Tue Aug  4 17:22:07 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_acquire_hw_v2: 8263: Acquire success: session_hdl 0x700200s ctx_type 3 ctx 27 link 0x110306 hw_mgr_ctx 27 is_shdr 0 is_shdr_master 0 offline_isp :0 
+[Tue Aug  4 17:22:07 2026] CAM_WARN: CAM-ISP: __cam_isp_ctx_process_evt: 9076: Get unexpect evt:2 in acquired state, ctx: 27 on link: 0x110306 
+[Tue Aug  4 17:22:08 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_update_lane_selection: 1652: lane_reg_addr: 0x814, lane_assign: 0x3210, lane_enable: 0xd5, delay: 0 
+[Tue Aug  4 17:22:08 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_core_cfg: 2865: CAM_START_PHYDEV: 0, CSID:1, Type: DPHY, dev_cnt: 1, slot: 0, combo: 0, cphy+dphy: 0, skew_en: 0, sec_mode: 0, Datarate: 2700000000, Settletime: 5600000000 
+[Tue Aug  4 17:22:08 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1504: 17:22:8.129 CAM_START_DEV Success for cmk_imx678 sensor_id:0x64,sensor_slave_addr:0x34 num_batched_frames:1 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 21 on link 0x110306 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_flush_req_in_top_state: 6191: Last request id to flush is 21, ctx_id:27 link: 0x110306 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_flush_req_in_top_state: 6208: Stop HW complete. Reset HW next.Ctx_id:27 link: 0x110306 
+[Tue Aug  4 17:22:09 2026] cam_common_util_thread_switch_delay_detect: 9 callbacks suppressed
+[Tue Aug  4 17:22:09 2026] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-700200-110306 cb: cam_req_mgr_process_flush_req [camera_qcs9100] delay in execution detected 2728:040217 cur 2728:081431
+                           diff 41: threshold 10 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 21 on link 0x110306 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 21 on link 0x110306 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 21 on link 0x110306 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 21 on link 0x110306 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-SENSOR: cam_sensor_stream_off: 1135: 17:22:9.212 CAM_STOP_DEV Success for cmk_imx678 sensor_id:0x64,sensor_slave_addr:0x34 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_update_lane_selection: 1652: lane_reg_addr: 0x814, lane_assign: 0x3210, lane_enable: 0x0, delay: 0 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_update_lane_selection: 1652: lane_reg_addr: 0x814, lane_assign: 0x3210, lane_enable: 0x0, delay: 0 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_core_cfg: 2459: CAM_STOP_PHYDEV: 0, CSID:1, Type: DPHY, slot: 0, Datarate: 2700000000, Settletime: 5600000000 
+[Tue Aug  4 17:22:09 2026] CAM_WARN: CAM-ISP: __cam_isp_ctx_process_evt: 9076: Get unexpect evt:1 in acquired state, ctx: 27 on link: 0x110306 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_release_hw: 9295: 17:22:9.283 Release HW success ctx id: 27 
+[Tue Aug  4 17:22:09 2026] CAM_WARN: CAM-CCI: cam_cci_master_lock_handler: 27: CCI is not enabled, bypassing master lock state processing 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1436: CAM_RELEASE_DEV Success for cmk_imx678 sensor_id:0x64, slave_addr:0x34 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-ICP: cam_icp_v2_download_fw: 873: Loading Secure PIL : Y 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_acquire_dev_in_available: 7816: Acquire success: session_hdl 0xdd0200 num_rsrces -16843010 ctx 28 link: 0xffffffff 
+[Tue Aug  4 17:22:09 2026] CAM_WARN: CAM-CCI: cam_cci_master_lock_handler: 27: CCI is not enabled, bypassing master lock state processing 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1377: CAM_ACQUIRE_DEV Success for cmk_imx678 sensor_id:0x64,sensor_slave_addr:0x34 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_core_cfg: 2333: CAM_ACQUIRE_DEV: 0 Type: DPHY acquire_count: 1 combo: 0 cphy+dphy combo: 0 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-ICP: cam_icp_mgr_process_dbg_buf: 2995: [icp]: FW_DBG:CICP_FW_E : HFI  :QC_IMAGE_VERSION_STRING=CICP.FW.7.8-00002,OEM_IMAGE_VERSION_STRING=CRM,BUILD_TIME: Apr 10 2025 23:00:32,CACHE_ENABLED at icphostinterface.c:880 QC_IMAGE_VERSION_STRING=CICP.FW.7.8-00002 OEM_IMAGE_VERSION_STRING=CRM 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-ICP: cam_icp_mgr_hw_open: 5018: [icp] FW download done successfully 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-ICP: cam_icp_mgr_process_dbg_buf: 2995: [icp]: FW_DBG:CICP_FW_E : HFI  :ELF variant: T480:USE_CDM_1_1:TCM_ENABLED: , API version: 0x2490000 at icphostinterface.c:881 QC_IMAGE_VERSION_STRING=CICP.FW.7.8-00002 OEM_IMAGE_VERSION_STRING=CRM 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-SENSOR: cam_sensor_handle_res_info: 196: Sensor[cmk_imx678-20] Feature: 0x0 updated for request id: 0, res index: 0, width: 0xf10, height: 0x884, capability: NORMAL , fps: 30 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_v_acquire: 18772: is FE 0 Offline 0 ctx id 0 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-ISP: cam_ife_hw_mgr_print_acquire_info: 1730: 17:22:9.626 Acquired Single IFE[1] with [9 pix] [0 pd] [1 rdi] ports for ctx:28 per_port_enabled :0 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_acquire_hw_v2: 8263: Acquire success: session_hdl 0xdd0200s ctx_type 3 ctx 28 link 0xc60306 hw_mgr_ctx 28 is_shdr 0 is_shdr_master 0 offline_isp :0 
+[Tue Aug  4 17:22:09 2026] CAM_WARN: CAM-ISP: __cam_isp_ctx_process_evt: 9076: Get unexpect evt:2 in acquired state, ctx: 28 on link: 0xc60306 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_update_lane_selection: 1652: lane_reg_addr: 0x814, lane_assign: 0x3210, lane_enable: 0xd5, delay: 0 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_core_cfg: 2865: CAM_START_PHYDEV: 0, CSID:1, Type: DPHY, dev_cnt: 1, slot: 0, combo: 0, cphy+dphy: 0, skew_en: 0, sec_mode: 0, Datarate: 2700000000, Settletime: 5600000000 
+[Tue Aug  4 17:22:09 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1504: 17:22:9.745 CAM_START_DEV Success for cmk_imx678 sensor_id:0x64,sensor_slave_addr:0x34 num_batched_frames:1 
+[Tue Aug  4 17:22:10 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 22 on link 0xc60306 
+[Tue Aug  4 17:22:10 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_flush_req_in_top_state: 6191: Last request id to flush is 22, ctx_id:28 link: 0xc60306 
+[Tue Aug  4 17:22:10 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_flush_req_in_top_state: 6208: Stop HW complete. Reset HW next.Ctx_id:28 link: 0xc60306 
+[Tue Aug  4 17:22:10 2026] cam_common_util_thread_switch_delay_detect: 8 callbacks suppressed
+[Tue Aug  4 17:22:10 2026] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-dd0200-c60306 cb: cam_req_mgr_process_flush_req [camera_qcs9100] delay in execution detected 2729:654406 cur 2729:695602
+                           diff 41: threshold 10 
+[Tue Aug  4 17:22:10 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 22 on link 0xc60306 
+[Tue Aug  4 17:22:10 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 22 on link 0xc60306 
+[Tue Aug  4 17:22:10 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 22 on link 0xc60306 
+[Tue Aug  4 17:22:10 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 22 on link 0xc60306 
+[Tue Aug  4 17:22:10 2026] CAM_INFO: CAM-SENSOR: cam_sensor_stream_off: 1135: 17:22:10.824 CAM_STOP_DEV Success for cmk_imx678 sensor_id:0x64,sensor_slave_addr:0x34 
+[Tue Aug  4 17:22:10 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_update_lane_selection: 1652: lane_reg_addr: 0x814, lane_assign: 0x3210, lane_enable: 0x0, delay: 0 
+[Tue Aug  4 17:22:10 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_update_lane_selection: 1652: lane_reg_addr: 0x814, lane_assign: 0x3210, lane_enable: 0x0, delay: 0 
+[Tue Aug  4 17:22:10 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_core_cfg: 2459: CAM_STOP_PHYDEV: 0, CSID:1, Type: DPHY, slot: 0, Datarate: 2700000000, Settletime: 5600000000 
+[Tue Aug  4 17:22:10 2026] CAM_WARN: CAM-ISP: __cam_isp_ctx_process_evt: 9076: Get unexpect evt:1 in acquired state, ctx: 28 on link: 0xc60306 
+[Tue Aug  4 17:22:10 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_release_hw: 9295: 17:22:10.894 Release HW success ctx id: 28 
+[Tue Aug  4 17:22:10 2026] CAM_WARN: CAM-CCI: cam_cci_master_lock_handler: 27: CCI is not enabled, bypassing master lock state processing 
+[Tue Aug  4 17:22:10 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1436: CAM_RELEASE_DEV Success for cmk_imx678 sensor_id:0x64, slave_addr:0x34 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_acquire_dev_in_available: 7816: Acquire success: session_hdl 0x4c0200 num_rsrces -16843010 ctx 29 link: 0xffffffff 
+[Tue Aug  4 17:22:11 2026] CAM_WARN: CAM-CCI: cam_cci_master_lock_handler: 27: CCI is not enabled, bypassing master lock state processing 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1377: CAM_ACQUIRE_DEV Success for cmk_imx678 sensor_id:0x64,sensor_slave_addr:0x34 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_core_cfg: 2333: CAM_ACQUIRE_DEV: 0 Type: DPHY acquire_count: 1 combo: 0 cphy+dphy combo: 0 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-SENSOR: cam_sensor_handle_res_info: 196: Sensor[cmk_imx678-20] Feature: 0x0 updated for request id: 0, res index: 0, width: 0xf10, height: 0x884, capability: NORMAL , fps: 30 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_v_acquire: 18772: is FE 0 Offline 0 ctx id 0 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-ISP: cam_ife_hw_mgr_print_acquire_info: 1730: 17:22:11.170 Acquired Single IFE[1] with [1 pix] [0 pd] [1 rdi] ports for ctx:29 per_port_enabled :0 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_acquire_hw_v2: 8263: Acquire success: session_hdl 0x4c0200s ctx_type 3 ctx 29 link 0xb60304 hw_mgr_ctx 29 is_shdr 0 is_shdr_master 0 offline_isp :0 
+[Tue Aug  4 17:22:11 2026] CAM_WARN: CAM-ISP: __cam_isp_ctx_process_evt: 9076: Get unexpect evt:2 in acquired state, ctx: 29 on link: 0xb60304 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_update_lane_selection: 1652: lane_reg_addr: 0x814, lane_assign: 0x3210, lane_enable: 0xd5, delay: 0 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_core_cfg: 2865: CAM_START_PHYDEV: 0, CSID:1, Type: DPHY, dev_cnt: 1, slot: 0, combo: 0, cphy+dphy: 0, skew_en: 0, sec_mode: 0, Datarate: 2700000000, Settletime: 5600000000 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1504: 17:22:11.278 CAM_START_DEV Success for cmk_imx678 sensor_id:0x64,sensor_slave_addr:0x34 num_batched_frames:1 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 8 on link 0xb60304 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_flush_req_in_top_state: 6191: Last request id to flush is 8, ctx_id:29 link: 0xb60304 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_flush_req_in_top_state: 6208: Stop HW complete. Reset HW next.Ctx_id:29 link: 0xb60304 
+[Tue Aug  4 17:22:11 2026] cam_common_util_thread_switch_delay_detect: 8 callbacks suppressed
+[Tue Aug  4 17:22:11 2026] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-4c0200-b60304 cb: cam_req_mgr_process_flush_req [camera_qcs9100] delay in execution detected 2730:710989 cur 2730:752086
+                           diff 41: threshold 10 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 8 on link 0xb60304 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 8 on link 0xb60304 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 8 on link 0xb60304 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 8 on link 0xb60304 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-SENSOR: cam_sensor_stream_off: 1135: 17:22:11.889 CAM_STOP_DEV Success for cmk_imx678 sensor_id:0x64,sensor_slave_addr:0x34 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_update_lane_selection: 1652: lane_reg_addr: 0x814, lane_assign: 0x3210, lane_enable: 0x0, delay: 0 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_update_lane_selection: 1652: lane_reg_addr: 0x814, lane_assign: 0x3210, lane_enable: 0x0, delay: 0 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_core_cfg: 2459: CAM_STOP_PHYDEV: 0, CSID:1, Type: DPHY, slot: 0, Datarate: 2700000000, Settletime: 5600000000 
+[Tue Aug  4 17:22:11 2026] CAM_WARN: CAM-ISP: __cam_isp_ctx_process_evt: 9076: Get unexpect evt:1 in acquired state, ctx: 29 on link: 0xb60304 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_release_hw: 9295: 17:22:11.959 Release HW success ctx id: 29 
+[Tue Aug  4 17:22:11 2026] CAM_WARN: CAM-CCI: cam_cci_master_lock_handler: 27: CCI is not enabled, bypassing master lock state processing 
+[Tue Aug  4 17:22:11 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1436: CAM_RELEASE_DEV Success for cmk_imx678 sensor_id:0x64, slave_addr:0x34 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_acquire_dev_in_available: 7816: Acquire success: session_hdl 0x8a0200 num_rsrces -16843010 ctx 30 link: 0xffffffff 
+[Tue Aug  4 17:22:12 2026] CAM_WARN: CAM-CCI: cam_cci_master_lock_handler: 27: CCI is not enabled, bypassing master lock state processing 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1377: CAM_ACQUIRE_DEV Success for cmk_imx678 sensor_id:0x64,sensor_slave_addr:0x34 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_core_cfg: 2333: CAM_ACQUIRE_DEV: 0 Type: DPHY acquire_count: 1 combo: 0 cphy+dphy combo: 0 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-SENSOR: cam_sensor_handle_res_info: 196: Sensor[cmk_imx678-20] Feature: 0x0 updated for request id: 0, res index: 0, width: 0xf10, height: 0x884, capability: NORMAL , fps: 30 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_v_acquire: 18772: is FE 0 Offline 0 ctx id 0 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-ISP: cam_ife_hw_mgr_print_acquire_info: 1730: 17:22:12.276 Acquired Single IFE[1] with [1 pix] [0 pd] [1 rdi] ports for ctx:30 per_port_enabled :0 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_acquire_hw_v2: 8263: Acquire success: session_hdl 0x8a0200s ctx_type 3 ctx 30 link 0x880304 hw_mgr_ctx 30 is_shdr 0 is_shdr_master 0 offline_isp :0 
+[Tue Aug  4 17:22:12 2026] CAM_WARN: CAM-ISP: __cam_isp_ctx_process_evt: 9076: Get unexpect evt:2 in acquired state, ctx: 30 on link: 0x880304 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_update_lane_selection: 1652: lane_reg_addr: 0x814, lane_assign: 0x3210, lane_enable: 0xd5, delay: 0 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_core_cfg: 2865: CAM_START_PHYDEV: 0, CSID:1, Type: DPHY, dev_cnt: 1, slot: 0, combo: 0, cphy+dphy: 0, skew_en: 0, sec_mode: 0, Datarate: 2700000000, Settletime: 5600000000 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1504: 17:22:12.382 CAM_START_DEV Success for cmk_imx678 sensor_id:0x64,sensor_slave_addr:0x34 num_batched_frames:1 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 8 on link 0x880304 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_flush_req_in_top_state: 6191: Last request id to flush is 8, ctx_id:30 link: 0x880304 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-ISP: __cam_isp_ctx_flush_req_in_top_state: 6208: Stop HW complete. Reset HW next.Ctx_id:30 link: 0x880304 
+[Tue Aug  4 17:22:12 2026] cam_common_util_thread_switch_delay_detect: 6 callbacks suppressed
+[Tue Aug  4 17:22:12 2026] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-8a0200-880304 cb: cam_req_mgr_process_flush_req [camera_qcs9100] delay in execution detected 2731:815045 cur 2731:856079
+                           diff 41: threshold 10 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 8 on link 0x880304 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 8 on link 0x880304 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 8 on link 0x880304 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 8 on link 0x880304 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-SENSOR: cam_sensor_stream_off: 1135: 17:22:12.996 CAM_STOP_DEV Success for cmk_imx678 sensor_id:0x64,sensor_slave_addr:0x34 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_update_lane_selection: 1652: lane_reg_addr: 0x814, lane_assign: 0x3210, lane_enable: 0x0, delay: 0 
+[Tue Aug  4 17:22:12 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_update_lane_selection: 1652: lane_reg_addr: 0x814, lane_assign: 0x3210, lane_enable: 0x0, delay: 0 
+[Tue Aug  4 17:22:13 2026] CAM_INFO: CAM-CSIPHY: cam_csiphy_core_cfg: 2459: CAM_STOP_PHYDEV: 0, CSID:1, Type: DPHY, slot: 0, Datarate: 2700000000, Settletime: 5600000000 
+[Tue Aug  4 17:22:13 2026] CAM_WARN: CAM-ISP: __cam_isp_ctx_process_evt: 9076: Get unexpect evt:1 in acquired state, ctx: 30 on link: 0x880304 
+[Tue Aug  4 17:22:13 2026] CAM_INFO: CAM-ISP: cam_ife_mgr_release_hw: 9295: 17:22:13.67 Release HW success ctx id: 30 
+[Tue Aug  4 17:22:13 2026] CAM_WARN: CAM-CCI: cam_cci_master_lock_handler: 27: CCI is not enabled, bypassing master lock state processing 
+[Tue Aug  4 17:22:13 2026] CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1436: CAM_RELEASE_DEV Success for cmk_imx678 sensor_id:0x64, slave_addr:0x34 

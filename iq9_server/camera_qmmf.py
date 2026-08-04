@@ -38,7 +38,7 @@ RAW_W, RAW_H, RAW_FPS = 3856, 2180, 30
 
 
 def grab_raw16(n_frames=1, width=RAW_W, height=RAW_H, fps=RAW_FPS, camera=0,
-               timeout_s=25, retries=1):
+               timeout_s=25, retries=1, exposure_ns=None, iso=None):
     """Capture native RAW16 Bayer frames via an isolated gst-launch subprocess.
 
     Returns (frames, meta): frames is a list of HxW uint16 arrays (RGGB, 12-bit,
@@ -46,12 +46,27 @@ def grab_raw16(n_frames=1, width=RAW_W, height=RAW_H, fps=RAW_FPS, camera=0,
     The caller MUST have released the camera first (single-client). Raises
     RuntimeError with the gst stderr tail if nothing was captured.
 
+    For characterization (OETF/PTC, dark, SNR-vs-gain) pass exposure_ns (manual
+    exposure, disables AE) and/or iso (manual ISO/gain) -> qtiqmmfsrc runs 3A OFF and
+    holds the requested values, so an exposure/gain sweep is repeatable. Leaving both
+    None keeps 3A auto (a quick look/preview grab).
+
     Why RAW16 (not RAW10/12): RAW10's advertised max is 3840x2160 < 3856x2180 so
     CamX rejects it at CheckValidStreamConfig; RAW12 destabilises cam-server. RAW16
     validates at native res and carries the 12-bit data in a 16-bit container.
     """
     caps = ("video/x-bayer,format=rggb,bpp=(string)16,"
             "width=%d,height=%d,framerate=%d/1" % (width, height, fps))
+    # manual 3A for characterization (disable AE/AWB drift; hold exposure/gain)
+    props = []
+    if exposure_ns is not None or iso is not None:
+        props += ["control-mode=off"]
+    if exposure_ns is not None:
+        props += ["exposure-mode=off", "manual-exposure-time=%d" % int(exposure_ns)]
+    if iso is not None:
+        # manual-iso-value ONLY takes effect with iso-mode=manual; range 100..3200.
+        # (Setting the value without iso-mode=manual left an inconsistent 3A state.)
+        props += ["iso-mode=manual", "manual-iso-value=%d" % max(100, min(3200, int(iso)))]
     last_err = ""
     for _attempt in range(retries + 1):
         tmp = tempfile.mkdtemp(prefix="iq9raw_")
@@ -61,7 +76,7 @@ def grab_raw16(n_frames=1, width=RAW_W, height=RAW_H, fps=RAW_FPS, camera=0,
         # passes, and that EOS races the sink -> the Nth buffer is often torn down unwritten.
         # Grabbing one extra buffer guarantees n_frames complete files (verified: eos-after=1
         # yields 0 bytes; eos-after=2 yields a full frame).
-        argv = (["gst-launch-1.0", "-e", "qtiqmmfsrc"] + cam +
+        argv = (["gst-launch-1.0", "-e", "qtiqmmfsrc"] + cam + props +
                 ["!", caps,
                  "!", "identity", "eos-after=%d" % (int(n_frames) + 1),
                  "!", "multifilesink", "location=%s" % pat])
@@ -88,7 +103,9 @@ def grab_raw16(n_frames=1, width=RAW_W, height=RAW_H, fps=RAW_FPS, camera=0,
         if frames:
             return frames, {"caps": caps, "width": width, "height": height,
                             "fps": fps, "raw_bytes_per_buffer": raw_bytes,
-                            "n": len(frames), "bit_depth": 12, "cfa": "RGGB"}
+                            "n": len(frames), "bit_depth": 12, "cfa": "RGGB",
+                            "exposure_ns": exposure_ns, "iso": iso,
+                            "ae": (exposure_ns is None and iso is None)}
         last_err = "\n".join(l for l in stderr.splitlines()
                              if "MESA" not in l and "driver name" not in l)[-1500:]
     raise RuntimeError("RAW capture produced no frame. gst-launch stderr tail:\n" + last_err)

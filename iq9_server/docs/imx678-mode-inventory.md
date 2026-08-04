@@ -130,14 +130,36 @@ solver, OETF/PTC) ports directly; the DAQ just feeds it RDI `.npy` frames via `i
    Leopard's own driver if they publish a DOL/DCG mode. Leads: Sony SRM (user has it), the e-con
    `IMX678Standard_vs_HDR` docs (Data/imx678/econ) for the HDR behaviour, and the `ATG-IMX678
    Source Code Overview` PDF in the repo root.
-2. **ParameterParser** (QLI 1.7 V5.5.1) needed to compile XML→`.bin` — build host / hvo (same
-   toolchain class as the cameradlkm rebuild).
+2. **ParameterParser** (QLI 1.7 V5.5.1) to compile XML→`.bin` — **already in-house** (Metropolis
+   has CreatePoint access and has compiled the current `.bin` with it). SRM to be sourced from
+   **Leopard directly** (reputable) rather than third-party scans.
 3. **RDI over HDR modes unverified** — validate A3/A4 actually stream over the RDI/bayer path on
    this stack before committing the full DAQ matrix.
 4. **Gain/CG/exposure axes are build-swaps** until per-frame control is unlocked (CamX escalation).
    Keep Layer-B ladders minimal (≥3 gain points to fit, not the full 0–72 dB range).
 
-## 7. Rebuild / deploy steps (for hvo)
+## 6b. BSP ownership reality (from the LI↔Metropolis BSP thread, May–Jun 2026)
+
+- **The rebuild path is already in-house, not hypothetical.** Metropolis has Qualcomm CreatePoint
+  access + the **QLI 1.7 ParameterParser (V5.5.1)**, has LI's XML **source**
+  (`cmk_imx678_sensor.xml`, `cmk_imx678_module_cam0.xml`, `cmk_imx678_sensor.cpp`), and has
+  **already compiled `com.qti.sensormodule.cmk_imx678_cam0.bin` and recompiled
+  `com.qti.sensor.cmk_imx678.so`** against QLI 1.7. ⇒ adding modes = authoring XML resolutionData
+  + re-running the parser we already have (the customlib `.cpp` is also recompilable if
+  `FillExposureSettings`/`CalculateExposure` ever need changing).
+- **LI's config is minimal by design** — "only basic image tuning… 1 or 2 control variables," GA1.4
+  base, one linear mode, tuning shared with IMX676. Full DOL/DCG/multi-mode support from LI is
+  **NRE or DIY**. ⇒ the mode set in §2–§3 is ours to author (Sony SRM register tables), which is
+  exactly "writing our own sensor driver."
+- **Color is a hybrid** — LI's 9 CCMs spliced into a `lemans_imx577` skeleton, `cc13_ipe_v2.xml`
+  excluded → ISP colors approximate. ⇒ **derive WB/CCM from RAW ourselves** (already the DAQ plan);
+  do not depend on the ISP-tuned color.
+- **Scope boundary (important):** owning the sensor driver unlocks all of §2 (modes) and §3
+  (static per-build gain/CG/exposure). It does **NOT** fix per-frame exposure/gain on RDI — that
+  handoff is in prebuilt **CamX**, upstream of the sensor driver. Per-frame 3A on RDI stays a
+  Qualcomm/CamX escalation regardless of how much of the sensor driver we own.
+
+## 7. Rebuild / deploy steps (in-house — toolchain already available)
 
 1. Edit `meta-metro-mcs/.../li-imx678/files/cmk_imx678_sensor.xml`: add A1–A4(+A5/A6) as new
    `<resolutionData>` blocks (each with its resSettings mode table), and produce the Layer-B

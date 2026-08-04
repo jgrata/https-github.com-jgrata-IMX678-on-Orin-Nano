@@ -1,0 +1,29 @@
+[Unit]
+Description=IQ9 IMX678 DAQ web server (NV12 live + gated RAW16)
+Documentation=https://github.com/metropolis/imx678 iq9_server/docs
+After=network-online.target cam-server.service
+Wants=network-online.target
+# Never give up restarting: the CamX/IFE driver is immature and can trip the
+# qcom_wdt hardware watchdog into a full SoC reset. On reboot this unit brings
+# the DAQ server back automatically so the PC-side supervisor can resume.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# metro is uid 0 on this EVK; HOME is required so python3 finds ~/.local
+# (fastapi/uvicorn live there) -- learned the hard way via systemd-run.
+User=metro
+Environment=HOME=/home/metro
+Environment=PORT=8080
+# RAW capture is gated OFF by default; arm it for a supervised session with
+#   systemctl set-environment  (or edit a drop-in) IQ9_RAW_ENABLE=1
+Environment=IQ9_RAW_ENABLE=0
+WorkingDirectory=/home/metro/iq9_server
+ExecStart=/usr/bin/python3 server.py
+Restart=always
+RestartSec=3
+# Give a hung capture a chance to be killed rather than wedging the unit.
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

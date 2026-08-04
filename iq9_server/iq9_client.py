@@ -38,7 +38,7 @@ import sys
 import time
 import urllib.request
 
-HOST = os.environ.get("IQ9_HOST", "10.70.0.60")
+HOST = os.environ.get("IQ9_HOST", "192.168.99.2")
 PORT = int(os.environ.get("IQ9_PORT", "8080"))
 SSH_USER = os.environ.get("IQ9_SSH_USER", "metro")
 DMX_AGENT = os.environ.get("DMX_AGENT", "http://127.0.0.1:9200")

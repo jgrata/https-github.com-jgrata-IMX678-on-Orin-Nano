@@ -16,7 +16,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CMD="${1:-status}"
 
-HOST="${IQ9_HOST:-10.70.0.60}"; SSHH="metro@$HOST"
+HOST="${IQ9_HOST:-192.168.99.2}"; SSHH="metro@$HOST"
 DEVDIR="/usr/lib/camera"
 DEVBIN="$DEVDIR/com.qti.sensormodule.cmk_imx678_cam0.bin"
 BACKUP="/var/li_backup/com.qti.sensormodule.cmk_imx678_cam0.bin.orig"

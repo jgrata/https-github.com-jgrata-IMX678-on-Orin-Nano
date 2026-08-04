@@ -171,15 +171,21 @@ solver, OETF/PTC) ports directly; the DAQ just feeds it RDI `.npy` frames via `i
   handoff is in prebuilt **CamX**, upstream of the sensor driver. Per-frame 3A on RDI stays a
   Qualcomm/CamX escalation regardless of how much of the sensor driver we own.
 
-## 7. Rebuild / deploy steps (in-house — toolchain already available)
+## 7. Rebuild / deploy — PROVEN in-house (`iq9_server/sensor_driver/` kit)
 
-1. Edit `meta-metro-mcs/.../li-imx678/files/cmk_imx678_sensor.xml`: add A1–A4(+A5/A6) as new
-   `<resolutionData>` blocks (each with its resSettings mode table), and produce the Layer-B
-   variant XMLs (A0 with FDG_SEL0/GAIN/SHR0 deltas).
-2. Run the **QLI 1.7 ParameterParser (V5.5.1)** to regenerate
-   `com.qti.sensormodule.cmk_imx678_cam0.bin` (and cam1–3) per config.
-3. Install to `/usr/lib/camera/` (rm-then-cp; `/usr` is ostree — `mount -o remount,rw /usr`),
-   `systemctl restart cam-server`, then `systemctl start iq9web`.
-4. Validate each caps-mode: request its caps via `iq9_client.py`, confirm the RDI frame geometry
-   /bit-depth, run the coverage matrix. Build-swaps: swap `.bin` + restart cam-server (supervisor
-   recovers automatically if a mode trips the watchdog).
+The build loop is implemented and validated (2026-08-04): **recompiling the baseline reproduces
+the shipping `.bin` byte-for-byte** (md5 `eb236184e9df`). See `sensor_driver/README.md`.
+
+1. `build_variants.py` — stamp variants from the LI baseline by named-register override
+   (FDG_SEL0/GAIN/SHR0/VMAX), each write verified. Layer-A modes = add new `<resolutionData>`
+   blocks (Sony-SRM tables); Layer-B = FDG_SEL0/GAIN/SHR0 deltas (already shipped: LCG/HCG + gain
+   ladder, no SRM needed).
+2. `compile.sh` — the **QLI 1.7 ParameterParser (V5.5.1)** in the local toolchain compiles each
+   XML → `com.qti.sensormodule.*.bin`. Runs the parser **directly** (`<out> b <sensor.xml>
+   <module.xml> -q`) with XMLs staged at `chi-cdk/oem/qcom/{sensor/cmk_imx678,module}`. Beats
+   Windows MAX_PATH by routing through **WSL** (linux64 parser); native on a Linux host.
+3. `deploy.sh <variant>` — compiles to the **cam0 identity** (tag matches socid_map → no SIGSEGV),
+   backs up + installs to `/usr/lib/camera/` (`mount -o remount,rw /usr`, rm-then-cp), restarts
+   cam-server + iq9web. `restore` reverts.
+4. Validate: `iq9_client.py` confirms recovery + streaming; run the §4 coverage matrix. A mode that
+   trips the watchdog auto-recovers (iq9web.service) and `deploy.sh restore` reverts the sensor.

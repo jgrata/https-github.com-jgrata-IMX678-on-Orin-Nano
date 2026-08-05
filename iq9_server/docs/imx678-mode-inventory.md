@@ -132,6 +132,29 @@ solver, OETF/PTC) ports directly; the DAQ just feeds it RDI `.npy` frames via `i
     to the RAW10 3840-max rejection we already hit). This is the #1 risk for A3.
   - Reconstruction (long/short → linear radiance) reuses the Jetson `reconstructRadiance` path.
 
+## 5b. Clear HDR (DCG / A4) register set — FROM SRM (2026-08-05, no longer "to-source")
+`IMX678_AppNote_ClearHDR_E_Rev4.0.pdf` p4 "List of Setting Register":
+
+| Addr | Register | Clear HDR | Normal | Notes |
+|---|---|---|---|---|
+| 0x301A | WDMODE | **08h** | 00h | mode enable |
+| 0x3028–2A | VMAX | **0x001194** (4500) | 0x0008CA (2250) | frame length doubles |
+| 0x3050–52 | SHR0 | ≥ 0x000006 | ≥ 0x000003 | shutter min |
+| 0x3069 | CHDR_GAIN_EN | 01h enable | 00h | direct-gain enable |
+| 0x306B | (CHDR) | **04h** | 00h | |
+| 0x3070–71 | GAIN (HG&LG) | 0–0x50 | — | **0.3 dB/step**, 0–24 dB in HDR |
+| 0x3081 | EXP_GAIN | 00–05h = 0/6/12/18/24/30 dB | 00h | HG-side coarse add |
+| 0x308C–8D | CHDR_DGAIN0_HG | 0x0100 default | | gain-adjust fn |
+| 0x3094–95 | CHDR_AGAIN0_LG | 0x000 default | | gain-adjust fn |
+| 0x309C–9D | CHDR_AGAIN0_HG | 0x000 default | | gain-adjust fn |
+
+**Gain model:** `LG = GAIN`, `HG = GAIN + EXP_GAIN`. The main `GAIN` (0x3070) is 0.3 dB/step (confirms our
+gain-ladder builds); `EXP_GAIN` (0x3081) is the coarse 6 dB HG boost — NOT the main gain. Dual-Gain mode
+(`IMX678_AppNote_DualGain`) is analogous (WDMODE + VMAX=0x1194 + EXP_GAIN + C_GAIN/DUR). Building A4 = add a
+Clear-HDR `<resolutionData>` with this sequence (VMAX 4500 → confirm frame geometry/dt for the RDI stream) +
+the appnote's exposure/gain-adjust setup. Validation deferred until camera-load stability returns (NV12
+streaming currently self-cycles the board — see below).
+
 ## 6. Gaps / risks / to-source
 
 1. **Register tables to source** for A1/A3/A4/A5 (and HCG/gain/exposure deltas): **Sony *IMX678

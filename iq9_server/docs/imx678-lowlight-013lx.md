@@ -26,7 +26,16 @@ Sensitivity at f/2: HCG **127 863** Digit/lx/s, LCG **47 957** Digit/lx/s.
 | 1/30 s | **554 DN** | 304 | **0.43 mlx** | 4.3 mlx |
 | 20 ms (our mode) | 332 DN | 183 | 0.71 mlx | 7.1 mlx |
 
-**Conclusion:** with the f/2 lens the sensor sits **~300× below** the 0.13 lx target (read-noise-limited floor ≈ 0.4 mlx); 0.13 lx is a strong, well-exposed signal, not a threshold. Low-light floor is read-noise-dominated (dark current negligible), consistent with the measured 1.82 DN.
+**⚠️ RETRACTED (2026-08-05): the "~300× below 0.13 lx / sub-mlx SNR1s" conclusion is WRONG — do not use it.**
+The "min illum SNR=1" column above is the illuminance where *signal(DN) = read-noise(DN)* — a read-noise-floor
+point, **NOT the SNR1s metric**. SNR1s (SNR=1) is **shot-noise-limited** (~1 e⁻) and requires **K (e⁻/DN)** to
+express in physical units — which we don't have (PTC blocked by RDI reboots). It must also be normalized to
+Sony's SNR1s protocol: **F2** (we match), a defined **exposure** (Sony standard ≠ our 20 ms), **2856K** source
+(ours was D65), **green channel, native/unbinned**, SNR=Signal/σ. Sony's real spec for the **color IMX678 is
+~0.31 lx** — our back-of-envelope was apples-to-oranges and ~700× off. **SNR1s remains TODO**, needs K (proper
+PTC) + a **calibrated lux measurement at the sensor under 2856K**, both gated by the RDI-capture instability.
+What stands: read noise 1.82 DN, Rcg 2.4× (= datasheet spec), register-level control. (Original flawed table
+retained above for the record.)
 
 ## Caveats / to firm up
 1. Uses datasheet F5.6 sensitivity scaled to f/2, green channel, typ values. Real SNR at 0.13 lx is **shot-limited** → exact SNR-in-electrons needs **K (e⁻/DN)** from a PTC (deferred: RDI capture reboots intermittently — see `qualcomm-rdi-smmu-escalation.md`).

@@ -1,0 +1,889 @@
+[56323.777348][ T9378] ====RDI-GRAB-NOW====
+[56324.625782][  T617] CAM_ERR: CAM-SMMU: cam_smmu_dump_cb_info: 747: Usage: shared_usage=0 io_usage=3674112 shared_free=0 io_free=18446744073705877504 
+[56324.625836][  T617] Internal error: synchronous external abort: 0000000096000010 [#1] PREEMPT SMP
+[56324.628083][ T8689] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 8 on link 0x170304 
+[56324.639577][  T617] Modules linked in: michael_mic usb_f_uvc videobuf2_vmalloc uvc videobuf2_dma_sg videobuf2_memops overlay tz_log qcom_smcinvoke mem_object si_core_module rfcomm 8021q garp mrp stp llc bnep snd_soc_hdmi_codec qrtr_mhi phy_qcom_edp tpm_tis_spi tpm_tis_core rpmsg_ctrl fastrpc qrtr_smd rpmsg_char qmi_cooling camera_qcs9100(O) qcom_edac msm_display ocmem gpu_sched snd_soc_sc8280xp hci_uart snd_soc_qcom_sdw drm_display_helper btqca snd_soc_qcom_common qcom_pon qca808x
+[56324.648815][ T8689] CAM_WARN: CAM-UTIL: cam_common_util_thread_switch_delay_detect: 184: crm_workq-560200-170304 cb: cam_req_mgr_process_flush_req [camera_qcs9100] delay in execution detected 56325:275801 cur 56325:296477
+[56324.648815][ T8689] diff 20: threshold 10 
+[56324.660131][  T617]  nvmem_qcom_spmi_sdam pwrseq_qcom_wcn snd_soc_simple_card_utils qcom_spmi_mbg_tm rtc_pm8xxx qcom_spmi_adc5_gen3 snd_soc_dmic snd_soc_max98357a dispcc0_sa8775p at24 bluetooth ecdh_generic drm_dp_aux_bus ecc drm_kms_helper camcc_sa8775p qcom_stats iris_vpu(O) v4l2_mem2mem videobuf2_v4l2 videodev videobuf2_common mc videocc_sa8775p
+[56324.703863][ T8689] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 8 on link 0x170304 
+[56324.728084][  T617]  spi_geni_qcom phy_qcom_sgmii_eth icc_bwmon qcom_eud dwmac_qcom_ethqos stmmac_platform qcrypto msm_kgsl(O) stmmac pcs_xpcs sha256_generic pinctrl_sa8775p_lpass_lpi llcc_qcom authenc phylink
+[56324.761625][ T8689] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 8 on link 0x170304 
+[56324.771130][  T617]  pinctrl_lpass_lpi dispcc1_sa8775p libdes ath11k_pci ath11k icc_osm_l3 mac80211 pci_pwrctl_pwrseq libarc4 pci_pwrctl_core pwrseq_core cfg80211 rfkill qcom_rng mhi qcom_q6v5_pas qcom_rproc_minidump qcom_pil_info qcom_q6v5 socinfo qcom_sysmon hd3ss3220 typec stm_p_ost stm_heartbeat stm_ftrace stm_console
+[56324.791507][ T8689] CAM_INFO: CAM-CRM: cam_req_mgr_process_flush_req: 3209: Last request id to flush is 8 on link 0x170304 
+[56324.801643][  T617]  nt36xxx_i2c(O) ipa qcom_common qcom_glink_smem mdt_loader coresight_tpdm coresight_tpda zram coresight_tmc usb_f_qdss zsmalloc coresight_tgu coresight_stm stm_core coresight_replicator qrtr coresight_remote_etm coresight_funnel coresight_dummy coresight_csr coresight_cti coresight at803x qcom_phy_lib fuse drm ipv6
+[56324.872664][  T617] CPU: 0 PID: 617 Comm: irq/44-arm-smmu Tainted: G   M    W  O       6.6.116-qli-1.7-ver.1.1-05801-gde229c16e2aa-dirty #1
+[56324.885502][  T617] Hardware name: Qualcomm Technologies, Inc. Addons IQ 9075 EVK (DT)
+[56324.893623][  T617] pstate: 604000c5 (nZCv daIF +PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+[56324.901482][  T617] pc : qsmmuv500_iova_to_phys+0x950/0x1568
+[56324.907299][  T617] lr : qsmmuv500_iova_to_phys+0x13c/0x1568
+[56324.913111][  T617] sp : ffffffc089ba3bd0
+[56324.917229][  T617] x29: ffffffc089ba3bd0 x28: ffffff80812a3580 x27: ffffff808154ba80
+[56324.925264][  T617] x26: ffffff808154ba80 x25: ffffff8096dcf300 x24: 0000000000000013
+[56324.933298][  T617] x23: 0000000000000013 x22: 00000000f8252f80 x21: ffffff808154ba80
+[56324.941339][  T617] x20: c6f5956e8d14fd3c x19: 0000000000003400 x18: ffffffffffffffff
+[56324.949373][  T617] x17: 3a32313a3531202a x16: ffffffee8cbb3438 x15: 2a203a343437203a
+[56324.957408][  T617] x14: 6f666e695f62635f x13: 000000000000199b x12: 00000000ffffffea
+[56324.965446][  T617] x11: 00000000ffffdfff x10: ffffffee8e72c188 x9 : ffffffee8e67c128
+[56324.973478][  T617] x8 : 37121055dc82f69c x7 : 0000000000ff0000 x6 : 0000000080ff0000
+[56324.981520][  T617] x5 : 0000000000003400 x4 : ffffff8efb690050 x3 : ffffff808154bbb8
+[56324.989562][  T617] x2 : 0000000000000001 x1 : ffffffc0800f5000 x0 : 0000000000000000
+[56324.997596][  T617] Call trace:
+[56325.000827][  T617]  qsmmuv500_iova_to_phys+0x950/0x1568
+[56325.006284][  T617]  qcom_smmu_context_fault+0x44c/0x890
+[56325.011745][  T617]  arm_smmu_context_fault+0x70/0x548
+[56325.017021][  T617]  irq_thread_fn+0x2c/0xa8
+[56325.021417][  T617]  irq_thread+0x160/0x248
+[56325.025717][  T617]  kthread+0x110/0x114
+[56325.029752][  T617]  ret_from_fork+0x10/0x20
+[56325.034143][  T617] Code: 97f7ab54 17fffea1 f9401f81 d503201f (b9400039) 
+[56325.041112][  T617] ---[ end trace 0000000000000000 ]---
+[56325.046567][  T617] Kernel panic - not syncing: synchronous external abort: Fatal exception
+[56325.055134][  T617] SMP: stopping secondary CPUs
+[56325.060711][  T617] Triggering bite
+[56325.064301][  T617] kgsl kgsl-3d0: snapshot: device is powered off
+[56325.270697][  T617] Kernel Offset: 0x2e0c900000 from 0xffffffc080000000
+[56325.277491][  T617] PHYS_OFFSET: 0x80000000
+[56325.281787][  T617] CPU features: 0x1,00000000,70020143,150172ab
+[56325.287957][  T617] Memory Limit: none
+S - Format: Log Type - Time(microsec) - Message - Optional Info
+S - Log Type: B - Since Boot(Power On Reset),  D - Delta,  S - Statistic
+S - QC_IMAGE_VERSION_STRING=BOOT.MXF.1.0.c1-00430-KODIAKLA-1
+S - IMAGE_VARIANT_STRING=SocLeMansLAA
+S - OEM_IMAGE_VERSION_STRING=ip-10-195-200-61
+S - Boot Interface: UFS
+S - Secure Boot: Off
+S - Boot Config @ 0x00786064 = 0x000000c1
+S - JTAG ID @ 0x00786130 = 0x102eb0e1
+S - OEM ID @ 0x00786138 = 0x00000000
+S - Serial Number @ 0x00786134 = 0xac67fe77
+S - OEM Config Row 0 @ 0x007841a8 = 0x0000000000000000
+S - OEM Config Row 1 @ 0x007841b0 = 0x0000000000400000
+S - Core 0 Frequency, 1632 MHz
+S - PBL Patch Ver: 2
+D -      8339 - pbl_apps_init_timestamp
+D -     40182 - bootable_media_detect_timestamp
+D -      3736 - bl_elf_metadata_loading_timestamp
+D -       555 - bl_hash_seg_auth_timestamp
+D -     21610 - bl_elf_loadable_segment_loading_timestamp
+D -      4572 - bl_elf_segs_hash_verify_timestamp
+D -      3164 - bl_sec_hash_seg_auth_timestamp
+D -       874 - bl_sec_segs_hash_verify_timestamp
+D -        12 - pbl_populate_shared_data_and_exit_timestamp
+S -     83044 - PBL, End
+B -     91347 - SBL1, Start
+B -    206332 - SBL1 BUILD @ 03:00:50 on Dec 13 2025
+B -    210816 - usb: HS: usb_shared_xbl_cache_dtb_node_init device tree Not available , 0x3
+B -    219478 - usb: qusb_ldr_eud_init
+B -    222101 - usb: eud_serial_upd , 0xac67fe77
+D -    225669 - sbl1_hw_init
+D -       549 - media_init:1
+D -         0 - boot_recovery_partitions_info_imem_init
+D -        31 - boot_handle_trial_boot
+B -    240584 - RECOVERY -  Image Load, Start
+D -         0 - smss_load_cancel
+D -         0 - boot_sail_pbl_edl_check
+D -         0 - sail_execute_bist_sequence
+B -    255071 - SMSS -  Image Load, Start
+D -      3935 - SMSS -  Image Loaded, Delta - (0 Bytes)
+D -       763 - Auth Metadata
+D -      5582 - sbl1_xblconfig_init
+B -    270748 - XBL Config -  Image Load, Start
+B -    274988 - DTB  Found: [pre-ddr][8302a402000000][0]
+D -      4361 - boot_pre_ddr_dtb_load
+B -    284290 - UFS Device Tree Settings
+B -    287127 - UFS Init Speed: HS Enabled 1, Gear 4 2 Lane Rate 2
+B -    296582 - UFS Perf Speed: HS Enabled 1, Gear 4 2 Lane Rate 2
+B -    302682 - UFS Timeouts(us): fDeviceInit 2500000, UTRD Poll 30000000
+D -     65911 - media_init:2
+B -    443470 - UFS INQUIRY ID: MICRON  MT128GBCAV2U31AI0101
+B -    445666 - UFS Boot LUN: 1
+B -    459452 - UFS GEAR: 4
+D -    133986 - media_init:3
+D -         0 - boot_proc_bootset
+D -         0 - shrm_load_cancel
+B -    489342 - SHRM -  Image Load, Start
+D -       610 - Auth Metadata
+D -      1067 - Segments hash check
+D -      9943 - SHRM -  Image Loaded, Delta - (34608 Bytes)
+D -         0 - boot_default_cdt_init
+B -    508221 - CDT not found in Memory
+D -      3477 - boot_cdt_init
+B -    515206 - CDT -  Image Load, Start
+B -    517981 - CDT not found in any storage media
+D -     14549 - sbl1_hw_platform_pre_ddr
+D -         0 - devcfg init
+B -    542137 - PMIC A:2.0 B:2.0 C:2.0 D:2.0 E:2.0 F:2.0 G:2.0 H:2.0
+B -    673745 - PM: PSI: b0x00_v0x36
+B -    676429 - PM: PMIC ECID_A: ???iPA_23_16_1
+B -    677161 - PM: PMIC ECID_B: ?????????_255_255_255
+B -    681797 - PM: PMIC ECID_C: ???)aA_13_20_25
+B -    686799 - PM: PMIC ECID_D: ?????????_255_255_255
+B -    691526 - PM: PMIC ECID_E: ???)aA_17_18_26
+B -    696528 - PM: PMIC ECID_F: ?????????_255_255_255
+B -    701256 - PM: PMIC ECID_G: ???)aA_14_5_12
+B -    706258 - PM: PMIC ECID_
+B -    710924 - PM: Device Init # SPMI Transn: 8404
+D -    181231 - pm_device_init, Delta
+B -    718519 - pm_driver_init, Start
+B -    725412 - PM: Driver Init # SPMI Transn: 232
+D -      3477 - pm_driver_init, Delta
+B -    730139 - vsense_init, Start
+D -         0 - vsense_init, Delta
+B -    736849 - CPR- Global: rev 3,vpid 0 Local: rev 1,vpid 0
+D -    224999 - sbl1_hw_pre_ddr_init
+D -         0 - boot_dload_handle_forced_dload_timeout
+D -       915 - sbl1_load_ddr_training_data
+B -    765977 - Pre_DDR_clock_init, Start
+D -        61 - Pre_DDR_clock_init, Delta
+D -     12901 - sbl1_ddr_set_params
+B -    777658 - sbl1_ddr_init, Start
+B -    780983 - DDR Init in Cold Boot stage
+B -    784429 - Chip Ver:  0x200
+B -    788394 - 6 channel DDR configuration
+D -     35959 - sbl1_ddr_init, Delta
+B -    817003 - DSF version = 272.89.00
+B -    820358 - Manufacturer ID = ff, Device Type = 8
+B -    824049 - DRAM ECID_0: 0x5ba22b9a53090080
+B -    828959 - DRAM ECID_1: 0x5ba22bba71090080
+B -    833321 - DRAM ECID_2: 0x5ba22bdb60080080
+B -    837713 - Rank 0 size = 18432 MB, Rank 1 size = 18432 MB
+D -     64691 - sbl1_ddr_init
+D -        61 - boot_pre_ddi_entry
+B -    850553 - do_ddr_training, Start
+B -    897523 - Saved training data to DDR DS backup region before training restore in Cold boot
+B -    903257 - DDR: Start of DDR Training Restore
+B -    920459 - Frequency = 2096 MHz
+B -    920490 - Max enabled DDR Freq = 3196 MHz
+B -    923875 - DDR: End of DDR Training Restore
+D -     74481 - do_ddr_training, Delta
+B -    932751 - Frequency = 2096 MHz
+B -    936289 - Max enabled DDR Freq = 3196 MHz
+B -    939888 - Frequency = 3205 MHz
+B -    944066 - Max enabled DDR Freq = 3196 MHz
+D -     96929 - sbl1_do_ddr_training
+D -      8753 - boot_ddi_entry
+B -    960628 - Pimem init cmd, entry
+D -     12475 - Pimem init cmd, exit
+B -    976274 - External heap init, Start
+B -    979355 - External heap init, End
+D -     24278 - sbl1_post_ddr_init
+D -        31 - sbl1_hw_init_secondary
+B -    990060 - DDR -  Image Load, Start
+D -        30 - boot_notify_sail_ddr_init_complete
+B -    999241 - DTB  Found: [post-ddr][8302a402000000][2000010000000000]
+D -     10339 - boot_post_ddr_dtb_load
+B -   1010800 - usb: UFS Serial - b7389937
+B -   1013362 - usb: usb_shared_xbl_cache_dtb_node_init dtb status
+B -   1021902 - usb: usb2phy: PRIM success
+B -   1022268 - usb: fedl: check start
+B -   1026203 - usb: dpGnd LOW, break
+D -     21137 - boot_fedl_check
+B -   1033248 - APDP -  Image Load, Start
+D -      3172 - APDP -  Image Loaded, Delta - (64 Bytes)
+D -         0 - boot_dload_dump_security_regions
+D -         0 - ramdump_load_cancel
+B -   1049688 - RamDump -  Image Load, Start
+D -        31 - boot_update_abnormal_reset_status
+D -         0 - boot_cache_set_memory_barrier
+D -         0 - boot_smem_debug_init
+D -       183 - boot_smem_init
+D -        30 - boot_smem_alloc_for_minidump
+D -        91 - boot_smem_store_pon_status
+D -        31 - sbl1_hw_platform_smem
+B -   1080493 - IOCTL features state
+D -      3477 - boot_ddr_share_data_to_aop
+D -       335 - boot_clock_init_rpm
+D -         0 - boot_vsense_copy_to_smem
+D -         0 - boot_recovery_partitions_info_smem_init
+D -        30 - boot_populate_ram_partition_table
+B -   1103154 - ECC DISABLED
+D -      4545 - boot_update_syndrome_regions
+D -        31 - boot_populate_ddr_details_shared_table
+D -       122 - sbl1_tlmm_init
+D -         0 - sbl1_efs_handle_cookies
+B -   1122369 - OEM_MISC -  Image Load, Start
+D -       671 - Auth Metadata
+D -       183 - Segments hash check
+D -     10645 - OEM_MISC -  Image Loaded, Delta - (5048 Bytes)
+B -   1136338 - QTI_MISC -  Image Load, Start
+D -      2715 - Auth Metadata
+D -       183 - Segments hash check
+D -     12688 - QTI_MISC -  Image Loaded, Delta - (4224 Bytes)
+D -         0 - boot_sail_wait_for_bist
+B -   1164246 - PM: PM Total Mem Allocated: 8878 
+D -      6252 - sbl1_pm_aop_pre_init_wrapper
+B -   1168821 - AOP -  Image Load, Start
+D -       549 - Auth Metadata
+D -      1373 - Segments hash check
+D -     10766 - AOP -  Image Loaded, Delta - (204944 Bytes)
+B -   1182912 - QSEE Dev Config -  Image Load, Start
+D -       549 - Auth Metadata
+D -       488 - Segments hash check
+D -     13023 - QSEE Dev Config -  Image Loaded, Delta - (57344 Bytes)
+B -   1204963 - QSEE -  Image Load, Start
+D -      3263 - Auth Metadata
+D -     19978 - Segments hash check
+D -     34404 - QSEE -  Image Loaded, Delta - (3949632 Bytes)
+B -   1243363 - DTB: Vibration Enabled
+D -      6344 - sbl1_hw_play_vibr
+D -         0 - boot_set_device_storage_type
+D -         0 - boot_sail_process_current_state
+B -   1259101 - SEC -  Image Load, Start
+D -      4544 - SEC -  Image Loaded, Delta - (64 Bytes)
+B -   1267244 - CPUCPFW -  Image Load, Start
+D -      3386 - Auth Metadata
+D -     11529 - Segments hash check
+D -     27358 - CPUCPFW -  Image Loaded, Delta - (110816 Bytes)
+B -   1303600 - QHEE -  Image Load, Start
+D -       549 - Auth Metadata
+D -      7442 - Segments hash check
+D -     12810 - QHEE -  Image Loaded, Delta - (1769568 Bytes)
+B -   1319704 - APPSBL -  Image Load, Start
+D -       518 - Auth Metadata
+D -     17050 - Segments hash check
+D -     29524 - APPSBL -  Image Loaded, Delta - (4198352 Bytes)
+D -         0 - sbl1_save_appsbl_index
+B -   1358409 - SBL1, End
+D -   1270539 - SBL1, Delta
+S - Flash Throughput, 345001 KB/s  (10695032 Bytes,  31689 us)
+S - DDR Frequency, 3196 MHz
+0       1.436647 added heap: partition 0xffffffcbc266f000, virt 0xffffffe1e6070000, phys 0x90270000, size 0x1000
+0       1.436662 Hypervisor cold boot, version: gunyah-e78adb36e debug (2025-11-17 05:38:05 UTC)
+0       1.465049 qhee_hyp_assign_add_memory: 0x80000000/0x10000000 (hlos 1) -> ret 0
+0       1.474126 qhee_hyp_assign_add_memory: 0xc0000000/0x4800000 (hlos 1) -> ret 0
+0       1.483955 qhee_hyp_assign_add_memory: 0xd00000000/0x280000000 (hlos 1) -> ret 0
+0       1.493750 qhee_hyp_assign_add_memory: 0xa80000000/0x180000000 (hlos 1) -> ret 0
+0       1.503546 qhee_hyp_assign_add_memory: 0x900000000/0x180000000 (hlos 1) -> ret 0
+0       1.513861 qhee_hyp_assign_add_memory: 0x100000000/0x300000000 (hlos 1) -> ret 0
+0       1.523204 qhee_hyp_assign_add_memory: 0xd0000000/0x100000 (hlos 1) -> ret 0
+0       1.532221 qhee_hyp_assign_add_memory: 0xd3500000/0x7c00000 (hlos 1) -> ret 0
+0       1.541289 qhee_hyp_assign_add_memory: 0x90600000/0x2e800000 (hlos 1) -> ret 0
+0       1.550421 qhee_hyp_assign_add_memory: 0xd1800000/0x100000 (hlos 1) -> ret 0
+0       1.559285 qhee_hyp_assign_add_memory: 0xdb1c0000/0x1e000 (hlos 1) -> ret 0
+0       1.568185 qhee_hyp_assign_add_memory: 0xdb300000/0x24d00000 (hlos 1) -> ret 0
+0       1.597632 Failed to register KP
+
+0       1.602069 platform info return:
+0       1.606284 platform_info.chip_id = 0x2a4
+0       1.611340 platform_info.chip_version = 0x20000
+0       1.617133 platform_info.foundry_id = 0x3
+0       1.622294 platform_info.platform_type = 0x20
+0       1.627876 platform_info.platform_version = 0x10000
+0       1.634090 platform_info.platform_subtype = 0x0
+0       1.639999 minidump: 31 of 32 slots available
+0       1.645752 qhee_hyp_assign_remove_memory: 0xc2400000/0x2400000 -> ret 0
+0       1.654105 added heap: partition 0xffffffcbc264f210, virt 0xfffffff512000000, phys 0xc2400000, size 0x100000
+0       1.666359 added heap: partition 0xffffffcbc266f000, virt 0xffffff93cc100000, phys 0xc2500000, size 0x2300000
+0       1.679346 Processing package image (0) type=1
+0       1.685061 Elf copied from 0xfffffff934000020 to 0x90400000 - size 0xcc4
+0       1.693489 Elf copied from 0xfffffff934001020 to 0x90401000 - size 0x3630
+0       1.702020 Elf copied from 0xfffffff934005020 to 0x90405000 - size 0xe68
+0       1.710446 Elf copied from 0xfffffff934006020 to 0x90406000 - size 0x1d8
+0       1.718872 Processing package image (1) type=2
+0       1.724635 Elf copied from 0xfffffff9340065c0 to 0x9040b000 - size 0x19664
+0       1.733346 Elf copied from 0xfffffff9340205c0 to 0x90425000 - size 0x4bf90
+0       1.741984 Elf copied from 0xfffffff93406c5c0 to 0x90471000 - size 0x400
+0       1.750410 Elf copied from 0xfffffff93406d5c0 to 0x90472000 - size 0x4b8
+0       1.758889 runtime_ipa: 0x90400000
+0       1.763313 app_ipa: 0x9040b000
+0       1.767316 env_data_ipa: 0x90474000
+0       1.771845 app_heap_ipa: 0x90478000
+0       1.776451 qhee_hyp_assign_remove_memory: 0xb0000000/0x800000 -> ret 0
+0       1.784667 GearVM region address: 0xb0000000, size: 0x800000
+0       1.791956 qhee_hyp_assign_remove_memory: 0xd0000000/0x100000 -> ret 0
+0       1.800171 GearVM SHM region address: 0xd0000000, size: 0x100000
+0       1.807829 qhee_hyp_assign_remove_memory: 0x91a80000/0x80000 -> ret 0
+[RM]Resource Manager version: 5b2857e5 (Sun Nov 16 13:58:21 2025 UTC)
+[RM]Gunyah API ver: 1, variant: 51
+[RM]Log buffer: 0x90487000
+[RM]MPD Sanitiser: skipping.
+0       1.838125 qhee_hyp_client_register_complete: smc-ret 0x0
+[RM]Error: unexpected value in ehdr
+[RM]Error: unexpected value in image ELF ehdr
+[RM]Static VM (16) not in READY state
+[RM]GearVM (16) not started
+[RM]HLOS is RAS handler
+0       1.867007 qhee_hyp_client_register_complete: smc-ret 0x0
+0       1.873965 boot_info_paddr 0x9049a000
+[RM]Init completed, disabling UART
+0       1.881970 Hypervisor UART is disabled!
+
+
+
+UEFI Start     [ 1887]
+ - 0x0AF001000 [ 1916] Sec.efi
+ASLR        : ON
+DEP         : ON (RTB)
+Timer Delta : +2 mS
+RAM Entry 0 : Base 0x0080000000  Size 0x0011A80000
+RAM Entry 1 : Base 0x00C0000000  Size 0x0002400000
+RAM Entry 2 : Base 0x0D00000000  Size 0x0280000000
+RAM Entry 3 : Base 0x0A80000000  Size 0x0180000000
+RAM Entry 4 : Base 0x0900000000  Size 0x0180000000
+RAM Entry 5 : Base 0x0100000000  Size 0x0300000000
+RAM Entry 6 : Base 0x00D0100000  Size 0x0001800000
+RAM Entry 7 : Base 0x00D3500000  Size 0x002CB00000
+RAM Entry 8 : Base 0x00B0800000  Size 0x000E600000
+RAM Entry 9 : Base 0x0091B00000  Size 0x001E500000
+Total Available RAM : 36588 MB (0x08EEC80000)
+Total Installed RAM : 36864 MB (0x0900000000)
+Init CPU core 1
+UEFI Ver    : 6.0.251213.BOOT.MXF.1.0.c1-00430-KODIAKLA-1
+Build Info  : 64b Dec 13 2025 03:02:07
+Boot Device : UFS
+PROD Mode   : TRUE
+Retail      : TRUE
+  > Scheduler up on Core 1
+After Create Event Status (0x0)
+ShmBridgeInitialize: enable status 0
+PM_DT_PARSING_ERR: cagrhpispiPM0: 78, PM1: 79, PM2: 78, PM3: 79, PM4: 78, PM5: 79, PM6: 78, PM7: 79, 
+Module cannot re-initialize DAL module environment
+PmicDxe: Unable to install ADC protocol handler 
+UFS INQUIRY ID: MICRON  MT128GBCAV2U31AI0101
+UFS Boot LUN: 1
+tz_armv8_smc_call failed, TzStatus = 0xFFFFFFFF,  SmcId = 0x32000105  
+Status = 0x3
+APP_REGION_NOTIFICATION_CMD: Syscall Not Supported, status 3
+HW Wdog Setting from PCD : Disabled
+smem_alloc_ex: SMEM alloc_ex failed with err=-3! smem_type=478, remote=3, size=32, flags=0x40000000.smem_alloc_ex: SMEM alloc_ex failed with err=-3! smem_type=478, remote=1, size=32, flags=0x40000000.smem_alloc_ex: SMEM alloc_ex failed with err=-3! smem_type=478, remote=13, size=32, flags=0x40000000.UsbConfigLibOpenProtocols: gNpaClientSS1Bus cannot be created
+UsbConfigLibOpenProtocols: gNpaClientSS2Bus cannot be created
+UsbConfigLibOpenProtocols: gNpaClientSS3Bus cannot be created
+UsbConfigLibOpenProtocols: gNpaClientSS1Bus cannot be created
+UsbConfigLibOpenProtocols: gNpaClientSS2Bus cannot be created
+UsbConfigLibOpenProtocols: gNpaClientSS3Bus cannot be created
+UsbConfigVbusGPIO: Platform :00000020, subtype :0
+usb_shared_gpio_expander_i2c_init, success for core_num: : 1
+i2c_close, success for core:: 1
+SSUsb2InitCommon: gNpaClientSS2Bus is NULL)
+usb_shared_xbl_cache_dtb_node_init dtb status: 0
+usb2phy: SEC success: 0
+usb_shared_xbl_cache_dtb_node_init dtb status: 0
+usb3phy: SEC success: lane_A: 0
+UsbEnumeratePort: new device connected at port 0, HubIfc =0xAA5F7018 
+UsbConfigVbusGPIO: Platform :00000020, subtype :0
+SSUsb3InitCommon: gNpaClientSS3Bus is NULL)
+usb_shared_xbl_cache_dtb_node_init dtb status: 0
+usb2phy: Tert success: 0
+SSUsb3InitCommon: End of SSusb3initcommon coreType 7 
+
+ButtonsDxeTest: Keypress SDAM data payload 0 
+HypDtFixupEntryPoint : Reading of OsConfigTableSelection failed,checking DT setting 
+InitStorageDiskInfo: storageInfo[0].guid: 8D90D477-39A3-4A38-AB9E-586FF69ED051
+InitStorageDiskInfo: storageInfo[1].guid: D33F1985-F107-4A85-BE38-68DC7AD32CEA
+SystemFwVersion partition not found. Status: Not Found
+: QcomValidateSysFwVersionData returned Not Found
+Firmware Version query failed with error: Not Found. Attempting to update partition with default value...
+SystemFwVersion partition not found. Status: Not Found
+: QcomWriteSysFwPartition returned Not Found
+Update of version partition with default values failed with error Not Found. Returning Device Error
+Attempt to get SysFwVer partition content failed with error: Device Error. Ignoring and continuing...
+SystemFwVersion partition not found. Status: Not Found
+Read SysFwVersion partiont failed. Status : Not FoundAttempt to print SysFwVer partition content failed with error: Not Found. Ignoring and continuing...
+Selected FW GUID =: 78462415-6133-431C-9FAE-48F2BAFD5C71 
+  Platform = 20 
+FmpDxe(Qualcomm System Firmware Update Driver): Failed to get the controller state.  Status = Not Found
+SystemFwVersion partition not found. Status: Not Found
+: QcomValidateSysFwVersionData returned Not Found
+Firmware Version query failed with error: Not Found. Attempting to update partition with default value...
+SystemFwVersion partition not found. Status: Not Found
+: QcomWriteSysFwPartition returned Not Found
+Update of version partition with default values failed with error Not Found. Returning Device Error
+FmpDxe(Qualcomm System Firmware Update Driver): GetVersion() from FmpDeviceLib (Qualcomm System Firmware Update Driver) returned Device Error
+SystemFwVersion partition not found. Status: Not Found
+: QcomValidateSysFwVersionData returned Not Found
+Firmware Version query failed with error: Not Found. Attempting to update partition with default value...
+SystemFwVersion partition not found. Status: Not Found
+: QcomWriteSysFwPartition returned Not Found
+Update of version partition with default values failed with error Not Found. Returning Device Error
+SystemFwVersion partition not found. Status: Not Found
+: QcomValidateSysFwVersionData returned Not Found
+Lowest Supported Version query failed with error: Not Found. Attempting to update partition with default value...
+SystemFwVersion partition not found. Status: Not Found
+: QcomWriteSysFwPartition returned Not Found
+Update of version partition with default values failed with error Not Found. Returning Device Error
+SoftSKUDxeInitialize: SoftSKU not supported for this chip
+MinidumpTADxe: Minidump TA loading not enabled.
+Disp init wait [ 2310] 
+-----------------------------
+Platform Init  [ 2315] BDS
+UEFI Ver   : 6.0.251213.BOOT.MXF.1.0.c1-00430-KODIAKLA-1
+Platform           : IOT
+Subtype            : 0
+Boot Device        : UFS
+Chip Name          : QCS_LEMANS_INDUSTRIAL
+Chip Ver           : 2.0
+Chip Serial Number : 0xAC67FE77
+ufs_error_log: 252
+RPMB ReadCounterPkt failed, Result = 6
+-----------------------------
+MountRequiredFatPartitions: OsTrialBootStatus read failed, status = 0xE
+EFI GUID based mount Success, GUID = C12A7328-F81F-11D2-BA4B-00A0C93EC93B Status = Success
+TransitionNhlosFromPostUpdateToBoot: Starting NHLOS state transition validation
+TransitionNhlosFromPostUpdateToBoot: Failed to read OsTrialBootStatus. Status 0xE
+ClearCapsuleNV: GetVariable Returned Status - Not Found
+No pending capsules found in EFI Raw file
+Looking for 'BootNext' variable to look for EFI partition with mass-storage capsules
+No 'BootNext' variable found to look for EFI partition with mass-storage capsules
+Looking for 'BootOrder' variable to find EFI partition with mass-storage capsules
+Could not find 'BootOrder' variable to find EFI partition with mass-storage capsules!
+Looking for local EFI partition variable to find EFI partition with mass-storage capsules
+GetPartitionHandlesForMassStorageCapsules: LocateHandleBuffer for  C12A7328-F81F-11D2-BA4B-00A0C93EC93B
+Found 1 EFI partitions in local device
+GetMassStorageCapsuleCount returned - Not Found!
+GetPersistedCapsuleCount returned - Not Found
+InitCapsulePtrFromPersistedMedia returned - Not Found!
+InitCapsulePtr returned - Not Found.
+LocateProtocol(DPP) returned Status:Not Found
+Locate pMorPpiProtocol failed 0xE 00000010
+Platform Init End : 2327
+-----------------------------
+From UEFI DT BootFromNvme  0x0
+UsbEnumNewDevRootHub: HIGH on port 0
+XHCI: Don't support multi-TT feature for Hub now. (force to disable MTT)
+XHCI: Don't support multi-TT feature for Hub now. (force to disable MTT)
+UsbEnumeratePort: new device connected at port 1, HubIfc =0xAA5F7018 
+ClearCapsuleNV: GetVariable Returned Status - Not Found
+FmpDeviceLock: smc:update rollback version succeeded, status: Success, pSysCallRsp->status: 1
+DtPlatformLoadDtbBlob qclinux_fit.img Loading Failed status=0xE
+DtPlatformLoadDtbBlob Loading Legacy MultiDtb
+OS DTB found. Model = Qualcomm Technologies, Inc. Addons IQ 9075 EVK
+Reading of OsConfigTableSelection failed,checking DT settings
+ UFSDxeFixupEventNotifyFunc: Fixup not done
+SdccDxeFixupEventNotifyFunc: Using Shared Sdcc Controller
+SdccUpdateDtStatusFlag: SD Card already okay
+SdccUpdateDtStatusFlag: eMMC already disabled
+Added qcom,platform-parts-info successfully in BoardInfoDxe
+Failed to get SKU information. Unsupported
+ GetNoMapRegions failed!!!
+UEFI Total : 721 ms
+POST Time      [ 2608] OS Loader
+UsbEnumNewDevRootHub: SUPER_PLUS on port 1
+XhcCheckUrbResult: STALL_ERROR! Completecode = 6
+XhcControlTransfer: error - Device Error, transfer - 2
+UsbHubInit: failed to read HUB descriptor Device Error
+UsbSelectConfig: failed to connect driver Device Error, ignored
+Start EBS        [ 3289] 
+UsbConfigPortsSetSimulate: UsbConfigPortsSetSimulate, event 0
+SSUsb2InitCommon: gNpaClientSS2Bus is NULL)
+usb_shared_xbl_cache_dtb_node_init dtb status: 0
+usb2phy: SEC success: 0
+usb_shared_xbl_cache_dtb_node_init dtb status: 0
+usb3phy: SEC success: lane_A: 0
+UsbConfigPortsSetSimulate: UsbConfigPortsSetSimulate, event 0
+SSUsb3InitCommon: gNpaClientSS3Bus is NULL)
+usb_shared_xbl_cache_dtb_node_init dtb status: 0
+usb2phy: Tert success: 0
+SSUsb3InitCommon: End of SSusb3initcommon coreType 7 
+
+From UEFI DT BootFromNvme  0x0
+BDS: LogFs sync skipped, Unsupported
+App Log Flush : 0 ms
+Gunyah based bootup
+Exit EBS        [ 3361] UEFI End
+[    0.000000][    T0] Linux version 6.6.116-qli-1.7-ver.1.1-05801-gde229c16e2aa-dirty (oe-user@oe-host) (aarch64-qcom-linux-gcc (GCC) 13.4.0, GNU ld (GNU Binutils) 2.42.0.20240723) #1 SMP PREEMPT Sun Dec 14 12:21:35 UTC 2025
+[    0.000000][    T0] random: crng init done
+[    0.000000][    T0] Kernel command line: initrd=\ostree\poky-95a43f96ef5e895f8be1ef81db2d99cbde804056b75cd9b21aa7710ff524080b\initramfs-6.6.116-qli-1.7-ver.1.1-05801-gde229c16e2aa-dirty.img root=LABEL=otaroot rootfstype=ext4 console=ttyMSM0,115200n8 pcie_pme=nomsi net.ifnames=0 pci=noaer pcie_aspm=off kpti=off kasan=off kasan.stacktrace=off swiotlb=128 mitigations=auto rcupdate.rcu_expedited=1 rcu_nocbs=0-7 no-steal-acc vfio_iommu_type1.allow_unsafe_interrupts=1 fw_devlink.strict=1 vfio_platform.reset_required=0 amc6821.pwminv=1 qcom_scm.download_mode=1 ostree=/ostree/boot.1/poky/95a43f96ef5e895f8be1ef81db2d99cbde804056b75cd9b21aa7710ff524080b/0
+[    0.000000][    T0] Unknown kernel command line parameters "ostree=/ostree/boot.1/poky/95a43f96ef5e895f8be1ef81db2d99cbde804056b75cd9b21aa7710ff524080b/0", will be passed to user space.
+[    0.029525][   T76] audit: type=2000 audit(0.024:1): state=initialized audit_enabled=0 res=1
+[    0.069790][    T1] SCSI subsystem initialized
+[    0.072750][    T1] VFS: Disk quotas dquot_6.6.0
+[    0.089268][    T1] Initialise system trusted keyrings
+[    0.089561][    T1] NFS: Registering the id_resolver key type
+[    0.089567][    T1] Key type id_resolver registered
+[    0.089568][    T1] Key type id_legacy registered
+[    0.095263][    T1] Key type asymmetric registered
+[    0.095264][    T1] Asymmetric key parser 'x509' registered
+[    0.113606][    T1] arm-smmu 15000000.iommu: probing hardware configuration...
+[    0.113607][    T1] arm-smmu 15000000.iommu: SMMUv2 with:
+[    0.113624][    T1] arm-smmu 15000000.iommu: 	stage 1 translation
+[    0.113625][    T1] arm-smmu 15000000.iommu: 	coherent table walk
+[    0.113626][    T1] arm-smmu 15000000.iommu: 	stream matching with 165 register groups
+[    0.113633][    T1] arm-smmu 15000000.iommu: 	98 context banks (0 stage-2 only)
+[    0.113641][    T1] arm-smmu 15000000.iommu: 	Limiting the stream matching groups to 128
+[    0.114245][    T1] arm-smmu 15000000.iommu: 	Supported page sizes: 0x61311000
+[    0.114246][    T1] arm-smmu 15000000.iommu: 	Stage-1: 36-bit VA -> 36-bit IPA
+[    0.114408][    T1] arm-smmu 15000000.iommu: 	preserved 0 boot mappings
+[    0.116655][    T1] arm-smmu 15200000.iommu: probing hardware configuration...
+[    0.116657][    T1] arm-smmu 15200000.iommu: SMMUv2 with:
+[    0.116669][    T1] arm-smmu 15200000.iommu: 	stage 1 translation
+[    0.116670][    T1] arm-smmu 15200000.iommu: 	coherent table walk
+[    0.116671][    T1] arm-smmu 15200000.iommu: 	stream matching with 64 register groups
+[    0.116676][    T1] arm-smmu 15200000.iommu: 	62 context banks (0 stage-2 only)
+[    0.116977][    T1] arm-smmu 15200000.iommu: 	Supported page sizes: 0x61311000
+[    0.116979][    T1] arm-smmu 15200000.iommu: 	Stage-1: 36-bit VA -> 36-bit IPA
+[    0.117083][    T1] arm-smmu 15200000.iommu: 	preserved 0 boot mappings
+[    0.215331][    T1] Key type dns_resolver registered
+[    0.221141][    T1] Loading compiled-in X.509 certificates
+[    0.229005][    T1] Key type .fscrypt registered
+[    0.229009][    T1] Key type fscrypt-provisioning registered
+[    0.257814][  T131] qcom-pcie 1c00000.pci: supply vdda not found, using dummy regulator
+[    0.257845][  T131] qcom-pcie 1c00000.pci: supply vddpe-3v3 not found, using dummy regulator
+[    0.258688][  T110] qcom-pcie 1c10000.pci: supply vdda not found, using dummy regulator
+[    0.258723][  T110] qcom-pcie 1c10000.pci: supply vddpe-3v3 not found, using dummy regulator
+[    0.260343][  T108] pca953x 18-0038: supply vcc not found, using dummy regulator
+[    0.261667][  T108] pca953x 18-0039: supply vcc not found, using dummy regulator
+[    0.265131][  T108] pca953x 18-003a: supply vcc not found, using dummy regulator
+[    0.267348][  T108] pca953x 18-003b: supply vcc not found, using dummy regulator
+[    0.269210][  T108] geni_i2c 894000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+[    0.380466][  T108] geni_i2c a90000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+[    0.386456][  T108] arm-smmu 3da0000.iommu: probing hardware configuration...
+[    0.386458][  T108] arm-smmu 3da0000.iommu: SMMUv2 with:
+[    0.386475][  T108] arm-smmu 3da0000.iommu: 	stage 1 translation
+[    0.386476][  T108] arm-smmu 3da0000.iommu: 	coherent table walk
+[    0.386477][  T108] arm-smmu 3da0000.iommu: 	stream matching with 9 register groups
+[    0.386488][  T108] arm-smmu 3da0000.iommu: 	6 context banks (0 stage-2 only)
+[    0.386501][  T108] arm-smmu 3da0000.iommu: 	Supported page sizes: 0x61311000
+[    0.386502][  T108] arm-smmu 3da0000.iommu: 	Stage-1: 48-bit VA -> 36-bit IPA
+[    0.386671][  T108] arm-smmu 3da0000.iommu: 	preserved 0 boot mappings
+[    0.756062][  T108] geni_i2c 894000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+[    0.769199][  T108] geni_i2c a90000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+[    0.827507][  T108] geni_i2c 894000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+[    0.830147][  T109] sdhci_msm 87c4000.sdhci: TCXO clk not present (-2)
+[    0.842308][  T108] geni_i2c a90000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+[    0.860679][  T108] geni_i2c 894000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+[    0.874362][  T108] geni_i2c a90000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+[    0.889339][  T108] geni_i2c 894000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+[    0.900355][  T108] geni_i2c a90000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+[    0.901852][  T110] scsi 0:0:0:49488: Well-known LUN    MICRON   MT128GBCAV2U31AI 0101 PQ: 0 ANSI: 6
+[    0.933992][  T110] scsi 0:0:0:49476: Well-known LUN    MICRON   MT128GBCAV2U31AI 0101 PQ: 0 ANSI: 6
+[    0.934853][  T108] geni_i2c 894000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+[    0.944862][  T110] scsi 0:0:0:49456: Well-known LUN    MICRON   MT128GBCAV2U31AI 0101 PQ: 0 ANSI: 6
+[    0.957097][  T108] geni_i2c a90000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+[    0.975765][  T110] scsi 0:0:0:0: Direct-Access     MICRON   MT128GBCAV2U31AI 0101 PQ: 0 ANSI: 6
+[    1.012113][  T108] sd 0:0:0:0: [sda] 29747200 4096-byte logical blocks: (122 GB/113 GiB)
+[    1.020971][  T110] scsi 0:0:0:1: Direct-Access     MICRON   MT128GBCAV2U31AI 0101 PQ: 0 ANSI: 6
+[    1.021189][  T108] sd 0:0:0:0: [sda] Write Protect is off
+[    1.036329][  T108] sd 0:0:0:0: [sda] Write cache: enabled, read cache: enabled, supports DPO and FUA
+[    1.040897][  T109] sd 0:0:0:1: [sdb] 5120 4096-byte logical blocks: (21.0 MB/20.0 MiB)
+[    1.041459][  T110] scsi 0:0:0:2: Direct-Access     MICRON   MT128GBCAV2U31AI 0101 PQ: 0 ANSI: 6
+[    1.051121][  T110] scsi 0:0:0:3: Direct-Access     MICRON   MT128GBCAV2U31AI 0101 PQ: 0 ANSI: 6
+[    1.051505][   T73] sd 0:0:0:2: [sdc] 5120 4096-byte logical blocks: (21.0 MB/20.0 MiB)
+[    1.051894][   T73] sd 0:0:0:2: [sdc] Write Protect is off
+[    1.052786][   T73] sd 0:0:0:2: [sdc] Write cache: disabled, read cache: enabled, supports DPO and FUA
+[    1.054788][  T109] sd 0:0:0:1: [sdb] Write Protect is off
+[    1.061023][   T73] sd 0:0:0:2: [sdc] Attached SCSI disk
+[    1.061420][  T110] scsi 0:0:0:4: Direct-Access     MICRON   MT128GBCAV2U31AI 0101 PQ: 0 ANSI: 6
+[    1.062065][  T131] sd 0:0:0:3: [sdd] 8192 4096-byte logical blocks: (33.6 MB/32.0 MiB)
+[    1.062363][   T73] geni_i2c 894000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+[    1.062643][  T131] sd 0:0:0:3: [sdd] Write Protect is off
+[    1.063005][   T73] geni_i2c a90000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+[    1.063195][  T131] sd 0:0:0:3: [sdd] Write cache: enabled, read cache: enabled, supports DPO and FUA
+[    1.063448][  T110] scsi 0:0:0:5: Direct-Access     MICRON   MT128GBCAV2U31AI 0101 PQ: 0 ANSI: 6
+[    1.063823][   T78] sd 0:0:0:4: [sde] 884736 4096-byte logical blocks: (3.62 GB/3.38 GiB)
+[    1.064323][   T78] sd 0:0:0:4: [sde] Write Protect is off
+[    1.065466][   T78] sd 0:0:0:4: [sde] Write cache: enabled, read cache: enabled, supports DPO and FUA
+/init[1]: Starting OSTree initrd script[    1.067322][  T110] scsi 0:0:0:6: Direct-Access     MICRON   MT128GBCAV2U31AI 0101 PQ: 0 ANSI: 6
+[    1.068333][   T85] sd 0:0:0:5: [sdf] 51200 4096-byte logical blocks: (210 MB/200 MiB)
+[    1.068670][  T108] sd 0:0:0:0: [sda] Attached SCSI disk
+
+[    1.068767][   T85] sd 0:0:0:5: [sdf] Write Protect is off
+[    1.069054][   T72] sd 0:0:0:6: [sdg] 262144 4096-byte logical blocks: (1.07 GB/1.00 GiB)
+/init[1]: mounting FS: proc /proc[    1.069197][  T110] scsi 0:0:0:7: Direct-Access     MICRON   MT128GBCAV2U31AI 0101 PQ: 0 ANSI: 6
+[    1.069324][   T72] sd 0:0:0:6: [sdg] Write Protect is off
+
+[    1.069633][   T72] sd 0:0:0:6: [sdg] Write cache: enabled, read cache: enabled, supports DPO and FUA
+[    1.069633][  T108] geni_i2c 894000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+[    1.069697][   T85] sd 0:0:0:5: [sdf] Write cache: enabled, read cache: enabled, supports DPO and FUA
+/init[1]: mounting FS: sysfs /sys[    1.070081][  T108] geni_i2c a90000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+[    1.070961][  T100] sd 0:0:0:7: [sdh] 262144 4096-byte logical blocks: (1.07 GB/1.00 GiB)
+
+[    1.071065][  T100] sd 0:0:0:7: [sdh] Write Protect is off
+[    1.071375][  T100] sd 0:0:0:7: [sdh] Write cache: enabled, read cache: enabled, supports DPO and FUA
+[    1.071672][   T72] sd 0:0:0:6: [sdg] Attached SCSI disk
+[    1.072173][   T78] sd 0:0:0:4: [sde] Attached SCSI disk
+/init[1]: mounting FS: devtmpfs /dev[    1.080608][  T109] sd 0:0:0:1: [sdb] Write cache: disabled, read cache: enabled, supports DPO and FUA
+[    1.086353][   T72] geni_i2c 894000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+
+[    1.087455][  T131] sd 0:0:0:3: [sdd] Attached SCSI disk
+[    1.087623][   T85] sd 0:0:0:5: [sdf] Attached SCSI disk
+/init[1]: mounting FS: devpts /dev/pts
+[    1.088276][  T100] sd 0:0:0:7: [sdh] Attached SCSI disk
+[    1.109153][   T72] geni_i2c a90000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+[    1.116249][  T109] sd 0:0:0:1: [sdb] Attached SCSI disk
+/init[1]: mounting FS: tmpfs /dev/shm[    1.128028][   T72] geni_i2c 894000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+[    1.142596][   T72] geni_i2c a90000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+
+[    1.164520][   T72] geni_i2c 894000.i2c: Direct firmware load for qcom/sa8775p/qupv3fw.elf failed with error -2
+/init[1]: mounting FS: tmpfs /run
+sysroot.readonly configuration value: 0 (fs writable: 1)
+composefs: No image present
+Using legacy ostree bind mount for /
+/init[1]: Switching to rootfs
+
+Welcome to [1mQualcomm Linux 1.7-ver.1.1[0m!
+
+[    2.984412][  T304] systemd-sysv-generator[304]: SysV service '/etc/init.d/qtee_supplicant' lacks a native systemd unit file, automatically generating a unit file for compatibility.
+[    3.001026][  T304] systemd-sysv-generator[304]: Please update package to include a native systemd unit file.
+[    3.011200][  T304] systemd-sysv-generator[304]: ! This compatibility logic is deprecated, expect removal soon. !
+[    3.021818][  T304] systemd-sysv-generator[304]: SysV service '/etc/init.d/redis-server' lacks a native systemd unit file, automatically generating a unit file for compatibility.
+[    3.038148][  T304] systemd-sysv-generator[304]: Please update package to include a native systemd unit file.
+[    3.048334][  T304] systemd-sysv-generator[304]: ! This compatibility logic is deprecated, expect removal soon. !
+[    3.059454][  T304] systemd-sysv-generator[304]: SysV service '/etc/init.d/wlan' lacks a native systemd unit file, automatically generating a unit file for compatibility.
+[    3.075065][  T304] systemd-sysv-generator[304]: Please update package to include a native systemd unit file.
+[    3.085243][  T304] systemd-sysv-generator[304]: ! This compatibility logic is deprecated, expect removal soon. !
+[    3.209692][    T1] systemd[1]: pulseaudio.service: Service has no ExecStart=, ExecStop=, or SuccessAction=. Refusing.
+[    3.231608][    T1] systemd[1]: /etc/systemd/system/iq9web.service:3: Invalid URL, ignoring: iq9_server/docs
+[    3.243276][    T1] systemd[1]: Configuration file /etc/systemd/system/init_display.service is marked executable. Please remove executable permission bits. Proceeding anyway.
+[    3.320836][    T1] systemd[1]: pulseaudio.service: Cannot add dependency job, ignoring: Unit pulseaudio.service has a bad unit file setting.
+[[0;32m  OK  [0m] Created slice [0;1;39mSlice /session[0m.
+[[0;32m  OK  [0m] Created slice [0;1;39mSlice /system/getty[0m.
+[[0;32m  OK  [0m] Created slice [0;1;39mSlice /system/modprobe[0m.
+[[0;32m  OK  [0m] Created slice [0;1;39mSlice /system/resize-partition[0m.
+[[0;32m  OK  [0m] Created slice [0;1;39mSlice /system/serial-getty[0m.
+[[0;32m  OK  [0m] Created slice [0;1;39mUser and Session Slice[0m.
+[[0;32m  OK  [0m] Started [0;1;39mDispatch Password Requests to Console Directory Watch[0m.
+[[0;32m  OK  [0m] Started [0;1;39mForward Password Requests to Wall Directory Watch[0m.
+         Expecting device [0;1;39m/dev/disk/by-partlabel/efi[0m...
+         Expecting device [0;1;39m/dev/disk/by-partlabel/persist[0m...
+         Expecting device [0;1;39m/dev/disk/by-partlabel/system[0m...
+         Expecting device [0;1;39m/dev/fastrpc-adsp-secure[0m...
+         Expecting device [0;1;39m/dev/zram0[0m...
+[[0;32m  OK  [0m] Reached target [0;1;39mRemote File Systems[0m.
+[[0;32m  OK  [0m] Reached target [0;1;39mSlice Units[0m.
+[[0;32m  OK  [0m] Reached target [0;1;39mSystem Time Set[0m.
+[[0;32m  OK  [0m] Listening on [0;1;39mRPCbind Server Activation Socket[0m.
+[[0;32m  OK  [0m] Reached target [0;1;39mRPC Port Mapper[0m.
+[[0;32m  OK  [0m] Listening on [0;1;39mSyslog Socket[0m.
+[[0;32m  OK  [0m] Listening on [0;1;39mProcess Core Dump Socket[0m.
+[[0;32m  OK  [0m] Listening on [0;1;39minitctl Compatibility Named Pipe[0m.
+[[0;32m  OK  [0m] Listening on [0;1;39mJournal Audit Socket[0m.
+[[0;32m  OK  [0m] Listening on [0;1;39mJournal Socket (/dev/log)[0m.
+[[0;32m  OK  [0m] Listening on [0;1;39mJournal Socket[0m.
+[[0;32m  OK  [0m] Listening on [0;1;39mudev Control Socket[0m.
+[[0;32m  OK  [0m] Listening on [0;1;39mudev Kernel Socket[0m.
+[[0;32m  OK  [0m] Listening on [0;1;39mUser Database Manager Socket[0m.
+         Mounting [0;1;39mHuge Pages File System[0m...
+         Mounting [0;1;39mPOSIX Message Queue File System[0m...
+         Mounting [0;1;39mKernel Trace File System[0m...
+         Starting [0;1;39mCreate List of Static Device Nodes[0m...
+         Starting [0;1;39mLoad Kernel Module configfs[0m...
+         Starting [0;1;39mLoad Kernel Module drm[0m...
+         Starting [0;1;39mLoad Kernel Module fuse[0m...
+         Starting [0;1;39mRPC Bind[0m...
+         Starting [0;1;39mJournal Service[0m...
+         Starting [0;1;39mLoad Kernel Modules[0m...
+         Starting [0;1;39mGenerate network units from Kernel command line[0m...
+         Starting [0;1;39mRemount Root and Kernel File Systems[0m...
+         Starting [0;1;39mColdplug All udev Devices[0m...
+         Starting [0;1;39mCreate compressed swap in memory using zram[0m...
+[[0;32m  OK  [0m] Mounted [0;1;39mHuge Pages File System[0m.
+[[0;32m  OK  [0m] Mounted [0;1;39mPOSIX Message Queue File System[0m.
+[    3.908105][  T333] zram-swap-init called
+[[0;32m  OK  [0m] Started [0;1;39mJournal Service[0m.
+[[0;32m  OK  [0m] Mounted [0;1;39mKernel Trace File System[0[    m.
+[[0;32m  OK  [0m] Finished [0;1;39mCreate List of Static Device Nodes[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mLoad Kernel Module configfs[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mLoad Kernel Module drm[0m.
+[    4.012612][  T324] nt36xxx_i2c: loading out-of-tree module taints kernel.
+[[0;32m  OK  [0m] Finished [0;1;39mLoad Kernel Module fuse[0[    m.
+[    4.057691][  T324] [NVT-ts] nvt_driver_init 2007: finished
+[[0;1;31mFAILED[0m] Failed to start [0;1;39mRPC Bind[0m.
+See 'systemctl status rpcbind.service' for details.
+[[0;32m  OK  [0m] Finished [0;1;39mLoad Kernel Modules[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mGenerate network units from Kernel command line[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mRemount Root and Kernel File Systems[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mCreate compressed swap in memory using zram[0m.
+[[0;32m  OK  [0m] Reached target [0;1;39mSwaps[0m.
+         Mounting [0;1;39mFUSE Control File System[0m...
+         Mounting [0;1;39mKernel Configuration File System[0m...
+         Mounting [0;1;39mTemporary Directory /tmp[0m...
+         Starting [0;1;39mApply Kernel Variables[0m...
+         Starting [0;1;39mCreate Static Device Nodes in /dev gracefully[0m...
+[[0;32m  OK  [0m] Finished [0;1;39mColdplug All udev Devices[0m.
+[[0;32m  OK  [0m] Mounted [0;1;39mFUSE Control File System[0m.
+[[0;32m  OK  [0m] Mounted [0;1;39mKernel Configuration File System[0m.
+[[0;32m  OK  [0m] Mounted [0;1;39mTemporary Directory /tmp[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mApply Kernel Variables[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mCreate Static Device Nodes in /dev gracefully[0m.
+         Starting [0;1;39mCreate Static Device Nodes in /dev[0m...
+[[0;32m  OK  [0m] Finished [0;1;39mCreate Static Device Nodes in /dev[0m.
+[[0;32m  OK  [0m] Reached target [0;1;39mPreparation for Local File Systems[0m.
+[[0;1;31mFAILED[0m] Failed to set up automount [0;1;39mEFI System Partition Automount[0m.
+See 'systemctl status efi.automount' for details.
+         Mounting [0;1;39m/var[0m...
+         Starting [0;1;39mRule-based Manager for Device Events and Files[0m...
+[[0;32m  OK  [0m] Mounted [0;1;39m/var[0m.
+         Mounting [0;1;39m/var/volatile[0m...
+         Starting [0;1;39mOSTree Remount OS/ Bind Mounts[0m...
+[[0;32m  OK  [0m] Mounted [0;1;39m/var/volatile[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mOSTree Remount OS/ Bind Mounts[0m.
+[[0;32m  OK  [0m] Started [0;1;39mRule-based Manager for Device Events and Files[0m.
+         Starting [0;1;39mFlush Journal to Persistent Storage[0m...
+         Starting [0;1;39mLoad/Save OS Random Seed[0m...
+[[0;32m  OK  [0m] Finished [0;1;39mFlush Journal to Persistent Storage[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mLoad/Save OS Random Seed[0m.
+[[0;32m  OK  [0m] Found device [0;1;39mMT128GBCAV2U31AI persist[0m.
+[    4.996401][   T89] qcom-spf_core gprsvc:spf-core:2:3: spf_core_callback: success response received, core->is_ready=1
+[    5.007319][  T419] spf-core-platform soc@0:spf-core-platform: spf_core_add_child_devices: apm is up
+[[0;32m  OK  [0m] Found device [0;1;39mMT128GBCAV2U31AI otaroot[0m.
+[    5.322429][   T78] tpm tpm0: A TPM error (256) occurred attempting the self test
+[[0;32m  OK  [0m] Found device [0;1;39mMT128GBCAV2U31AI efi[0m.
+[[0;32m  OK  [0m] Found device [0;1;39m/dev/fastrpc-adsp-secure[0m.
+[[0;1;31mFAILED[0m] Failed to set up automount [0;1;39mEFI System Partition Automount[0m.
+See 'systemctl status efi.automount' for details.
+[[0;32m  OK  [0m] Reached target [0;1;39mHardware activated USB gadget[0m.
+[[0;32m  OK  [0m] Listening on [0;1;39mLoad/Save RF Kill Switch Status /dev/rfkill Watch[0m.
+         Mounting [0;1;39m/boot[0m...
+         Starting [0;1;39mCheck and recreate ext4 file system on persist[0m...
+         Starting [0;1;39mCheck and recreate ext4 file system on system[0m...
+         Starting [0;1;39mVirtual Console Setup[0m...
+[[0;32m  OK  [0m] Mounted [0;1;39m/boot[0m.
+[[0;1;31mFAILED[0m] Failed to start [0;1;39mCheck and recreate ext4 file system on persist[0m.
+See 'systemctl status resize-partition@persist.service' for details.
+[[0;32m  OK  [0m] Finished [0;1;39mCheck and recreate ext4 file system on system[0m.
+         Mounting [0;1;39mmount persist unit[0m...
+         Starting [0;1;39mLoad/Save RF Kill Switch Status[0m...
+[[0;32m  OK  [0m] Started [0;1;39mLoad/Save RF Kill Switch Status[0m.
+[[0;32m  OK  [0m] Mounted [0;1;39mmount persist unit[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mVirtual Console Setup[0m.
+[[0;32m  OK  [0m] Reached target [0;1;39mLocal File Systems[0m.
+         Starting [0;1;39mUpdate Boot Loader Random Seed[0m...
+         Starting [0;1;39mAutomatic Boot Loader Update[0m...
+         Starting [0;1;39mCreate System Files and Directories[0m...
+[[0;32m  OK  [0m] Finished [0;1;39mAutomatic Boot Loader Update[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mUpdate Boot Loader Random Seed[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mCreate System Files and Directories[0m.
+         Starting [0;1;39mNetwork Name Resolution[0m...
+         Starting [0;1;39mNetwork Time Synchronization[0m...
+         Starting [0;1;39mRecord System Boot/Shutdown in UTMP[0m...
+         Starting [0;1;39mUser Database Manager[0m...
+[[0;32m  OK  [0m] Finished [0;1;39mRecord System Boot/Shutdown in UTMP[0m.
+[[0;32m  OK  [0m] Started [0;1;39mUser Database Manager[0m.
+[[0;32m  OK  [0m] Started [0;1;39mNetwork Time Synchronization[0m.
+[[0;32m  OK  [0m] Started [0;1;39mNetwork Name Resolution[0m.
+[[0;32m  OK  [0m] Reached target [0;1;39mHost and Network Name Lookups[0m.
+[[0;32m  OK  [0m] Reached target [0;1;39mSystem Initialization[0m.
+[[0;32m  OK  [0m] Started [0;1;39mOSTree Monitor Staged Deployment[0m.
+[[0;32m  OK  [0m] Started [0;1;39mDaily rotation of log files[0m.
+[[0;32m  OK  [0m] Started [0;1;39mDaily Cleanup of Temporary Directories[0m.
+[[0;32m  OK  [0m] Reached target [0;1;39mPath Units[0m.
+[[0;32m  OK  [0m] Reached target [0;1;39mTimer Units[0m.
+[[0;32m  OK  [0m] Listening on [0;1;39mAvahi mDNS/DNS-SD Stack Activation Socket[0m.
+[[0;32m  OK  [0m] Listening on [0;1;39mD-Bus System Message Bus Socket[0m.
+         Starting [0;1;39mDocker Socket for the API[0m...
+         Starting [0;1;39mPipeWire Multimedia System Manager Socket[0m...
+         Starting [0;1;39mPipeWire Multimedia System Socket[0m...
+         Starting [0;1;39msshd.socket[0m...
+[[0;32m  OK  [0m] Listening on [0;1;39mDocker Socket for the API[0m.
+[[0;32m  OK  [0m] Listening on [0;1;39mPipeWire Multimedia System Manager Socket[0m.
+[[0;32m  OK  [0m] Listening on [0;1;39mPipeWire Multimedia System Socket[0m.
+[[0;32m  OK  [0m] Listening on [0;1;39msshd.socket[0m.
+[[0;32m  OK  [0m] Reached target [0;1;39mSocket Units[0m.
+[[0;32m  OK  [0m] Reached target [0;1;39mBasic System[0m.
+[[0;32m  OK  [0m] Started [0;1;39mproperty vault service[0m.
+         Starting [0;1;39mModem Manager[0m...
+[[0;32m  OK  [0m] Started [0;1;39madsprpc Service[0m.
+[[0;32m  OK  [0m] Started [0;1;39mAudio adsprpc Service[0m.
+         Starting [0;1;39mAndroid Debug Bridge[0m...
+         Starting [0;1;39mAvahi mDNS/DNS-SD Stack[0m...
+         Starting [0;1;39mBluetooth service[0m...
+         Starting [0;1;39mCamera Server Service[0m...
+         Starting [0;1;39mNTP client/server[0m...
+         Starting [0;1;39mD-Bus System Message Bus[0m...
+[[0;32m  OK  [0m] Started [0;1;39mKernel debug configuration[0m.
+[[0;32m  OK  [0m] Started [0;1;39mA minimalistic network con???h DHCPv4, rdisc and DHCPv6 support[0m.
+         Starting [0;1;39mEthernet Bridge Filtering Tables[0m...
+[[0;32m  OK  [0m] Started [0;1;39mEEPROM format change[0m.
+         Starting [0;1;39mGSTreamer Daemon[0m...
+         Starting [0;1;39mInit-display Service[0m...
+         Starting [0;1;39mIPv6 Packet Filtering Framework[0m...
+         Starting [0;1;39mIPv4 Packet Filtering Framework[0m...
+[[0;32m  OK  [0m] Started [0;1;39mirqbalance daemon[0m.
+[[0;32m  OK  [0m] Started [0;1;39mQCOM logging service[0m.
+         Starting [0;1;39mStart or stops the modem[0m...
+         Starting [0;1;39mTelephony service[0m...
+         Starting [0;1;39mpersist property vault service[0m...
+[[0;32m  OK  [0m] Started [0;1;39mPipeWire Multimedia Service[0m.
+[[0;32m  OK  [0m] Started [0;1;39mQCOM postboot service[0m.
+[[0;32m  OK  [0m] Started [0;1;39mQIPCRTR Name Service[0m.
+[[0;32m  OK  [0m] Started [0;1;39mQualcomm PD mapper service[0m.
+[[0;32m  OK  [0m] Started [0;1;39mSeat management daemon[0m.
+[[0;32m  OK  [0m] Started [0;1;39msfs configuration Service[0m.
+         Starting [0;1;39mLoad smcinvoke dlkm service[0m...
+[[0;32m  OK  [0m] Started [0;1;39msubsystem-ramdump service[0m.
+         Starting [0;1;39mResets System Activity Logs[0m...
+         Starting [0;1;39mUser Login Management[0m...
+[[0;32m  OK  [0m] Started [0;1;39mStaring tftp server[0m.
+[[0;32m  OK  [0m] Started [0;1;39mLoad tz_log service[0m.
+[[0;32m  OK  [0m] Started [0;1;39mMultimedia Service Session Manager[0m.
+[    6.884223][   T73] tz_log:[tzdbg_init_tme_log][1414]: Tme Crashdump address offset need to be defined!
+[[0;32m  OK  [0m] Started [0;1;39mPipeWire PulseAudio[0m.
+[[0;32m  OK  [0m] Started [0;1;39mWlan Service[0m.
+         Starting [0;1;39mOpenSSH Key Generation[0m...
+[[0;32m  OK  [0m] Started [0;1;39mD-Bus System Message Bus[0m.
+[[0;32m  OK  [0m] Started [0;1;39mUser Login Management[0m.
+[[0;32m  OK  [0m] Started [0;1;39mNTP client/server[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mEthernet Bridge Filtering Tables[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mIPv6 Packet Filtering Framework[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mIPv4 Packet Filtering Framework[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mStart or stops the modem[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mLoad smcinvoke dlkm service[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mResets System Activity Logs[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mOpenSSH Key Generation[0m.
+[[0;32m  OK  [0m] Started [0;1;39mInit-display Service[0m.
+[[0;32m  OK  [0m] Started [0;1;39mBluetooth service[0m.
+[[0;32m  OK  [0m] Finished [0;1;39mpersist property vault service[0m.
+[[0;32m  OK  [0m] Started [0;1;39mTelephony service[0m.
+[[0;32m  OK  [0m] Started [0;1;39mModem Manager[0m.
+[    7.147449][  T130] PDR: service lookup for tms/servreg failed: -6
+[[0;32m  OK  [0m] Started [0;1;39mAvahi mDNS/DNS-SD Stack[0m.
+[[0;32m  OK  [0m] Reached target [0;1;39mPreparation for Network[0m.
+         Starting [0;1;39mNetwork Manager[0m...
+[[0;32m  OK  [0m] Started [0;1;39mcdsp1rpc Service[0m.
+[[0;32m  OK  [0m] Started [0;1;39mcdsprpc Service[0m.
+[[0;32m  OK  [0m] Started [0;1;39mgdsp1rpc Service[0m.
+[[0;32m  OK  [0m] Started [0;1;39mgdsp0rpc Service[0m.
+         Starting [0;1;39mBluetooth OBEX service[0m...
+[[0;32m  OK  [0m] Started [0;1;39mstart set BDA script for bluetooth[0m.
+         Starting [0;1;39mQTEE Supplicant Service[0m...
+         Starting [0;1;39mCheck and recreate ext4 file system on persist[0m...
+         Starting [0;1;39mHostname Service[0m...
+[[0;32m  OK  [0m] Finished [0;1;39mCheck and recreate ext4 file system on persist[0m.
+         Stopping [0;1;39mMultimedia Service Session Manager[0m...
+[[0;32m  OK  [0m] Stopped [0;1;39mMultimedia Service Session Manager[0m.
+[[0;32m  OK  [0m] Started [0;1;39mHostname Service[0m.
+[[0;32m  OK  [0m] Started [0;1;39mBluetooth OBEX service[0m.
+[[0;32m  OK  [0m] Reached target [0;1;39mBluetooth Support[0m.
+         Starting [0;1;39mNetwork Manager Script Dispatcher Service[0m...
+[[0;32m  OK  [0m] Started [0;1;39mNetwork Manager[0m.
+[[0;32m  OK  [0m] Started [0;1;39mNetwork Manager Script Dispatcher Service[0m.
+[[0;32m  OK  [0m] Started [0;1;39mCamera Server Service[0m.
+         Starting [0;1;39mNetwork Manager Wait Online[0m...
+         Starting [0;1;39mWPA supplicant[0m...
+[[0;32m  OK  [0m] Started [0;1;39mQTEE Supplicant Service[0m.
+[[0;32m  OK  [0m] Started [0;1;39mWPA supplicant[0m.
+[[0;32m  OK  [0m] Reached target [0;1;39mNetwork[0m.
+         Starting [0;1;39mcontainerd container runtime[0m...
+         Starting [0;1;39mDNS forwarder and DHCP server[0m...
+         Starting [0;1;39mMosquitto MQTT Broker[0m...
+         Starting [0;1;39mQwesd Service[0m...
+[[0;32m  OK  [0m] Started [0;1;39mssgtzd Service[0m.
+         Starting [0;1;39mPermit User Sessions[0m...
+         Starting [0;1;39mUEFI Sev Service[0m...
+[[0;32m  OK  [0m] Finished [0;1;39mPermit User Sessions[0m.
+[[0;32m  OK  [0m] Started [0;1;39mUEFI Sev Service[0m.
+[[0;32m  OK  [0m] Started [0;1;39mDNS forwarder and DHCP server[0m.
+[[0;32m  OK  [0m] Started [0;1;39mGetty on tty1[0m.
+[[0;32m  OK  [0m] Started [0;1;39mSerial Getty on ttyMSM0[0m.
+[[0;32m  OK  [0m] Reached target [0;1;39mLogin Prompts[0m.
+[[0;32m  OK  [0m] Started [0;1;39mQwesd Service[0m.
+[[0;32m  OK  [0m] Started [0;1;39mMosquitto MQTT Broker[0m.
+[[0;32m  OK  [0m] Started [0;1;39mcontainerd container runtime[0m.
+[[0;32m  OK  [0m] Started [0;1;39mGSTreamer Daemon[0m.
+[    9.185217][  T761] qcom-apm gprsvc:service:2:1: CMD timeout for [1001021] opcode
+         Starting [0;1;39mSave/Restore Sound Card State[0m...
+[[0;32m  OK  [0m] Finished [0;1;39mSave/Restore Sound Card State[0m.
+[[0;32m  OK  [0m] Reached target [0;1;39mSound Card[0m.
+[[0;32m  OK  [0m] Started [0;1;39mPipeWire Multimedia Service[0m.
+[[0;32m  OK  [0m] Started [0;1;39mMultimedia Service Session Manager[0m.
+[   10.628841][ T1563] [audio_pkt_open]: for to_apps
+[[0;32m  OK  [0m] Started [0;1;39mAndroid Debug Bridge[0m.
+         Starting [0;1;39mQualcomm USB Service[0m...
+[[0;32m  OK  [0m] Finished [0;1;39mQualcomm USB Service[0m.[ 
+[[0;32m  OK  [0m] Started [0;1;39mdiag-router Service[0m.
+[   11.314216][ T1630] udc a600000.usb: failed to start adb: -19
+
+Qualcomm Linux 1.7-ver.1.1 qcs9075-iq-9075-evk ttyMSM0
+
+qcs9075-iq-9075-evk login: [   17.189457][  T969] msm_dpu ae01000.display-controller: no GPU device was found

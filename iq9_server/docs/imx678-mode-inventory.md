@@ -155,6 +155,33 @@ Clear-HDR `<resolutionData>` with this sequence (VMAX 4500 → confirm frame geo
 the appnote's exposure/gain-adjust setup. Validation deferred until camera-load stability returns (NV12
 streaming currently self-cycles the board — see below).
 
+## 5c. Clear HDR — COMPLETE register set from `IMX678_Standard_Register_Setting_Ver3.0.xlsx` (2026-08-05)
+The xlsx has dedicated `ClearHDR_AllPixel` / `ClearHDR_Binning` (and `DOL_*`) sheets = the authoritative
+mode tables. `ClearHDR_AllPixel` has **5 sub-configs**:
+
+| cfg | lanes | AD/out bit | Mbps | fps | integ | EXP_GAIN |
+|---|---|---|---|---|---|---|
+| 1 | 2 | 10 | 1440 | 12.5 | 79.9 ms | 12 dB |
+| 2 | 2 | 10 | 1782 | 15 | 66.6 ms | 12 dB |
+| 3 | 2 | **12** | 1782 | 12.5 | 79.9 ms | 12 dB |
+| **4** | **4** | **10** | 720 | 12.5 | 79.9 ms | 12 dB |
+| **5** | **4** | **10** | 891 | 15 | 66.6 ms | 12 dB |
+
+All: **VMAX=4500** (0x3028/29 = 94/11), **HMAX** 1320 (12.5 fps) / 1100 (15 fps), **dual-VC** (HG & LG on
+separate Virtual Channels). **Our sensor is 4-lane → Clear HDR is cfg 4/5 = 10-bit** (no 4-lane 12-bit CHDR).
+Full 53-register delta (cfg 5, 4-lane/10-bit/15 fps) vs AllPixel → **`sensor_driver/clearhdr_allpixel_deltas.csv`**
+(the app-note listed only ~11 of these; the other ~42 are AD/line-timing regs 0x3Cxx/0x3Exx/0x44xx/0x45xx that
+are REQUIRED for a working mode). Data-complete for the build.
+
+**Build (next):** extend `build_variants.py` to apply the CSV deltas + patch the resolutionData geometry
+(height ≈ 2×2180 for HG+LG stacked, frameLengthLines 4500, frameRate 15, dt=RAW10, dual-VC) → compile the
+DCG `.bin` (zero board risk). **Deployment/validation is BLOCKED by three concrete issues:**
+1. **RDI capture reboots** (qsmmuv500 SMMU panic — escalated).
+2. **Dual-VC over RDI unverified** on this CamX/qtiqmmfsrc stack (same open question as DOL) + the full-height
+   capture must not clamp (the Jetson DOL 4450→2160 failure).
+3. **4-lane Clear HDR is 10-bit**, and CamX rejected RAW10 at our 3856 width (>3840 max) — so the CHDR 10-bit
+   RDI likely needs a **RAW16 container** (as we did for the linear 12-bit) or the 2-lane 12-bit cfg.
+
 ## 6. Gaps / risks / to-source
 
 1. **Register tables to source** for A1/A3/A4/A5 (and HCG/gain/exposure deltas): **Sony *IMX678

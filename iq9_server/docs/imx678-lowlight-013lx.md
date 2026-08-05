@@ -35,3 +35,8 @@ Sensitivity at f/2: HCG **127 863** Digit/lx/s, LCG **47 957** Digit/lx/s.
 
 ## Sources
 `C:\Users\JGrata\mms\LI-IMX678\IMX678\` — datasheet, `IMX678_Standard_Register_Setting_Ver3.0.xlsx`, ClearHDR/DOL/DualGain app notes, `IMX678-AAQR1_SpectralSensitivity` (relative QE). SRM = `IMX678_SoftwareReferenceManual_E_Rev4.0.pdf`.
+
+## Illuminant caveat (2850K datasheet vs D65 measurement) — added 2026-08-05
+Datasheet **Sensitivity** is measured under **Standard imaging condition I = 2850 K source + IR-cut CM700** (3200K is only used for saturation/condition II). Our DMX captures were **D65 (~6500 K)**. Implications:
+- **Conversion-gain ratio (2.4x) and read noise (1.82 DN) are unaffected** — a same-light ratio (illuminant cancels) and a dark measurement.
+- **Absolute sensitivity / SNR1s** need a **D65->2850K green-channel spectral correction** (computable from IMX678-AAQR1 relative spectral response x the two illuminant spectra; magnitude is modest, order +-20%). It does NOT change the first-order conclusion (we sit ~300x below 0.13 lx). Fold the exact factor in when computing a precise SNR1s / sensitivity number.

@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jeremy Grata <jgrata@metropolis.io>
+Date: Thu, 6 Aug 2026 00:00:00 -0700
+Subject: [PATCH] iommu/arm-smmu-qcom: skip fault-path ATOS when the TBU has no
+ power handle
+
+On QCS9075 (SA8775P) native RAW/RDI capture from an IMX678 reliably-
+intermittently panics the kernel: the SMMU context-fault handler takes a
+synchronous external abort (ESR 0x96000010) inside qsmmuv500_iova_to_phys()
+while running the hardware ATOS, and qcom_wdt resets the SoC.
+
+  pc : qsmmuv500_iova_to_phys+0x950/0x1568
+  lr : qcom_smmu_context_fault+0x44c/0x890
+        arm_smmu_context_fault+0x70/0x548
+
+Root cause: the ATOS pokes a per-TBU DEBUG register block (tbu->base, e.g.
+cam_tbu@0x151f1000). On SA8775P *every* qcom,qsmmuv500-tbu DT node - including
+cam_tbu - declares no clocks/power-domains/interconnects, so tbu->clk and
+tbu->path are NULL and the existing clk_prepare_enable(tbu->clk) /
+icc_set_bw(tbu->path) guards are no-ops. The block is instead powered by the
+camera subsystem (CAMNOC/camcc). During IFE/RDI teardown that subsystem powers
+down; the threaded context-fault IRQ then races the teardown and the ATOS
+register access aborts, and the SMMU driver has no handle with which to
+re-power the TBU. arm_smmu_rpm_get() covers the apps_smmu, not cam_tbu.
+
+The ATOS result is used only for a diagnostic dev_err() in
+qcom_smmu_context_fault(); the fault report (report_iommu_fault + the software
+page-table walk) and the FSR clear/RESUME do not depend on it. So when the
+driver cannot guarantee the TBU is powered, skip the hardware ATOS rather than
+risk a fatal abort. This turns a reboot into a recoverable, reported fault.
+
+The guard is SoC-agnostic: TBUs that do expose a clock or interconnect path
+keep the ATOS unchanged.
+
+Signed-off-by: Jeremy Grata <jgrata@metropolis.io>
+---
+ drivers/iommu/arm/arm-smmu/arm-smmu-qcom-tbu.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom-tbu.c b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom-tbu.c
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom-tbu.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom-tbu.c
+@@ -239,7 +239,20 @@ static phys_addr_t qsmmuv500_iova_to_phys(struct arm_smmu_domain *smmu_domain,
+ 	tbu = qsmmuv500_find_tbu(qsmmu, sid);
+ 	if (!tbu)
+ 		return 0;
+
++	/*
++	 * If the TBU exposes no clock or interconnect the driver can enable, its
++	 * debug register block is powered by an external subsystem (e.g. the
++	 * camera CAMNOC on SA8775P/QCS9075, where cam_tbu declares no clocks or
++	 * power-domains). That subsystem may be off during IFE/RDI teardown when
++	 * this fault-path ATOS runs, so the tbu->base access below would take a
++	 * synchronous external abort with no way for us to re-power the TBU.
++	 * Skip the hardware ATOS; qcom_smmu_context_fault() still reports the
++	 * fault from the software page-table walk and handles a phys == 0 return.
++	 */
++	if (!tbu->clk && !tbu->path)
++		return 0;
++
+ 	ret = icc_set_bw(tbu->path, 0, UINT_MAX);
+ 	if (ret)
+ 		return ret;
+--
+2.34.1

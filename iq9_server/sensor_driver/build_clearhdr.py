@@ -14,7 +14,7 @@ FIRST-CUT — validation deferred. Open items before deploy:
     RAW16 container
   - frameDimension height set to 2x2180=4360 (HG+LG stacked); exact rows incl OB/embedded TBC
 """
-import os, re, csv
+import os, re, csv, argparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BASE = os.path.join(HERE, "baseline", "cmk_imx678_sensor.xml")
@@ -34,7 +34,16 @@ def patch_once(xml, pat, repl, label):
     return xml2
 
 
-def main():
+def main(argv=None):
+    ap = argparse.ArgumentParser(
+        description="Build the Clear HDR (DCG) sensor XML from the LI baseline + SRM deltas")
+    ap.add_argument("--exp-gain", type=int, choices=range(0, 6), default=None, metavar="0..5",
+                    help="override EXP_GAIN (0x3081): 0..5 = 0/6/12/18/24/30 dB added to the HG "
+                         "leg. Use 0 for a clean LCG/HCG comparator (legs differ by conversion "
+                         "gain only). Default: keep the CSV value 0x02 (+12 dB).")
+    ap.add_argument("--out", default=None, help="output XML path (default auto-named under generated/)")
+    args = ap.parse_args(argv)
+
     xml = open(BASE, encoding="utf-8").read()
     applied, problems = 0, []
     with open(DELTAS) as f:
@@ -57,13 +66,29 @@ def main():
     xml = patch_once(xml, r'<bitWidth>12</bitWidth>', '<bitWidth>10</bitWidth>', 'bitWidth 12->10')
     xml = patch_once(xml, r'(<width>3856</width>\s*<height>)2180(</height>)', r'\g<1>4360\g<2>',
                      'frameDim height 2180->4360 (HG+LG)')
-    os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    open(OUT, "w", encoding="utf-8", newline="\n").write(xml)
-    # verify a couple of signature registers landed
-    for a, want in [("0x301A", "0x08"), ("0x3028", "0x94"), ("0x3029", "0x11"), ("0x3081", "0x02")]:
+
+    # optional EXP_GAIN override. Gain model: LG = GAIN, HG = GAIN + EXP_GAIN.
+    variant = "chdr"
+    if args.exp_gain is not None:
+        xml, n = apply_reg(xml, "0x3081", "0x%02X" % args.exp_gain)
+        print("  EXP_GAIN 0x3081 -> 0x%02X (HG +%d dB)  matched=%d"
+              % (args.exp_gain, args.exp_gain * 6, n))
+        if n != 1:
+            problems.append(("0x3081", n))
+        variant = "chdr_dcgcal" if args.exp_gain == 0 else "chdr_expg%d" % args.exp_gain
+
+    out = args.out or os.path.join(HERE, "generated", "cmk_imx678_cam0_%s_sensor.xml" % variant)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    open(out, "w", encoding="utf-8", newline="\n").write(xml)
+    # verify signature registers landed (0x3081 reflects any override)
+    exp_gain_want = "0x%02X" % (args.exp_gain if args.exp_gain is not None else 0x02)
+    for a, want in [("0x301A", "0x08"), ("0x3028", "0x94"), ("0x3029", "0x11"), ("0x3081", exp_gain_want)]:
         ok = ("<registerAddr>%s</registerAddr><registerData>%s</registerData>" % (a, want)) in xml
         print("  verify %s=%s : %s" % (a, want, "OK" if ok else "MISSING"))
-    print("wrote", OUT)
+    print("wrote", out)
+    if args.exp_gain == 0:
+        print("gain model: EXP_GAIN=0 -> HG=HCG, LG=LCG at equal analog gain; "
+              "Rcg = net mean_HG / mean_LG (expect ~2.4x; datasheet Rcg 2.4-2.9)")
     return 0 if applied == 53 and not problems else 1
 
 

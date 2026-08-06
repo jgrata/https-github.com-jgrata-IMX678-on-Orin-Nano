@@ -30,6 +30,7 @@ CLI:
     python iq9_client.py arm            # enable RAW (supervised), disarm to gate off
     python iq9_client.py capture        # one resilient RAW snapshot -> stats
     python iq9_client.py lightsweep     # DMX light sweep -> checkpointed RAW capture
+    python iq9_client.py dcg-sweep      # DCG/Clear HDR sweep -> pulled frames + characterize manifest
 """
 import json
 import os
@@ -249,13 +250,34 @@ class IQ9:
             lambda: self._http("/api/raw/capture?width=%d" % width, timeout=timeout),
             retries=retries, per_call_timeout=timeout)
 
-    def save_raw(self, n_frames=1, label="raw", retries=2, timeout=60):
-        """Capture + persist N RAW16 frames on the board (uint16 .npy + JSON sidecar)."""
+    def save_raw(self, n_frames=1, label="raw", width=None, height=None, retries=2, timeout=90):
+        """Capture + persist N RAW16 frames on the board (uint16 .npy + JSON sidecar).
+
+        width/height override the capture geometry (e.g. the taller DCG/Clear HDR frame,
+        HG+LG stacked); omit to use the server's shipping-mode default.
+        """
+        body = {"n_frames": n_frames, "label": label}
+        if width:
+            body["width"] = int(width)
+        if height:
+            body["height"] = int(height)
         return self.resilient(
             "raw_snapshot",
-            lambda: self._http("/api/raw/save", method="POST",
-                               body={"n_frames": n_frames, "label": label}, timeout=timeout),
+            lambda: self._http("/api/raw/save", method="POST", body=body, timeout=timeout),
             retries=retries, per_call_timeout=timeout)
+
+    def scp_pull(self, remote, local_dir, timeout=180):
+        """Pull a file off the board via scp (out-of-band). Returns the local path, or None."""
+        os.makedirs(local_dir, exist_ok=True)
+        dest = os.path.join(local_dir, os.path.basename(remote))
+        cmd = ["scp", "-o", "ConnectTimeout=10", "-o", "BatchMode=yes",
+               "-o", "StrictHostKeyChecking=accept-new",
+               "%s@%s:%s" % (self.ssh_user, self.host, remote), dest]
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            return dest if p.returncode == 0 and os.path.exists(dest) else None
+        except Exception:
+            return None
 
     # ---- checkpointed sweep --------------------------------------------------
     def sweep(self, points, capture_fn, checkpoint_path, label="sweep",
@@ -314,6 +336,25 @@ def set_dmx(d65=None, tungsten=None, agent=DMX_AGENT, timeout=6):
         return False
 
 
+def _parse_opts(args):
+    """Minimal --key value / --key=value parser for the CLI subcommands."""
+    opts, i = {}, 0
+    while i < len(args):
+        a = args[i]
+        if a.startswith("--"):
+            k = a[2:]
+            if "=" in k:
+                k, v = k.split("=", 1)
+            elif i + 1 < len(args) and not args[i + 1].startswith("--"):
+                v = args[i + 1]
+                i += 1
+            else:
+                v = "true"
+            opts[k] = v
+        i += 1
+    return opts
+
+
 # --- CLI ----------------------------------------------------------------------
 def _main(argv):
     cmd = argv[1] if len(argv) > 1 else "health"
@@ -343,6 +384,60 @@ def _main(argv):
 
         res = iq9.sweep(levels, cap, ckpt, label="lightsweep", settle_s=0.5)
         print(json.dumps([x.get("result", x) for x in res], indent=2))
+    elif cmd == "dcg-sweep":
+        # DMX light sweep for DCG/Clear HDR: capture N frames per level (>=2 for the PTC
+        # two-frame difference), pull them to the PC, and emit a dcg_characterize manifest
+        # skeleton. Reboot-tolerant (checkpointed). Assumes the cmk_imx678_cam0_chdr_dcgcal
+        # .bin (EXP_GAIN=0) is deployed, so the legs (HG=HCG, LG=LCG) differ by conversion
+        # gain only. Options: --levels a,b,c --frames N --width W --height H --out-dir DIR.
+        here = os.path.dirname(os.path.abspath(__file__))
+        opts = _parse_opts(argv[2:])
+        levels = [int(x) for x in
+                  opts.get("levels", "0,8,16,32,48,64,96,128,160,192,224,255").split(",")]
+        nframes = max(2, int(opts.get("frames", 3)))
+        width = int(opts.get("width", 3856))
+        height = int(opts.get("height", 4360))   # HG+LG stacked; confirm via dcg_demux analyze
+        out_dir = opts.get("out-dir", os.path.join(here, "dcg_sweep_frames"))
+        ckpt = os.path.join(here, "dcg_sweep.jsonl")
+        iq9.arm_raw()
+
+        def cap(level):
+            set_dmx(d65=level, tungsten=level)
+            time.sleep(1.5)                      # lamp + scene settle
+            r = iq9.save_raw(n_frames=nframes, label="dcg_%03d" % level,
+                             width=width, height=height)
+            return {"level": level, "file": r.get("file"), "frames": r.get("frames")} \
+                if isinstance(r, dict) else {"level": level}
+
+        res = iq9.sweep(levels, cap, ckpt, label="dcg-sweep", settle_s=0.5)
+        set_dmx(d65=0, tungsten=0)
+
+        points = []
+        for rec in res:
+            r = rec.get("result", rec)
+            bf = r.get("file")
+            local = iq9.scp_pull(bf, out_dir) if bf else None
+            points.append({"level": r.get("level"), "frames": [local or bf], "pulled": bool(local)})
+        manifest = {
+            "_note": ("Fill 'layout' from `python sensor_driver/dcg_demux.py analyze <a bright "
+                      "frame>` (hg_rows,lg_rows,ob_top,gap) + the OB rows (ob_hg/ob_lg: the SRM's "
+                      "masked rows or the leading low/flat rows), then run "
+                      "`python sensor_driver/dcg_characterize.py <this file>`."),
+            "dtype": "<u2", "exp_gain_db": 0.0,
+            "layout": {"hg_rows": None, "lg_rows": None, "ob_top": 0, "gap": 0,
+                       "hg_first": True, "ob_hg": None, "ob_lg": None},
+            "points": [{"level": p["level"], "frames": p["frames"]} for p in points],
+            "ref_level": levels[len(levels) // 2],
+        }
+        mpath = os.path.join(here, "dcg_manifest.json")
+        with open(mpath, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+        print(json.dumps({"captured": len(points),
+                          "pulled_to_pc": sum(1 for p in points if p["pulled"]),
+                          "out_dir": out_dir, "manifest": mpath,
+                          "geometry": {"width": width, "height": height, "frames": nframes},
+                          "next": "fill manifest 'layout' via dcg_demux analyze, then dcg_characterize"},
+                         indent=2))
     else:
         print(__doc__)
         return 2

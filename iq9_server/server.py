@@ -196,15 +196,21 @@ def _frame(timeout_s=5.0):
     return _read_shm(timeout_s=timeout_s)           # lock-free read (may wait for first frame)
 
 
-def _grab_raw(n_frames=1):
+def _grab_raw(n_frames=1, width=None, height=None):
     """Capture native RAW16 Bayer frames. Fully KILLS the NV12 worker first (the only
     reliable way to release the camera from cam-server), captures, then respawns it
-    (unless in cold RAW mode)."""
+    (unless in cold RAW mode). width/height override the capture geometry (e.g. the taller
+    DCG/Clear HDR frame); omit for the shipping-mode default."""
     with _cam_lock:
         cold = _raw_mode
         _kill_worker()                              # full camera release
         try:
-            return camera_qmmf.grab_raw16(n_frames=n_frames, camera=CAM)
+            kw = {}
+            if width:
+                kw["width"] = int(width)
+            if height:
+                kw["height"] = int(height)
+            return camera_qmmf.grab_raw16(n_frames=n_frames, camera=CAM, **kw)
         finally:
             if not cold:
                 _start_worker()
@@ -389,8 +395,9 @@ async def api_raw_save(request: Request):
         return JSONResponse({"error": RAW_DISABLED_MSG}, status_code=503)
     n = max(1, min(int(body.get("n_frames", 1)), 32))
     label = "".join(c for c in str(body.get("label", "raw")) if c.isalnum() or c in "-_")[:40] or "raw"
+    width, height = body.get("width"), body.get("height")
     try:
-        frames, meta = _grab_raw(n)
+        frames, meta = _grab_raw(n, width=width, height=height)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
     os.makedirs(RAW_DIR, exist_ok=True)

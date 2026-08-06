@@ -99,6 +99,29 @@ def demux(frame, hg_rows, lg_rows, ob_top=0, gap=0, hg_first=True):
     return (first, second) if hg_first else (second, first)
 
 
+def _as_ranges(ranges):
+    """Normalize a row range spec: (r0, r1) or [(r0, r1), ...] -> list of (int, int)."""
+    if not ranges:
+        return None
+    if isinstance(ranges[0], (int, float)):
+        ranges = [ranges]
+    return [(int(a), int(b)) for a, b in ranges]
+
+
+def ob_levels(frame, ranges):
+    """Per-RGGB-channel mean of optical-black (masked) rows -> per-frame black reference.
+
+    ranges are absolute row spans in the stacked frame: (r0, r1) or [(r0, r1), ...]. Each DCG leg
+    has its own OB (HCG and LCG sit at different black levels), so pass the HG OB rows and the LG
+    OB rows separately. Returns None if no ranges (caller falls back to a separate dark capture).
+    """
+    ranges = _as_ranges(ranges)
+    if ranges is None:
+        return None
+    rows = np.concatenate([np.asarray(frame[a:b]) for a, b in ranges], axis=0).astype(np.float64)
+    return {n: float(rows[pr::2, pc::2].mean()) for n, (pr, pc) in _PHASE.items()}
+
+
 def leg_stats(leg, black=None):
     """Per-RGGB mean/std for a leg; if `black` (per-channel dict) given, add net signal."""
     out = {}
@@ -142,6 +165,8 @@ def main(argv=None):
     s.add_argument("--gap", type=int, default=0)
     s.add_argument("--lg-first", action="store_true", help="frame is stacked [LG;HG] not [HG;LG]")
     s.add_argument("--black", default=None, help="per-channel black as R,Gr,Gb,B (e.g. 200,200,200,200)")
+    s.add_argument("--ob-hg", default=None, help="HG optical-black rows r0:r1 (per-frame HCG black)")
+    s.add_argument("--ob-lg", default=None, help="LG optical-black rows r0:r1 (per-frame LCG black)")
     s.add_argument("--out-prefix", default=None, help="also write <prefix>_HG.raw / _LG.raw")
 
     args = ap.parse_args(argv)
@@ -159,15 +184,22 @@ def main(argv=None):
         frame = load_raw(args.file, args.width)
         hg, lg = demux(frame, args.hg_rows, args.lg_rows, args.ob_top, args.gap,
                        hg_first=not args.lg_first)
-        black = None
-        if args.black:
-            vals = [float(x) for x in args.black.split(",")]
-            black = dict(zip(BAYER, vals))
-        hs, ls = leg_stats(hg, black), leg_stats(lg, black)
-        print(json.dumps({"HG_HCG": hs, "LG_LCG": ls,
-                          "Rcg_HG_over_LG": rcg(hs, ls)}, indent=2))
-        if not args.black:
-            print("# note: Rcg on raw means; pass --black R,Gr,Gb,B (pedestal) for the true ratio")
+
+        def _ob(spec):
+            if not spec:
+                return None
+            a, b = (int(x) for x in spec.split(":"))
+            return ob_levels(frame, (a, b))
+
+        black_hg, black_lg = _ob(args.ob_hg), _ob(args.ob_lg)
+        if black_hg is None and black_lg is None and args.black:
+            black_hg = black_lg = dict(zip(BAYER, [float(x) for x in args.black.split(",")]))
+        hs, ls = leg_stats(hg, black_hg), leg_stats(lg, black_lg)
+        print(json.dumps({"HG_HCG": hs, "LG_LCG": ls, "Rcg_HG_over_LG": rcg(hs, ls),
+                          "ob_hg": black_hg, "ob_lg": black_lg}, indent=2))
+        if black_hg is None and black_lg is None:
+            print("# note: Rcg on raw means; give --ob-hg/--ob-lg r0:r1 (masked rows) or --black "
+                  "R,Gr,Gb,B for the true per-frame ratio")
         if args.out_prefix:
             hg.tofile(args.out_prefix + "_HG.raw")
             lg.tofile(args.out_prefix + "_LG.raw")

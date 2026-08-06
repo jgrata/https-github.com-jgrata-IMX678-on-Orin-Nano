@@ -53,6 +53,17 @@
         arrive with the RAW/RDI path.</div>
     </div>
     <div class="card">
+      <h2>Lighting (DMX)</h2>
+      <div class="row"><span style="width:4.2em;color:var(--mut)">D65</span>
+        <input type="range" id="d65" min="0" max="255" step="1" value="0">
+        <span id="d65v" style="width:2.4em;text-align:right;font-variant-numeric:tabular-nums">0</span></div>
+      <div class="row"><span style="width:4.2em;color:var(--mut)">Tungsten</span>
+        <input type="range" id="tung" min="0" max="255" step="1" value="0">
+        <span id="tungv" style="width:2.4em;text-align:right;font-variant-numeric:tabular-nums">0</span></div>
+      <div class="row"><button class="sec" id="lightoff">All off</button>
+        <span class="note" id="dmxnote" style="margin-top:0">—</span></div>
+    </div>
+    <div class="card">
       <h2>Histogram (green)</h2>
       <canvas id="hist" width="240" height="70"></canvas>
       <div class="note" id="clip"></div>
@@ -102,9 +113,37 @@ async function refreshHist(){
   }catch(e){}
 }
 
-refreshInfo(); refreshHist();
+// --- lighting (DMX) ---
+let dmxTimer=null, dmxBusy=false;
+function dmxNote(t,c){ const n=$("dmxnote"); n.textContent=t;
+  n.style.color = c==="bad"?"var(--bad)":c==="ok"?"var(--ok)":"var(--mut)"; }
+async function refreshDmx(){
+  try{
+    const d = await (await fetch("/api/dmx")).json();
+    if(d.error){ dmxNote(d.error,"bad"); return; }
+    if(document.activeElement!==$("d65")){ $("d65").value=d.d65??0; $("d65v").textContent=d.d65??0; }
+    if(document.activeElement!==$("tung")){ $("tung").value=d.tungsten??0; $("tungv").textContent=d.tungsten??0; }
+    dmxNote("agent ok","ok");
+  }catch(e){ dmxNote("agent unreachable","bad"); }
+}
+async function setDmx(){
+  dmxBusy=true; dmxNote("setting…");
+  try{
+    const r = await (await fetch("/api/dmx",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({d65:parseInt($("d65").value),tungsten:parseInt($("tung").value)})})).json();
+    dmxNote(r.error?r.error:"applied", r.error?"bad":"ok");
+  }catch(e){ dmxNote("set failed","bad"); } finally{ dmxBusy=false; }
+}
+function dmxBind(id,vid){ $(id).oninput=()=>{ $(vid).textContent=$(id).value;
+  clearTimeout(dmxTimer); dmxTimer=setTimeout(setDmx,200); }; }
+dmxBind("d65","d65v"); dmxBind("tung","tungv");
+$("lightoff").onclick=()=>{ $("d65").value=0;$("d65v").textContent=0;
+  $("tung").value=0;$("tungv").textContent=0; setDmx(); };
+
+refreshInfo(); refreshHist(); refreshDmx();
 setInterval(refreshInfo, 3000);
 setInterval(refreshHist, 1500);
+setInterval(()=>{ if(!dmxBusy) refreshDmx(); }, 4000);
 </script>
 </body>
 </html>

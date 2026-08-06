@@ -24,6 +24,7 @@ import numpy as np
 import cv2
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.concurrency import run_in_threadpool
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Approach A: find the portable modules (deployed alongside as _shared/, or in the repo tree).
@@ -51,6 +52,9 @@ STATIC = next((c for c in (os.path.join(HERE, "static"),
                            os.path.join(HERE, "..", "metro_server", "webui", "static"),
                            os.path.join(HERE, "_shared", "static"))
                if os.path.isdir(c)), os.path.join(HERE, "static"))
+
+# PC-side DMX agent (lab lights are on the PC's USB; the board proxies over the direct link)
+DMX_AGENT_URL = os.environ.get("DMX_AGENT_URL", "http://192.168.99.1:9200")
 
 W = int(os.environ.get("IQ9_W", "1920"))
 H = int(os.environ.get("IQ9_H", "1080"))
@@ -312,6 +316,52 @@ async def api_params(request: Request):
     info = api_info()
     info["applied"] = applied
     return info
+
+
+# ── lighting (PC-side DMX agent, proxied over the direct link) ───────────────
+@app.get("/api/dmx")
+async def api_dmx_get():
+    """Current illuminant levels from the PC-side DMX agent (d65/tungsten, 0-255)."""
+    def work():
+        import json as _j
+        import urllib.request
+        try:
+            with urllib.request.urlopen(DMX_AGENT_URL + "/dmx", timeout=5) as r:
+                return _j.loads(r.read())
+        except Exception as e:
+            return {"error": "DMX agent unreachable (%s): %s" % (DMX_AGENT_URL, e)}
+    return await run_in_threadpool(work)
+
+
+@app.post("/api/dmx")
+async def api_dmx_set(request: Request):
+    """Set illuminant levels via the PC-side DMX agent (d65/tungsten, 0-255)."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    fwd = {}
+    for k in ("d65", "tungsten"):
+        if k in body:
+            fwd[k] = max(0, min(255, int(body[k])))
+
+    def work():
+        import json as _j
+        import urllib.error
+        import urllib.request
+        req = urllib.request.Request(DMX_AGENT_URL + "/dmx", data=_j.dumps(fwd).encode(),
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=12) as r:
+                return _j.loads(r.read())
+        except urllib.error.HTTPError as e:
+            try:
+                return _j.loads(e.read())
+            except Exception:
+                return {"error": "DMX agent HTTP %d" % e.code}
+        except Exception as e:
+            return {"error": "DMX agent unreachable (%s): %s" % (DMX_AGENT_URL, e)}
+    return await run_in_threadpool(work)
 
 
 # ── frames ───────────────────────────────────────────────────────────────────

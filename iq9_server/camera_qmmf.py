@@ -139,15 +139,27 @@ def _ensure_gst():
 
 
 class QmmfCapture:
-    def __init__(self, width=1920, height=1080, fps=30, mode="nv12", camera=0):
+    def __init__(self, width=1920, height=1080, fps=30, mode="nv12", camera=0,
+                 exposure_ns=None, iso=None):
         _ensure_gst()
         self.w, self.h, self.fps, self.mode = width, height, fps, mode
-        cam = "" if camera == 0 else ("camera=%d " % camera)
+        self.exposure_ns, self.iso = exposure_ns, iso
+        # qtiqmmfsrc element props built at CONSTRUCTION. Manual exposure/gain is set here
+        # (a fresh pipeline already in control-mode=off) rather than toggled live -- the live
+        # 3A-mode transition is what tripped the IFE SMMU fault on this stack; starting in
+        # manual avoids that transition. props must end with a space (it precedes '!').
+        props = "" if camera == 0 else ("camera=%d " % camera)
+        if exposure_ns is not None or iso is not None:
+            props += "control-mode=off "
+        if exposure_ns is not None:
+            props += "exposure-mode=off manual-exposure-time=%d " % int(exposure_ns)
+        if iso is not None:
+            props += "iso-mode=manual manual-iso-value=%d " % max(100, min(3200, int(iso)))
         if mode == "nv12":
             desc = ("qtiqmmfsrc name=c %s! video/x-raw,format=NV12,width=%d,height=%d,framerate=%d/1 "
                     "! videoconvert ! video/x-raw,format=BGRx "
                     "! appsink name=s max-buffers=2 drop=true sync=false"
-                    % (cam, width, height, fps))
+                    % (props, width, height, fps))
         elif mode == "bayer":
             # RAW16 Bayer -> uint16. bpp MUST be a caps string; RAW16 (not RAW10/12).
             # Prefer grab_raw16() (isolated subprocess); this in-process path is for tools
@@ -155,7 +167,7 @@ class QmmfCapture:
             desc = ("qtiqmmfsrc name=c %s! video/x-bayer,format=rggb,bpp=(string)16,"
                     "width=%d,height=%d,framerate=%d/1 "
                     "! appsink name=s max-buffers=2 drop=true sync=false"
-                    % (cam, width, height, fps))
+                    % (props, width, height, fps))
         else:
             raise ValueError("mode must be 'nv12' or 'bayer'")
         self.desc = desc

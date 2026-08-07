@@ -28,6 +28,9 @@ CAM = int(os.environ.get("IQ9_CAM", "0"))
 SHM = os.environ.get("IQ9_SHM", "/dev/shm/iq9_nv12")
 CTL = SHM + ".ctl"
 MAGIC = b"IQ9N"
+# Optional construction-time manual exposure/gain for the NV12 live path (None -> 3A auto).
+EXP_NS = os.environ.get("IQ9_EXP_NS")   # manual exposure, nanoseconds
+ISO = os.environ.get("IQ9_ISO")         # manual ISO/gain, 100..3200
 
 
 def _publish(bgr, seq):
@@ -48,7 +51,10 @@ def _publish(bgr, seq):
 
 
 def main():
-    cam = camera_qmmf.QmmfCapture(W, H, FPS, mode="nv12", camera=CAM).start()
+    cam = camera_qmmf.QmmfCapture(
+        W, H, FPS, mode="nv12", camera=CAM,
+        exposure_ns=int(EXP_NS) if EXP_NS else None,
+        iso=int(ISO) if ISO else None).start()
     time.sleep(1.2)                                # 3A settle
     seq = 0
     applied_ec = None

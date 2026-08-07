@@ -65,10 +65,12 @@
       <h2>Lighting (DMX)</h2>
       <div class="row"><span style="width:4.2em;color:var(--mut)">D65</span>
         <input type="range" id="d65" min="0" max="255" step="1" value="0">
-        <span id="d65v" style="width:2.4em;text-align:right;font-variant-numeric:tabular-nums">0</span></div>
+        <input type="number" id="d65v" min="0" max="255" step="1" value="0"
+          style="width:3.6em;text-align:right;font-variant-numeric:tabular-nums;background:#2a2f3a;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:3px 5px;font:inherit"></div>
       <div class="row"><span style="width:4.2em;color:var(--mut)">Tungsten</span>
         <input type="range" id="tung" min="0" max="255" step="1" value="0">
-        <span id="tungv" style="width:2.4em;text-align:right;font-variant-numeric:tabular-nums">0</span></div>
+        <input type="number" id="tungv" min="0" max="255" step="1" value="0"
+          style="width:3.6em;text-align:right;font-variant-numeric:tabular-nums;background:#2a2f3a;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:3px 5px;font:inherit"></div>
       <div class="row"><button class="sec" id="lightoff">All off</button>
         <span class="note" id="dmxnote" style="margin-top:0">—</span></div>
     </div>
@@ -143,8 +145,9 @@ async function refreshDmx(){
   try{
     const d = await (await fetch("/api/dmx")).json();
     if(d.error){ dmxNote(d.error,"bad"); return; }
-    if(document.activeElement!==$("d65")){ $("d65").value=d.d65??0; $("d65v").textContent=d.d65??0; }
-    if(document.activeElement!==$("tung")){ $("tung").value=d.tungsten??0; $("tungv").textContent=d.tungsten??0; }
+    const ae=document.activeElement;
+    if(ae!==$("d65")&&ae!==$("d65v")){ $("d65").value=d.d65??0; $("d65v").value=d.d65??0; }
+    if(ae!==$("tung")&&ae!==$("tungv")){ $("tung").value=d.tungsten??0; $("tungv").value=d.tungsten??0; }
     dmxNote("agent ok","ok");
   }catch(e){ dmxNote("agent unreachable","bad"); }
 }
@@ -152,15 +155,20 @@ async function setDmx(){
   dmxBusy=true; dmxNote("setting…");
   try{
     const r = await (await fetch("/api/dmx",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({d65:parseInt($("d65").value),tungsten:parseInt($("tung").value)})})).json();
+      body:JSON.stringify({d65:parseInt($("d65").value)||0,tungsten:parseInt($("tung").value)||0})})).json();
     dmxNote(r.error?r.error:"applied", r.error?"bad":"ok");
   }catch(e){ dmxNote("set failed","bad"); } finally{ dmxBusy=false; }
 }
-function dmxBind(id,vid){ $(id).oninput=()=>{ $(vid).textContent=$(id).value;
-  clearTimeout(dmxTimer); dmxTimer=setTimeout(setDmx,200); }; }
-dmxBind("d65","d65v"); dmxBind("tung","tungv");
-$("lightoff").onclick=()=>{ $("d65").value=0;$("d65v").textContent=0;
-  $("tung").value=0;$("tungv").textContent=0; setDmx(); };
+const dmxClamp=v=>Math.max(0,Math.min(255,parseInt(v)||0));
+function dmxPair(slider,num){
+  const s=$(slider), n=$(num);
+  const kick=()=>{ clearTimeout(dmxTimer); dmxTimer=setTimeout(setDmx,200); };
+  s.oninput=()=>{ n.value=s.value; kick(); };
+  n.oninput=()=>{ s.value=dmxClamp(n.value); kick(); };          // sync slider (clamped); don't rewrite field mid-type
+  n.onchange=()=>{ n.value=dmxClamp(n.value); s.value=n.value; setDmx(); };  // clamp field on enter/blur
+}
+dmxPair("d65","d65v"); dmxPair("tung","tungv");
+$("lightoff").onclick=()=>{ ["d65","d65v","tung","tungv"].forEach(id=>$(id).value=0); setDmx(); };
 
 refreshInfo(); refreshHist(); refreshDmx();
 setInterval(refreshInfo, 3000);

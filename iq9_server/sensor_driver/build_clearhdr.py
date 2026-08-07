@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """Build the Clear HDR (DCG) sensor XML from the LI baseline + the SRM ClearHDR delta set.
 
-Target: ClearHDR_AllPixel **4-lane / 10-bit / 15 fps** (dual-VC HG+LG) — the config that fits our
+Target: ClearHDR_AllPixel 4-lane / 10-bit / 15 fps (dual-VC HG+LG), the config that fits our
 4-lane sensor (Standard_Register_Setting_Ver3.0.xlsx cfg 5). Applies the 53-register delta
-(clearhdr_allpixel_deltas.csv) as in-place overrides on the baseline + patches the resolutionData
-geometry (VMAX/frameRate/bit-depth/height).
+(clearhdr_allpixel_deltas.csv) + rewrites the resolutionData into a proper dual-VC HDR stream.
 
-FIRST-CUT — validation deferred. Open items before deploy:
-  - RDI capture reboots (qsmmuv500 SMMU panic — escalated)
-  - dual-VC (HG/LG) over RDI unverified on this CamX/qtiqmmfsrc stack (as DOL); full-height capture
-    must not clamp
-  - 4-lane Clear HDR is 10-bit; CamX rejected RAW10 at 3856 width (>3840) -> capture likely needs a
-    RAW16 container
-  - frameDimension height set to 2x2180=4360 (HG+LG stacked); exact rows incl OB/embedded TBC
+Stream descriptor (reverse-engineered 2026-08-07 from imx766 DOL + api/sensor/camxsensordriver.xsd,
+after the first-cut single-VC / stacked-4360 .bin streamed ZERO frames on the bench):
+  - ONE <streamConfiguration> with TWO <vc> children (0=HG, 1=LG); each leg at the NATIVE 2180
+    height (NOT stacked 4360). dt=43 (0x2B RAW10), bitWidth 10, type IMAGE. (XSD: vc maxOccurs=2.)
+  - resolutionData: VMAX 4500 / 15 fps, exposureInfo x2 (DEFAULT+SHORT), HDRExposureType TWOEXPOSURE,
+    capability SHDR. --exp-gain 0 -> EXP_GAIN=0 so the legs differ by conversion gain only (HG=HCG,
+    LG=LCG) for the static LCG/HCG comparator.
+
+Open: capture-side geometry (does CamX deliver the two VCs stacked in one RDI buffer, or two?) is
+bench-discovered via dcg_demux analyze; the shipping-mode RDI SMMU reboot (escalated) is separate.
 """
 import os, re, csv, argparse
 
@@ -32,6 +34,13 @@ def patch_once(xml, pat, repl, label):
     xml2, n = re.subn(pat, repl, xml, count=1)
     print("  geom %-26s matched=%d" % (label, n))
     return xml2
+
+
+def sub_once(xml, old, new, label):
+    """Literal single-occurrence insert (for structural XML, no regex escaping). Returns (xml, n)."""
+    n = xml.count(old)
+    print("  struct %-40s matched=%d" % (label, n))
+    return (xml.replace(old, new, 1) if n == 1 else xml), n
 
 
 def main(argv=None):
@@ -62,10 +71,31 @@ def main(argv=None):
     xml = patch_once(xml, r'<frameLengthLines>2250</frameLengthLines>',
                      '<frameLengthLines>4500</frameLengthLines>', 'frameLengthLines 2250->4500 (VMAX)')
     xml = patch_once(xml, r'<frameRate>30</frameRate>', '<frameRate>15</frameRate>', 'frameRate 30->15')
-    xml = patch_once(xml, r'<dt>44</dt>', '<dt>43</dt>', 'dt 44(RAW12)->43(RAW10)')
+    xml = patch_once(xml, r'<dt>44</dt>', '<dt>43</dt>', 'dt 44(RAW12)->43(RAW10=0x2B)')
     xml = patch_once(xml, r'<bitWidth>12</bitWidth>', '<bitWidth>10</bitWidth>', 'bitWidth 12->10')
-    xml = patch_once(xml, r'(<width>3856</width>\s*<height>)2180(</height>)', r'\g<1>4360\g<2>',
-                     'frameDim height 2180->4360 (HG+LG)')
+    # Dual-VC stream descriptor (reverse-engineered from imx766 DOL + camxsensordriver.xsd):
+    # Clear HDR emits HG(VC0)+LG(VC1) in ONE streamConfiguration, each leg at the NATIVE 2180
+    # height (NOT stacked 4360 — the earlier first-cut was wrong; that never streamed). Add VC1.
+    xml, nvc = sub_once(xml, '<vc range="[0,3]">0</vc>',
+                        '<vc range="[0,3]">0</vc>\n          <vc range="[0,3]">1</vc>',
+                        'streamConfig: add VC1 (dual-VC HG+LG, per-leg 2180)')
+    if nvc != 1:
+        problems.append(("vc1", nvc))
+    # HDR metadata at resolutionData level (XSD order: cropInfo -> exposureInfo -> HDRExposureType).
+    hdr = ("\n      <exposureInfo><exposureType>DEFAULT</exposureType>"
+           "<maxLineCount>4494</maxLineCount><minLineCount>8</minLineCount></exposureInfo>"
+           "\n      <exposureInfo><exposureType>SHORT</exposureType>"
+           "<maxLineCount>4494</maxLineCount><minLineCount>8</minLineCount></exposureInfo>"
+           "\n      <HDRExposureType>TWOEXPOSURE</HDRExposureType>")
+    xml, nh = sub_once(xml, '</cropInfo>', '</cropInfo>' + hdr,
+                       'add exposureInfo x2 + HDRExposureType TWOEXPOSURE')
+    if nh != 1:
+        problems.append(("hdrmeta", nh))
+    # capability NORMAL -> SHDR (triggers CamX's dual-VC HDR stream setup, as in imx766 DOL)
+    xml, nc = sub_once(xml, '<capability>NORMAL</capability>', '<capability>SHDR</capability>',
+                       'capability NORMAL->SHDR')
+    if nc != 1:
+        problems.append(("capability", nc))
 
     # optional EXP_GAIN override. Gain model: LG = GAIN, HG = GAIN + EXP_GAIN.
     variant = "chdr"
@@ -85,6 +115,13 @@ def main(argv=None):
     for a, want in [("0x301A", "0x08"), ("0x3028", "0x94"), ("0x3029", "0x11"), ("0x3081", exp_gain_want)]:
         ok = ("<registerAddr>%s</registerAddr><registerData>%s</registerData>" % (a, want)) in xml
         print("  verify %s=%s : %s" % (a, want, "OK" if ok else "MISSING"))
+    # verify the transport-critical dual-VC + HDR stream structure
+    for token, desc in (('<vc range="[0,3]">1</vc>', 'VC1 present'),
+                        ('<HDRExposureType>TWOEXPOSURE</HDRExposureType>', 'TWOEXPOSURE'),
+                        ('<capability>SHDR</capability>', 'capability SHDR')):
+        print("  verify %-16s : %s" % (desc, "OK" if token in xml else "MISSING"))
+    print("  verify per-leg-height  : %s"
+          % ("OK (2180, not stacked)" if "<height>4360</height>" not in xml else "BAD (4360 stacked)"))
     print("wrote", out)
     if args.exp_gain == 0:
         print("gain model: EXP_GAIN=0 -> HG=HCG, LG=LCG at equal analog gain; "

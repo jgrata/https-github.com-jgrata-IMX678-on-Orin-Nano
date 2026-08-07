@@ -250,17 +250,21 @@ class IQ9:
             lambda: self._http("/api/raw/capture?width=%d" % width, timeout=timeout),
             retries=retries, per_call_timeout=timeout)
 
-    def save_raw(self, n_frames=1, label="raw", width=None, height=None, retries=2, timeout=90):
+    def save_raw(self, n_frames=1, label="raw", width=None, height=None, shdr=False,
+                 retries=2, timeout=90):
         """Capture + persist N RAW16 frames on the board (uint16 .npy + JSON sidecar).
 
-        width/height override the capture geometry (e.g. the taller DCG/Clear HDR frame,
-        HG+LG stacked); omit to use the server's shipping-mode default.
+        width/height override the capture geometry; omit for the shipping-mode default.
+        shdr=True requests the Raw SHDR (2-exposure) usecase (vhdr=shdr-raw) so CamX
+        demuxes the sensor's two VCs for Clear HDR / DOL capture (line-interleaved output).
         """
         body = {"n_frames": n_frames, "label": label}
         if width:
             body["width"] = int(width)
         if height:
             body["height"] = int(height)
+        if shdr:
+            body["shdr"] = True
         return self.resilient(
             "raw_snapshot",
             lambda: self._http("/api/raw/save", method="POST", body=body, timeout=timeout),
@@ -405,7 +409,7 @@ def _main(argv):
             set_dmx(d65=level, tungsten=level)
             time.sleep(1.5)                      # lamp + scene settle
             r = iq9.save_raw(n_frames=nframes, label="dcg_%03d" % level,
-                             width=width, height=height)
+                             width=width, height=height, shdr=True)
             return {"level": level, "file": r.get("file"), "frames": r.get("frames")} \
                 if isinstance(r, dict) else {"level": level}
 

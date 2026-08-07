@@ -90,8 +90,17 @@ def analyze(frame, ob_thresh_frac=0.15):
     }
 
 
-def demux(frame, hg_rows, lg_rows, ob_top=0, gap=0, hg_first=True):
-    """Split a stacked DCG frame into (HG, LG). Row order: [ob_top][hg_rows][gap][lg_rows]."""
+def demux(frame, hg_rows, lg_rows, ob_top=0, gap=0, hg_first=True, interleaved=False):
+    """Split a DCG frame into (HG, LG).
+
+    interleaved=False (stacked): row order [ob_top][hg_rows][gap][lg_rows].
+    interleaved=True (SHDR-raw / vhdr=shdr-raw): the two legs alternate lines, so
+      HG = rows[ob_top::2], LG = rows[ob_top+1::2] (swap with hg_first=False).
+    """
+    if interleaved:
+        body = frame[ob_top:]
+        a, b = body[0::2], body[1::2]
+        return (a, b) if hg_first else (b, a)
     r = ob_top
     first = frame[r : r + hg_rows]
     r += hg_rows + gap

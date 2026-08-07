@@ -38,7 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dcg_demux  # noqa: E402
 
 LEG_ROLE = {"HG": "HCG", "LG": "LCG"}
-DEMUX_KEYS = ("hg_rows", "lg_rows", "ob_top", "gap", "hg_first")
+DEMUX_KEYS = ("hg_rows", "lg_rows", "ob_top", "gap", "hg_first", "interleaved")
 DOL_16X_DR_DB = 20.0 * math.log10(16.0)  # e-con DOL reference (~24.1 dB) for comparison
 
 

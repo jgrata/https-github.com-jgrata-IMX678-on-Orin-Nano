@@ -200,11 +200,12 @@ def _frame(timeout_s=5.0):
     return _read_shm(timeout_s=timeout_s)           # lock-free read (may wait for first frame)
 
 
-def _grab_raw(n_frames=1, width=None, height=None):
+def _grab_raw(n_frames=1, width=None, height=None, shdr=False):
     """Capture native RAW16 Bayer frames. Fully KILLS the NV12 worker first (the only
     reliable way to release the camera from cam-server), captures, then respawns it
     (unless in cold RAW mode). width/height override the capture geometry (e.g. the taller
-    DCG/Clear HDR frame); omit for the shipping-mode default."""
+    DCG/Clear HDR frame); omit for the shipping-mode default. shdr=True requests the Raw
+    SHDR (2-exposure) usecase (vhdr=shdr-raw) for Clear HDR / DOL dual-VC capture."""
     with _cam_lock:
         cold = _raw_mode
         _kill_worker()                              # full camera release
@@ -214,6 +215,8 @@ def _grab_raw(n_frames=1, width=None, height=None):
                 kw["width"] = int(width)
             if height:
                 kw["height"] = int(height)
+            if shdr:
+                kw["shdr"] = True
             return camera_qmmf.grab_raw16(n_frames=n_frames, camera=CAM, **kw)
         finally:
             if not cold:
@@ -446,8 +449,9 @@ async def api_raw_save(request: Request):
     n = max(1, min(int(body.get("n_frames", 1)), 32))
     label = "".join(c for c in str(body.get("label", "raw")) if c.isalnum() or c in "-_")[:40] or "raw"
     width, height = body.get("width"), body.get("height")
+    shdr = bool(body.get("shdr", False))
     try:
-        frames, meta = _grab_raw(n, width=width, height=height)
+        frames, meta = _grab_raw(n, width=width, height=height, shdr=shdr)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
     os.makedirs(RAW_DIR, exist_ok=True)

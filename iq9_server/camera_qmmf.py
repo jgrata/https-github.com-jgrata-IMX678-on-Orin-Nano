@@ -38,7 +38,7 @@ RAW_W, RAW_H, RAW_FPS = 3856, 2180, 30
 
 
 def grab_raw16(n_frames=1, width=RAW_W, height=RAW_H, fps=RAW_FPS, camera=0,
-               timeout_s=25, retries=1, exposure_ns=None, iso=None):
+               timeout_s=25, retries=1, exposure_ns=None, iso=None, shdr=False):
     """Capture native RAW16 Bayer frames via an isolated gst-launch subprocess.
 
     Returns (frames, meta): frames is a list of HxW uint16 arrays (RGGB, 12-bit,
@@ -51,6 +51,12 @@ def grab_raw16(n_frames=1, width=RAW_W, height=RAW_H, fps=RAW_FPS, camera=0,
     holds the requested values, so an exposure/gain sweep is repeatable. Leaving both
     None keeps 3A auto (a quick look/preview grab).
 
+    shdr=True adds `vhdr=shdr-raw` -> qtiqmmfsrc requests the Raw SHDR (2-exposure)
+    usecase so CamX acquires the IFE with is_shdr=1 and demuxes the sensor's two VCs.
+    REQUIRED for Clear HDR / DOL capture: without it the IFE acquires a single RDI port
+    (is_shdr=0) and no buffers flow even when the sensor is in SHDR mode. shdr-raw is
+    LINE-INTERLEAVED (the two legs alternate lines) -> demux with dcg_demux interleaved.
+
     Why RAW16 (not RAW10/12): RAW10's advertised max is 3840x2160 < 3856x2180 so
     CamX rejects it at CheckValidStreamConfig; RAW12 destabilises cam-server. RAW16
     validates at native res and carries the 12-bit data in a 16-bit container.
@@ -59,6 +65,8 @@ def grab_raw16(n_frames=1, width=RAW_W, height=RAW_H, fps=RAW_FPS, camera=0,
             "width=%d,height=%d,framerate=%d/1" % (width, height, fps))
     # manual 3A for characterization (disable AE/AWB drift; hold exposure/gain)
     props = []
+    if shdr:
+        props += ["vhdr=shdr-raw"]      # Raw SHDR: IFE acquires is_shdr=1, demuxes the 2 VCs
     if exposure_ns is not None or iso is not None:
         props += ["control-mode=off"]
     if exposure_ns is not None:

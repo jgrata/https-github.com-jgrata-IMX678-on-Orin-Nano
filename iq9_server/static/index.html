@@ -44,6 +44,15 @@
     <div class="card">
       <h2>Camera</h2>
       <div class="kv" id="info"><div class="k">…</div><div class="v"></div></div>
+      <div class="row"><span style="width:5em;color:var(--mut)">Resolution</span>
+        <select id="res" style="flex:1;background:#2a2f3a;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px;font:inherit">
+          <option value="1920x1080">1920 × 1080</option>
+          <option value="1280x720">1280 × 720</option>
+          <option value="960x540">960 × 540</option>
+          <option value="3840x2160">3840 × 2160</option>
+          <option value="640x480">640 × 480</option>
+        </select></div>
+      <div class="note" id="resnote">ISP output size (restarts the live view briefly).</div>
     </div>
     <div class="card">
       <h2>Exposure compensation</h2>
@@ -85,9 +94,22 @@ async function refreshInfo(){
     if(d.exposure_compensation!=null && document.activeElement!==$("ec")){
       $("ec").value=d.exposure_compensation; $("ecv").textContent=d.exposure_compensation;
     }
+    const cur=d.width+"x"+d.height;
+    if(document.activeElement!==$("res")) for(const o of $("res").options) if(o.value===cur){$("res").value=cur;break;}
     setStatus("live","ok");
   }catch(e){ setStatus("offline — is server.py running?","bad"); }
 }
+
+$("res").onchange = async () => {
+  const [w,h] = $("res").value.split("x").map(Number);
+  $("resnote").textContent = "switching to "+w+"×"+h+"… (live view reloads)";
+  try{
+    await fetch("/api/params",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({width:w,height:h})});
+    setTimeout(()=>{ $("view").src="/stream.mjpg?width=1280&t="+Date.now();
+      $("resnote").textContent="set "+w+"×"+h; }, 3500);
+  }catch(e){ $("resnote").textContent="failed"; }
+};
 
 let ecTimer=null;
 $("ec").oninput = () => { $("ecv").textContent=$("ec").value;

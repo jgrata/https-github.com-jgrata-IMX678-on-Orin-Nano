@@ -123,6 +123,15 @@ def _start_worker():
                                env=env, preexec_fn=_pdeathsig)
 
 
+def _set_resolution(w, h):
+    """Restart the NV12 worker at a new output resolution (ISP downscale). Holds _cam_lock."""
+    global W, H
+    with _cam_lock:
+        W, H = int(w), int(h)
+        _kill_worker()
+        _start_worker()
+
+
 def _kill_worker():
     """Fully kill the NV12 worker so cam-server releases the camera (caller holds _cam_lock)."""
     global _worker
@@ -316,6 +325,12 @@ async def api_params(request: Request):
         _exposure_comp = max(-12, min(12, int(body["exposure_compensation"])))
         _write_ctl(_exposure_comp)                  # NV12 worker polls the control file and applies it
         applied["exposure_compensation"] = True
+    if "width" in body and "height" in body:
+        w2 = max(320, min(3856, int(body["width"])))
+        h2 = max(240, min(2180, int(body["height"])))
+        if (w2, h2) != (W, H):
+            await run_in_threadpool(_set_resolution, w2, h2)   # ISP downscale; restarts the worker
+        applied["resolution"] = "%dx%d" % (w2, h2)
     info = api_info()
     info["applied"] = applied
     return info

@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PTC / OETF / SNR — IQ9</title>
+<style>
+  :root { --bg:#15171c; --panel:#1e2128; --ink:#e6e8ec; --mut:#9aa3b2;
+          --acc:#4ea1ff; --line:#2c303a; --ok:#5fd08a; --warn:#e6c15f; --bad:#e46a6a;
+          --R:#e46a6a; --G1:#5fd08a; --G2:#8fb98f; --B:#4ea1ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:13px/1.45 system-ui,Segoe UI,Roboto,sans-serif; }
+  header { padding:8px 14px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:14px; margin:0; font-weight:600; }
+  header a { color:var(--acc); text-decoration:none; font-size:13px; }
+  header .status { margin-left:auto; color:var(--mut); font-size:12px; }
+  .wrap { display:flex; gap:12px; padding:12px 14px; flex-wrap:wrap; align-items:flex-start; }
+  .col { flex:1 1 360px; min-width:320px; display:flex; flex-direction:column; gap:12px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  .card h2 { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--mut); margin:0 0 8px; }
+  button { background:var(--acc); color:#08213d; border:0; border-radius:6px; padding:8px 12px; font-weight:600; cursor:pointer; font:inherit; }
+  button.sec { background:#2a2f3a; color:var(--ink); }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  label.inl { font-size:11.5px; color:var(--mut); display:flex; gap:5px; align-items:center; }
+  input,select { background:#12141a; color:var(--ink); border:1px solid var(--line); border-radius:5px; padding:5px 6px; font:inherit; }
+  input.num { width:58px; } input.lv { width:220px; }
+  table { border-collapse:collapse; width:100%; font-size:12px; font-variant-numeric:tabular-nums; }
+  th,td { text-align:right; padding:4px 7px; border-bottom:1px solid var(--line); }
+  th:first-child,td:first-child { text-align:left; }
+  th { color:var(--mut); font-weight:600; font-size:10.5px; text-transform:uppercase; letter-spacing:.03em; }
+  .hint { font-size:10.5px; color:var(--mut); margin-top:6px; }
+  .b { font-weight:600; } .mut { color:var(--mut); }
+  .luxgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:6px; margin-top:6px; }
+  .luxgrid label { font-size:10.5px; color:var(--mut); display:flex; flex-direction:column; gap:2px; }
+  .luxgrid input { width:100%; }
+  svg { width:100%; height:auto; background:#0c0e12; border:1px solid var(--line); border-radius:8px; display:block; }
+  .leg { display:flex; gap:12px; font-size:11px; margin-top:5px; flex-wrap:wrap; }
+  .leg span::before { content:"■ "; }
+  .warnbanner { background:#3a331a; border:1px solid #6a5a2f; border-radius:8px; padding:8px 10px; font-size:11.5px; margin-top:8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>PTC / OETF / SNR — RAW light sweep</h1>
+  <a href="/">&larr; live</a> <a href="/colorchecker">ColorChecker</a> <a href="/fieldmap">Field</a>
+  <a href="/raw">RAW</a> <a href="/history">History</a>
+  <div class="status" id="status">ready</div>
+</header>
+
+<div class="wrap">
+  <div class="col">
+    <div class="card">
+      <h2>Sweep setup</h2>
+      <div class="row">
+        <label class="inl">source
+          <select id="channel"><option value="tungsten" selected>tungsten (3200K)</option><option value="d65">D65</option></select>
+        </label>
+        <label class="inl">levels (DMX) <input class="lv" id="levels" value="12,18,25,32,40,48,55,62"></label>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label class="inl">frames/level <input class="num" id="nframes" type="number" value="3" min="2" max="16"></label>
+        <label class="inl">settle s <input class="num" id="settle" type="number" value="1.5" min="0.2" max="8" step="0.1"></label>
+        <label class="inl">ROI frac <input class="num" id="roifrac" type="number" value="0.4" min="0.05" max="0.9" step="0.05"></label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="sec" id="dark">1 · Capture dark (cap the lens)</button>
+        <button id="sweep">2 · Run sweep</button>
+        <button class="sec" id="save" disabled>Save last</button>
+      </div>
+      <div class="hint">
+        Two-frame-difference PTC from <b>consecutive frames of a persistent RAW stream</b> (flicker-immune;
+        not the open/close path that corrupted K). Order: <b>cap the lens → Capture dark</b> (true read noise),
+        then <b>uncap, light on → Run sweep</b>. PTC K/read/full-well/SNR are signal-based (robust to lamp
+        nonlinearity). Enter <b>lux</b> per level (below) to get responsivity (e⁻/lux) + lux-referred SNR1s;
+        leave blank for sensor-referred only.
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Lux per level (optional — meter at the target plane)</h2>
+      <div class="luxgrid" id="luxgrid"></div>
+      <div class="hint">Fill these from a lux meter reading at each DMX level to calibrate the light axis.</div>
+    </div>
+
+    <div class="card" id="darkCard" style="display:none">
+      <h2>Dark reference</h2>
+      <table id="darkTbl"></table>
+      <div class="hint" id="darkNote"></div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="card" id="sumCard" style="display:none">
+      <h2>Per-channel PTC / SNR</h2>
+      <table id="sumTbl"></table>
+      <div class="hint" id="sumNote"></div>
+      <div id="luxWarn"></div>
+    </div>
+    <div class="card" id="specCard" style="display:none">
+      <h2>Spec-referred SNR1s (Sony: 3200K, 18% gray, F1.4, 1/60s)</h2>
+      <div class="row">
+        <label class="inl">our f/# <input class="num" id="mfnum" type="number" value="2.0" step="0.1"></label>
+        <label class="inl">spec f/# <input class="num" id="sfnum" type="number" value="1.4" step="0.1"></label>
+        <label class="inl">our exp ms <input class="num" id="mexp" type="number" value="20" step="1"></label>
+        <label class="inl">spec exp ms <input class="num" id="sexp" type="number" value="16.67" step="0.01"></label>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <label class="inl"><input type="checkbox" id="applyR"> apply reflectance (white&rarr;18% gray)</label>
+        <label class="inl">our &rho; <input class="num" id="mrefl" type="number" value="0.90" step="0.01"></label>
+        <label class="inl">spec &rho; <input class="num" id="srefl" type="number" value="0.18" step="0.01"></label>
+      </div>
+      <table id="specTbl" style="margin-top:8px"></table>
+      <div class="hint" id="specFac"></div>
+      <div class="hint">SNR1s<sub>spec</sub> = measured &times; (t<sub>meas</sub>/t<sub>spec</sub>) &times; (f<sub>spec</sub>/f<sub>meas</sub>)&sup2; [&times; (&rho;<sub>meas</sub>/&rho;<sub>spec</sub>)].
+        f/# &amp; exposure are the optics normalization; reflectance is optional (toggle) &mdash; apply it only when comparing to the 18%-gray <b>scene-lux</b> call-out rather than re-measuring on an actual gray target.</div>
+    </div>
+    <div class="card" id="ptcCard" style="display:none">
+      <h2>Photon-transfer curve (variance vs signal)</h2>
+      <svg id="ptcSvg" viewBox="0 0 440 300" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="leg" id="ptcLeg"></div>
+    </div>
+    <div class="card" id="oetfCard" style="display:none">
+      <h2>OETF (signal vs light)</h2>
+      <svg id="oetfSvg" viewBox="0 0 440 300" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="leg" id="oetfLeg"></div>
+      <div class="hint" id="oetfNote"></div>
+    </div>
+    <div class="card" id="tblCard" style="display:none">
+      <h2>Per-level capture</h2>
+      <table id="lvlTbl"></table>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const CH = ["R","G1","G2","B"];
+let LAST = null;   // last sweep result, for live spec-normalization recompute
+const COL = {R:"var(--R)",G1:"var(--G1)",G2:"var(--G2)",B:"var(--B)"};
+const COLHEX = {R:"#e46a6a",G1:"#5fd08a",G2:"#8fb98f",B:"#4ea1ff"};
+function setStatus(t,c){ const s=$("status"); s.textContent=t; s.style.color = c==="bad"?"var(--bad)":c==="ok"?"var(--ok)":c==="warn"?"var(--warn)":"var(--mut)"; }
+const fx = (v,p=2)=> (v==null||isNaN(v)||!isFinite(v))?"–":(+v).toFixed(p);
+function parseLevels(){ return ($("levels").value.replace(/,/g," ").split(/\s+/).filter(Boolean).map(x=>parseInt(x)).filter(n=>n>0&&n<=255)); }
+
+function rebuildLux(){
+  const lv = parseLevels();
+  const prev = {}; $("luxgrid").querySelectorAll("input").forEach(i=>prev[i.dataset.lvl]=i.value);
+  $("luxgrid").innerHTML = lv.map(l=>`<label>DMX ${l}<input type="number" step="1" min="0" data-lvl="${l}" value="${prev[l]||""}" placeholder="lux"></label>`).join("");
+}
+function collectLux(){
+  const lux = {}; let any=false;
+  $("luxgrid").querySelectorAll("input").forEach(i=>{ if(i.value!==""){ lux[i.dataset.lvl]=parseFloat(i.value); any=true; } });
+  return any?lux:null;
+}
+$("levels").addEventListener("change", rebuildLux);
+$("levels").addEventListener("keyup", rebuildLux);
+rebuildLux();
+
+async function post(url, body){
+  const r = await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
+  return r.json();
+}
+function busy(b){ ["dark","sweep"].forEach(i=>$(i).disabled=b); }
+
+// ---- simple SVG scatter+line plotter --------------------------------------
+function plot(svg, series, opt){
+  opt = opt||{};
+  const W=440,H=300, mL=56,mR=12,mT=12,mB=40;
+  const xs=[], ys=[];
+  series.forEach(s=>s.pts.forEach(p=>{ if(p[0]!=null&&isFinite(p[0]))xs.push(p[0]); if(p[1]!=null&&isFinite(p[1]))ys.push(p[1]); }));
+  if(!xs.length){ svg.innerHTML=""; return; }
+  let x0=Math.min(0,...xs), x1=Math.max(...xs), y0=Math.min(0,...ys), y1=Math.max(...ys);
+  if(x1<=x0)x1=x0+1; if(y1<=y0)y1=y0+1;
+  const px=v=>mL+(v-x0)/(x1-x0)*(W-mL-mR), py=v=>H-mB-(v-y0)/(y1-y0)*(H-mT-mB);
+  let g=`<rect x="0" y="0" width="${W}" height="${H}" fill="none"/>`;
+  const nt=5;
+  for(let k=0;k<=nt;k++){ const yv=y0+(y1-y0)*k/nt, y=py(yv);
+    g+=`<line x1="${mL}" y1="${y}" x2="${W-mR}" y2="${y}" stroke="#22262f"/><text x="${mL-6}" y="${y+3}" fill="#7a8090" font-size="9" text-anchor="end">${fmtAx(yv)}</text>`; }
+  for(let k=0;k<=nt;k++){ const xv=x0+(x1-x0)*k/nt, x=px(xv);
+    g+=`<text x="${x}" y="${H-mB+13}" fill="#7a8090" font-size="9" text-anchor="middle">${fmtAx(xv)}</text>`; }
+  g+=`<text x="${mL+(W-mL-mR)/2}" y="${H-4}" fill="#9aa3b2" font-size="10" text-anchor="middle">${opt.xlabel||""}</text>`;
+  g+=`<text x="12" y="${mT+(H-mT-mB)/2}" fill="#9aa3b2" font-size="10" text-anchor="middle" transform="rotate(-90 12 ${mT+(H-mT-mB)/2})">${opt.ylabel||""}</text>`;
+  series.forEach(s=>{
+    const pts=s.pts.filter(p=>p[0]!=null&&p[1]!=null&&isFinite(p[0])&&isFinite(p[1])).sort((a,b)=>a[0]-b[0]);
+    if(s.line && pts.length>1){ g+=`<polyline fill="none" stroke="${s.color}" stroke-width="1.4" opacity="0.9" points="${pts.map(p=>px(p[0])+","+py(p[1])).join(" ")}"/>`; }
+    pts.forEach(p=>{ g+=`<circle cx="${px(p[0])}" cy="${py(p[1])}" r="2.6" fill="${s.color}"/>`; });
+  });
+  svg.innerHTML=g;
+}
+function fmtAx(v){ const a=Math.abs(v); if(a>=1000)return (v/1000).toFixed(a>=10000?0:1)+"k"; if(a>=10)return v.toFixed(0); if(a>=1)return v.toFixed(1); return v.toFixed(2); }
+function legend(el, chs){ el.innerHTML = chs.map(c=>`<span style="color:${COLHEX[c]}">${c}</span>`).join(""); }
+
+// ---- dark ------------------------------------------------------------------
+$("dark").onclick = async () => {
+  busy(true); setStatus("capturing dark (persistent stream)…","warn");
+  let d; try{ d = await post("/api/ptc/dark",{n_frames:8, roi_frac:parseFloat($("roifrac").value)||0.4}); }
+  catch(e){ setStatus("request failed: "+e.message,"bad"); busy(false); return; }
+  busy(false);
+  if(d.error){ setStatus("dark error: "+d.error,"bad"); return; }
+  $("darkCard").style.display="";
+  $("darkTbl").innerHTML = "<tr><th>chan</th><th>pedestal DN</th><th>read DN</th><th>flicker %</th></tr>" +
+    CH.map(c=>`<tr><td style="color:${COL[c]}">${c}</td><td>${fx(d.channels[c].pedestal_DN,2)}</td><td>${fx(d.channels[c].read_DN,3)}</td><td>${fx(d.channels[c].flicker_pct,3)}</td></tr>`).join("");
+  $("darkNote").textContent = d.note||"";
+  setStatus("dark captured — uncap lens, light on, run sweep","ok");
+};
+
+// ---- sweep -----------------------------------------------------------------
+$("sweep").onclick = async () => {
+  const levels = parseLevels();
+  if(levels.length<3){ setStatus("need ≥3 levels","bad"); return; }
+  const lux = collectLux();
+  busy(true); setStatus(`sweeping ${levels.length} levels (persistent stream)… ~${Math.ceil(levels.length*((parseFloat($("settle").value)||1.5)+1))}s`,"warn");
+  let d; try{ d = await post("/api/ptc/sweep",{
+      channel:$("channel").value, levels, n_frames:parseInt($("nframes").value)||3,
+      settle_s:parseFloat($("settle").value)||1.5, roi_frac:parseFloat($("roifrac").value)||0.4,
+      lux: lux||undefined }); }
+  catch(e){ setStatus("request failed: "+e.message,"bad"); busy(false); return; }
+  busy(false);
+  if(d.error){ setStatus("sweep error: "+d.error,"bad"); return; }
+  renderSweep(d); $("save").disabled=false;
+  setStatus(`done — K(G1) ${fx(d.channels.G1.K_e_per_DN,2)} e⁻/DN, read ${fx(d.channels.G1.read_e,2)} e⁻`+(d.lux_referred?`, SNR1s(G1) ${fx(d.channels.G1.snr1s_lux,2)} lux`:``),"ok");
+};
+
+function renderSweep(d){
+  LAST = d;
+  const lux = d.lux_referred;
+  // summary table
+  let head = "<tr><th>chan</th><th>K e⁻/DN</th><th>read e⁻</th><th>full-well e⁻</th><th>max SNR</th><th>SNR1 e⁻</th><th>DR dB</th><th>OETF r²</th>"
+           + (lux?"<th>e⁻/lux</th><th>SNR1s lux</th>":"") + "</tr>";
+  $("sumTbl").innerHTML = head + CH.map(c=>{ const x=d.channels[c];
+    return `<tr><td style="color:${COL[c]}">${c}</td><td>${fx(x.K_e_per_DN,3)}</td><td>${fx(x.read_e,2)}</td><td>${fx(x.full_well_e,0)}</td>`
+         + `<td>${fx(x.max_SNR,1)}</td><td>${fx(x.SNR1_e_sensor,2)}</td><td>${fx(x.DR_dB,1)}</td><td>${fx(x.oetf&&x.oetf.r2,5)}</td>`
+         + (lux?`<td>${fx(x.responsivity_e_per_lux,2)}</td><td>${fx(x.snr1s_lux,2)}</td>`:"") + `</tr>`; }).join("");
+  $("sumNote").textContent = "dark: "+d.dark_source+" · ROI "+JSON.stringify(d.roi)+" · channel "+d.channel;
+  $("luxWarn").innerHTML = lux ? "" : `<div class="warnbanner">Sensor-referred only. Enter lux per level above and re-run for responsivity (e⁻/lux) + lux-referred SNR1s.</div>`;
+  $("sumCard").style.display="";
+
+  // PTC plot: var vs signal
+  plot($("ptcSvg"), CH.map(c=>({color:COLHEX[c], line:false,
+        pts:d.curves[c].signal_DN.map((s,i)=>[s, d.curves[c].var_DN[i]])})),
+        {xlabel:"signal DN (pedestal-subtracted)", ylabel:"variance DN²"});
+  legend($("ptcLeg"), CH); $("ptcCard").style.display="";
+
+  // OETF plot: mean signal vs light
+  plot($("oetfSvg"), CH.map(c=>({color:COLHEX[c], line:true,
+        pts:d.curves[c].signal_DN.map((s,i)=>[d.curves[c].light[i], s])})),
+        {xlabel: lux?"light (lux)":"light (DMX level)", ylabel:"signal DN"});
+  legend($("oetfLeg"), CH);
+  $("oetfNote").textContent = lux ? "light axis is calibrated lux → OETF straightness is the true sensor linearity."
+    : "light axis is DMX level (sensor × lamp). Use the PTC-line straightness for the lamp-independent linearity.";
+  $("oetfCard").style.display="";
+
+  // per-level table
+  $("lvlTbl").innerHTML = "<tr><th>DMX</th><th>light</th><th>green DN</th><th>non-unif %</th><th>flicker %</th><th>clip</th></tr>" +
+    d.table.map(r=>`<tr><td>${r.level}</td><td>${fx(r.light,1)}</td><td>${fx(r.green_DN,0)}</td><td>${fx(r.nonunif_pct,1)}</td><td>${fx(r.flicker_pct,3)}</td><td>${fx(r.clip*100,2)}%</td></tr>`).join("");
+  $("tblCard").style.display="";
+
+  specNorm();
+}
+
+function specNorm(){
+  if(!LAST || !LAST.lux_referred){ $("specCard").style.display="none"; return; }
+  $("specCard").style.display="";
+  const mf=+$("mfnum").value||2, sf=+$("sfnum").value||1.4;
+  const mt=(+$("mexp").value||20)/1000, st=(+$("sexp").value||16.67)/1000;
+  const applyR=$("applyR").checked, mr=+$("mrefl").value||0.9, sr=+$("srefl").value||0.18;
+  let fac=(mt/st)*(sf/mf)**2; if(applyR) fac*=(mr/sr);
+  $("specTbl").innerHTML = "<tr><th>chan</th><th>measured</th><th>spec-referred</th></tr>" +
+    CH.map(c=>{const s=LAST.channels[c].snr1s_lux; return s?`<tr><td style="color:${COL[c]}">${c}</td><td>${fx(s,3)} lux</td><td class="b">${fx(s*fac,3)} lux</td></tr>`:"";}).filter(Boolean).join("");
+  $("specFac").textContent = `factor ×${fac.toFixed(3)} = exposure ${(mt/st).toFixed(2)} × f/# ${((sf/mf)**2).toFixed(2)}`+(applyR?` × reflectance ${(mr/sr).toFixed(2)}`:` (reflectance off)`);
+}
+["mfnum","sfnum","mexp","sexp","applyR","mrefl","srefl"].forEach(id=>$(id).addEventListener("change",specNorm));
+
+$("save").onclick = async () => {
+  setStatus("saving…","warn");
+  try{ const r = await post("/api/history/save",{kind:"ptc"});
+    setStatus(r.error?("save: "+r.error):("saved "+r.id),r.error?"bad":"ok");
+  }catch(e){ setStatus("save failed","bad"); }
+};
+</script>
+</body>
+</html>

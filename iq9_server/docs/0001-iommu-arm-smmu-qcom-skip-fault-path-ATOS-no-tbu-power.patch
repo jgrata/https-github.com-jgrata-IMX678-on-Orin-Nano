@@ -40,11 +40,10 @@ Signed-off-by: Jeremy Grata <jgrata@metropolis.io>
 diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom-tbu.c b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom-tbu.c
 --- a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom-tbu.c
 +++ b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom-tbu.c
-@@ -239,7 +239,20 @@ static phys_addr_t qsmmuv500_iova_to_phys(struct arm_smmu_domain *smmu_domain,
- 	tbu = qsmmuv500_find_tbu(qsmmu, sid);
+@@ -240,6 +240,19 @@
  	if (!tbu)
  		return 0;
-
+ 
 +	/*
 +	 * If the TBU exposes no clock or interconnect the driver can enable, its
 +	 * debug register block is powered by an external subsystem (e.g. the
@@ -61,5 +60,5 @@ diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom-tbu.c b/drivers/iommu/arm/
  	ret = icc_set_bw(tbu->path, 0, UINT_MAX);
  	if (ret)
  		return ret;
---
+-- 
 2.34.1

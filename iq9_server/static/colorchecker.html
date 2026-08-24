@@ -3,114 +3,237 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ColorChecker — vendor-ISP eval — IQ9</title>
+<title>ColorChecker — RAW-derived CCM vs ISP — IQ9</title>
 <style>
   :root { --bg:#15171c; --panel:#1e2128; --ink:#e6e8ec; --mut:#9aa3b2;
           --acc:#4ea1ff; --line:#2c303a; --ok:#5fd08a; --warn:#e6c15f; --bad:#e46a6a; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--ink); font:13px/1.45 system-ui,Segoe UI,Roboto,sans-serif; }
-  header { padding:8px 14px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; }
+  header { padding:8px 14px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
   header h1 { font-size:14px; margin:0; font-weight:600; }
   header a { color:var(--acc); text-decoration:none; font-size:13px; }
   header .status { margin-left:auto; color:var(--mut); font-size:12px; }
   .wrap { display:flex; gap:12px; padding:12px 14px; flex-wrap:wrap; align-items:flex-start; }
-  .col { flex:1 1 320px; min-width:300px; display:flex; flex-direction:column; gap:12px; }
+  .col { flex:1 1 340px; min-width:300px; display:flex; flex-direction:column; gap:12px; }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
   .card h2 { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--mut); margin:0 0 8px; }
   img { width:100%; border-radius:8px; border:1px solid var(--line); background:#0c0e12; display:block; }
-  button { background:var(--acc); color:#08213d; border:0; border-radius:6px; padding:8px 14px; font-weight:600; cursor:pointer; font:inherit; }
+  button { background:var(--acc); color:#08213d; border:0; border-radius:6px; padding:8px 12px; font-weight:600; cursor:pointer; font:inherit; }
   button.sec { background:#2a2f3a; color:var(--ink); }
-  .tiles { display:flex; gap:10px; flex-wrap:wrap; }
-  .tile { background:#12141a; border:1px solid var(--line); border-radius:8px; padding:8px 12px; min-width:92px; }
-  .tile .n { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; }
-  .tile .l { font-size:10.5px; color:var(--mut); text-transform:uppercase; letter-spacing:.04em; }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  label.inl { font-size:11.5px; color:var(--mut); display:flex; gap:5px; align-items:center; }
+  input[type=number] { width:56px; background:#12141a; color:var(--ink); border:1px solid var(--line); border-radius:5px; padding:5px 6px; font:inherit; }
+  .tiles { display:flex; gap:8px; flex-wrap:wrap; }
+  .tile { background:#12141a; border:1px solid var(--line); border-radius:8px; padding:7px 11px; min-width:84px; }
+  .tile .n { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .tile .l { font-size:10px; color:var(--mut); text-transform:uppercase; letter-spacing:.04em; }
   .grid { display:grid; grid-template-columns:repeat(6,1fr); gap:4px; }
   .patch { border-radius:5px; padding:4px 3px; text-align:center; font-size:9.5px; line-height:1.15; color:#0c0e12; }
   .patch .de { font-weight:700; font-size:12px; font-variant-numeric:tabular-nums; }
   .hint { font-size:10.5px; color:var(--mut); margin-top:6px; }
-  .big { font-size:12px; }
   .b { font-weight:600; } .mut { color:var(--mut); }
+  .ccm { font-family:ui-monospace,Consolas,monospace; font-size:11.5px; background:#12141a; border:1px solid var(--line);
+         border-radius:6px; padding:8px 10px; white-space:pre; overflow-x:auto; }
+  .banner { border-radius:8px; padding:10px 12px; margin-bottom:0; font-size:12.5px; }
+  .banner.win { background:#16311f; border:1px solid #2f6a44; }
+  .banner.bad { background:#3a1d1d; border:1px solid #7a3a3a; }
+  .vs { display:flex; gap:12px; align-items:stretch; }
+  .vs .side { flex:1 1 0; text-align:center; background:#12141a; border:1px solid var(--line); border-radius:8px; padding:10px; }
+  .vs .side .big { font-size:26px; font-weight:800; font-variant-numeric:tabular-nums; }
+  .vs .side .cap { font-size:10.5px; color:var(--mut); text-transform:uppercase; letter-spacing:.04em; }
+  .badge { display:inline-block; font-size:10px; padding:1px 7px; border-radius:9px; background:#2a2f3a; color:var(--mut); }
+  .badge.ok { background:#16311f; color:var(--ok); } .badge.warn { background:#3a331a; color:var(--warn); }
 </style>
 </head>
 <body>
 <header>
-  <h1>ColorChecker — vendor-ISP eval</h1>
-  <a href="/">&larr; live</a> <a href="/mtf">MTF</a> <a href="/history">History</a>
+  <h1>ColorChecker — RAW-derived CCM vs ISP</h1>
+  <a href="/">&larr; live</a> <a href="/mtf">MTF</a> <a href="/fieldmap">Field</a>
+  <a href="/ptc">PTC</a> <a href="/raw">RAW</a> <a href="/history">History</a>
   <div class="status" id="status">ready</div>
 </header>
 
 <div class="wrap">
   <div class="col">
     <div class="card">
-      <button id="measure">Measure ColorChecker</button>
-      <button class="sec" id="save" disabled>Save</button>
-      <div class="hint">Measures ΔE00 of the <b>ISP's</b> output vs the ColorChecker reference —
-        i.e. how accurate the Spectra ISP's colour is. No CCM fit (the ISP already corrects;
-        its tuning carries LI's CCMs). Derived-CCM-from-RAW needs the CamX RDI path.</div>
+      <div class="row">
+        <button id="h2h">Head-to-head (RAW vs ISP)</button>
+        <button class="sec" id="mraw">RAW-derived only</button>
+        <button class="sec" id="misp">ISP (factory) only</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label class="inl">RAW frames avg <input type="number" id="nf" value="4" min="1" max="16"></label>
+        <button class="sec" id="save" disabled>Save last</button>
+      </div>
+      <div class="hint">
+        <b>RAW-derived</b>: detects the chart on linear RAW16, fits a 3&times;3 CCM and reports honest
+        leave-one-out cross-validated &Delta;E00 &mdash; the sensor's colour ceiling.
+        <b>ISP</b>: &Delta;E00 of the Spectra ISP's NV12 output (its tuning carries LI's CCMs).
+        <b>Head-to-head</b> runs both on the same chart. Keep the white patch <b>unclipped</b>
+        (lower the light if it warns) &mdash; clipping corrupts the CCM.
+      </div>
     </div>
-    <div class="card" id="ovCard" style="display:none">
-      <h2>Detection</h2><img id="overlay" alt="detection overlay">
+
+    <div class="card" id="cmpCard" style="display:none">
+      <h2>Head-to-head &Delta;E00 (CIEDE2000, mean)</h2>
+      <div class="vs">
+        <div class="side"><div class="big" id="vsRaw">–</div><div class="cap">RAW-derived (xval)</div></div>
+        <div class="side"><div class="big" id="vsIsp">–</div><div class="cap">ISP factory</div></div>
+      </div>
+      <div class="banner" id="vsBanner" style="margin-top:10px"></div>
     </div>
-    <div class="card" id="swCard" style="display:none">
-      <h2>Measured (left) vs reference (right)</h2><img id="swatch" alt="swatch">
+
+    <div class="card" id="rawCard" style="display:none">
+      <h2>RAW-derived CCM</h2>
+      <div id="rawClip"></div>
+      <div class="tiles" id="rawTiles"></div>
+      <div class="hint" id="rawMeta"></div>
+      <div style="margin-top:8px"><span class="mut" style="font-size:10.5px">derived CCM (raw&#8209;linear &rarr; linear&#8209;sRGB, apply = rgb &middot; M<sup>T</sup>)</span>
+        <div class="ccm" id="rawCcm"></div></div>
+      <div style="margin-top:8px"><img id="rawOverlay" alt="raw detection"></div>
+      <div style="margin-top:6px"><span class="mut" style="font-size:10.5px">measured+CCM (left) vs reference (right)</span>
+        <img id="rawSwatch" alt="raw swatch"></div>
+      <div class="grid" id="rawGrid" style="margin-top:8px"></div>
+      <div class="hint">per-patch = cross-validated &Delta;E00 · green &lt;3 · amber 3–6 · red &gt;6</div>
     </div>
-  </div>
-  <div class="col">
-    <div class="card" id="sumCard" style="display:none">
-      <h2>Summary</h2>
-      <div class="tiles" id="tiles"></div>
-      <div class="hint" id="meta"></div>
-    </div>
-    <div class="card" id="worstCard" style="display:none">
-      <h2>Worst patches</h2><div id="worst" class="big"></div>
-    </div>
-    <div class="card" id="gridCard" style="display:none">
-      <h2>Per-patch ΔE00</h2>
-      <div class="grid" id="grid"></div>
-      <div class="hint">cell colour = reference; green &lt;3 · amber 3–6 · red &gt;6</div>
+
+    <div class="card" id="ispCard" style="display:none">
+      <h2>ISP (factory) colour</h2>
+      <div class="tiles" id="ispTiles"></div>
+      <div class="hint" id="ispMeta"></div>
+      <div id="ispWorst" class="hint"></div>
+      <div style="margin-top:8px"><img id="ispOverlay" alt="isp detection"></div>
+      <div style="margin-top:6px"><span class="mut" style="font-size:10.5px">measured (left) vs reference (right)</span>
+        <img id="ispSwatch" alt="isp swatch"></div>
+      <div class="grid" id="ispGrid" style="margin-top:8px"></div>
+      <div class="hint">per-patch &Delta;E00 · green &lt;3 · amber 3–6 · red &gt;6</div>
     </div>
   </div>
 </div>
 
 <script>
 const $ = id => document.getElementById(id);
-const REF = null;
 function setStatus(t,c){ const s=$("status"); s.textContent=t; s.style.color = c==="bad"?"var(--bad)":c==="ok"?"var(--ok)":c==="warn"?"var(--warn)":"var(--mut)"; }
 const deColor = d => d==null?"#555":(d<3?"#5fd08a":d<6?"#e6c15f":"#e46a6a");
+const fx = (v,p=2)=> (v==null||isNaN(v))?"–":(+v).toFixed(p);
+let LAST_SAVE = null;   // "colorchecker_raw" | "colorchecker"
 
-let LAST=null;
-$("measure").onclick = async () => {
-  setStatus("capturing + detecting…","warn"); $("measure").disabled=true;
-  let d;
-  try{ d = await (await fetch("/api/colorchecker",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"})).json(); }
-  catch(e){ setStatus("request failed: "+e.message,"bad"); $("measure").disabled=false; return; }
-  $("measure").disabled=false;
+function tile(l,v,p,color){ return `<div class="tile"><div class="n" style="color:${color||'var(--ink)'}">${fx(v,p)}</div><div class="l">${l}</div></div>`; }
+function grid(el, des, names){
+  el.innerHTML = (des||[]).map((de,i)=>`<div class="patch" style="background:${deColor(de)}"><div class="de">${(+de).toFixed(1)}</div>${((names&&names[i])||"").replace(/ /g,"&nbsp;")}</div>`).join("");
+}
+
+function renderRaw(d){
+  $("rawCard").style.display = "";
+  const clip = $("rawClip");
+  if(d.white_clip){ clip.innerHTML = `<div class="banner bad">⚠ White patch clipping (white level ${fx(d.white_level*100,0)}% of full-scale) — lower the light; the CCM fit is corrupted.</div>`; }
+  else { clip.innerHTML = `<div class="hint">white level ${fx(d.white_level*100,0)}% of full-scale <span class="badge ok">unclipped</span></div>`; }
+  const beats = d.derived_beats_vendor;
+  $("rawTiles").innerHTML =
+      tile("ΔE xval mean", d.dE_xval_mean,2, deColor(d.dE_xval_mean)) +
+      tile("ΔE xval max", d.dE_xval_max,2, deColor(d.dE_xval_max)) +
+      tile("ΔE selffit", d.dE_derived_mean,2, deColor(d.dE_derived_mean)) +
+      tile("ΔE vendor", d.dE_vendor_mean,2, deColor(d.dE_vendor_mean)) +
+      tile("rootpoly xval", d.dE_rootpoly_xval_mean,2, deColor(d.dE_rootpoly_xval_mean));
+  const g = d.wb_gains||[1,1,1];
+  const warm = g[0] < g[2];   // warm source: blue is dim -> needs the most gain (g_B > g_R)
+  $("rawMeta").innerHTML =
+      `illuminant ≈ <b>${fx(d.illum_cct,0)}K</b> (${d.illum_name}) <span class="badge warn">approx</span> · `+
+      `WB gains R/G/B <b>${fx(g[0],2)}/${fx(g[1],2)}/${fx(g[2],2)}</b> <span class="badge">${warm?'warm':'cool'}</span> · `+
+      `orientation ${d.orientation} · cost ${fx(d.cost,3)} · resid ${fx(d.resid,4)} · `+
+      `<span class="badge ${beats?'ok':'warn'}">${beats?'derived beats vendor':'vendor competitive'}</span>`+
+      (d.rootpoly_beats_linear?` · <span class="badge warn">root-poly &gt; 3×3 (headroom)</span>`:``)+
+      ` · ${d.n_frames||1}-frame avg`;
+  $("rawCcm").textContent = (d.ccm||[]).map(r=>r.map(x=>(x>=0?" ":"")+(+x).toFixed(4)).join("   ")).join("\n");
+  $("rawOverlay").src = d.overlay_png; $("rawSwatch").src = d.swatch_png;
+  grid($("rawGrid"), d.dE_derived, d.patch_names);
+}
+
+function renderIsp(d){
+  $("ispCard").style.display = "";
+  $("ispTiles").innerHTML =
+      tile("ΔE mean", d.dE_mean,2, deColor(d.dE_mean)) +
+      tile("ΔE max", d.dE_max,2, deColor(d.dE_max)) +
+      tile("ΔE median", d.dE_median,2, deColor(d.dE_median)) +
+      tile("neutral a*", d.neutral_cast_a,2) +
+      tile("neutral b*", d.neutral_cast_b,2);
+  $("ispMeta").innerHTML = `orientation <b>${d.orientation}</b> · cost ${fx(d.cost,3)} · clip ${fx((d.clip_frac||0)*100,1)}%`;
+  $("ispWorst").innerHTML = "worst: " + (d.worst||[]).map(w=>`<span class="b" style="color:${deColor(w.de)}">${fx(w.de,1)}</span> ${w.name}`).join(" · ");
+  $("ispOverlay").src = d.overlay_png; $("ispSwatch").src = d.swatch_png;
+  grid($("ispGrid"), d.dE, d.patch_names);
+}
+
+function compare(raw, isp){
+  const r = raw && raw.detected ? raw.dE_xval_mean : null;
+  const i = isp && isp.detected ? isp.dE_mean : null;
+  $("cmpCard").style.display = "";
+  $("vsRaw").textContent = fx(r,2); $("vsRaw").style.color = deColor(r);
+  $("vsIsp").textContent = fx(i,2); $("vsIsp").style.color = deColor(i);
+  const bn = $("vsBanner");
+  if(r!=null && i!=null){
+    const win = r < i;
+    bn.className = "banner " + (win?"win":"bad");
+    bn.innerHTML = win
+      ? `RAW-derived CCM wins by <b>${fx(i-r,2)}</b> ΔE00 — a fitted 3×3 on this sensor's RAW is <b>${fx(i/r,1)}×</b> more accurate than the factory ISP colour here.`
+      : `ISP factory colour is ahead by <b>${fx(r-i,2)}</b> ΔE00.`;
+  } else {
+    bn.className = "banner bad";
+    bn.innerHTML = `Chart not detected in ${r==null?"RAW":""}${(r==null&&i==null)?" and ":""}${i==null?"ISP":""} — aim the camera at the ColorChecker (all 24 patches in frame, unclipped).`;
+  }
+}
+
+async function post(url, body){
+  const r = await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
+  return r.json();
+}
+function nf(){ return Math.max(1, Math.min(16, parseInt($("nf").value)||4)); }
+function hide(...ids){ ids.forEach(i=>$(i).style.display="none"); }
+
+$("h2h").onclick = async () => {
+  hide("cmpCard","rawCard","ispCard"); setStatus("head-to-head: RAW capture + ISP…","warn");
+  ["h2h","mraw","misp"].forEach(i=>$(i).disabled=true);
+  let d; try { d = await post("/api/colorchecker/headtohead",{n_frames:nf()}); }
+  catch(e){ setStatus("request failed: "+e.message,"bad"); ["h2h","mraw","misp"].forEach(i=>$(i).disabled=false); return; }
+  ["h2h","mraw","misp"].forEach(i=>$(i).disabled=false);
   if(d.error){ setStatus("error: "+d.error,"bad"); return; }
-  if(!d.detected){ setStatus("chart NOT detected (clip "+((d.clip_frac||0)*100).toFixed(1)+"%) — aim at the ColorChecker","bad");
-    ["ovCard","swCard","sumCard","worstCard","gridCard"].forEach(i=>$(i).style.display="none"); return; }
-  LAST=d; render(d); $("save").disabled=false; setStatus("measured","ok");
+  const raw=d.raw||{}, isp=d.isp||{};
+  compare(raw, isp);
+  if(raw.detected){ renderRaw(raw); LAST_SAVE="colorchecker_raw"; $("save").disabled=false; }
+  if(isp.detected){ renderIsp(isp); }
+  const parts=[]; if(raw.error)parts.push("RAW: "+raw.error); if(isp.error)parts.push("ISP: "+isp.error);
+  setStatus(parts.length?parts.join(" · "):"measured — RAW-derived ΔE "+fx(raw.dE_xval_mean,2)+" vs ISP "+fx(isp.dE_mean,2), parts.length?"warn":"ok");
+};
+
+$("mraw").onclick = async () => {
+  hide("cmpCard","rawCard","ispCard"); setStatus("RAW capture + detect…","warn");
+  ["h2h","mraw","misp"].forEach(i=>$(i).disabled=true);
+  let d; try { d = await post("/api/colorchecker/raw",{n_frames:nf()}); }
+  catch(e){ setStatus("request failed: "+e.message,"bad"); ["h2h","mraw","misp"].forEach(i=>$(i).disabled=false); return; }
+  ["h2h","mraw","misp"].forEach(i=>$(i).disabled=false);
+  if(d.error){ setStatus("error: "+d.error,"bad"); return; }
+  if(!d.detected){ setStatus("chart NOT detected (clip "+fx((d.clip_frac||0)*100,1)+"%) — aim at the ColorChecker","bad"); return; }
+  renderRaw(d); LAST_SAVE="colorchecker_raw"; $("save").disabled=false; setStatus("measured — ΔE xval "+fx(d.dE_xval_mean,2),"ok");
+};
+
+$("misp").onclick = async () => {
+  hide("cmpCard","rawCard","ispCard"); setStatus("ISP frame + detect…","warn");
+  ["h2h","mraw","misp"].forEach(i=>$(i).disabled=true);
+  let d; try { d = await post("/api/colorchecker",{}); }
+  catch(e){ setStatus("request failed: "+e.message,"bad"); ["h2h","mraw","misp"].forEach(i=>$(i).disabled=false); return; }
+  ["h2h","mraw","misp"].forEach(i=>$(i).disabled=false);
+  if(d.error){ setStatus("error: "+d.error,"bad"); return; }
+  if(!d.detected){ setStatus("chart NOT detected (clip "+fx((d.clip_frac||0)*100,1)+"%) — aim at the ColorChecker","bad"); return; }
+  renderIsp(d); LAST_SAVE="colorchecker"; $("save").disabled=false; setStatus("measured — ISP ΔE "+fx(d.dE_mean,2),"ok");
 };
 
 $("save").onclick = async () => {
+  if(!LAST_SAVE) return;
   setStatus("saving…","warn");
-  try{ const r = await (await fetch("/api/history/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({kind:"colorchecker"})})).json();
-    setStatus(r.error?("save: "+r.error):("saved "+r.id),"ok");
+  try{ const r = await post("/api/history/save",{kind:LAST_SAVE});
+    setStatus(r.error?("save: "+r.error):("saved "+r.id),r.error?"bad":"ok");
   }catch(e){ setStatus("save failed","bad"); }
 };
-
-function render(d){
-  $("overlay").src=d.overlay_png; $("ovCard").style.display="";
-  $("swatch").src=d.swatch_png; $("swCard").style.display="";
-  const tiles=[["ΔE mean",d.dE_mean,2],["ΔE max",d.dE_max,2],["ΔE median",d.dE_median,2],
-               ["neutral a*",d.neutral_cast_a,2],["neutral b*",d.neutral_cast_b,2]];
-  $("tiles").innerHTML = tiles.map(([l,v,p])=>`<div class="tile"><div class="n" style="color:${l.startsWith('ΔE')?deColor(v):'var(--ink)'}">${v==null?'–':(+v).toFixed(p)}</div><div class="l">${l}</div></div>`).join("");
-  $("meta").innerHTML = `orientation <b>${d.orientation}</b> · detector cost ${(+d.cost).toFixed(3)} · clip ${((d.clip_frac||0)*100).toFixed(1)}% · metric CIEDE2000`;
-  $("sumCard").style.display="";
-  $("worst").innerHTML = (d.worst||[]).map(w=>`<div><span class="b" style="color:${deColor(w.de)}">${w.de.toFixed(2)}</span> <span class="mut">${w.name}</span></div>`).join("");
-  $("worstCard").style.display = (d.worst&&d.worst.length)?"":"none";
-  $("grid").innerHTML = (d.dE||[]).map((de,i)=>`<div class="patch" style="background:${deColor(de)}"><div class="de">${de.toFixed(1)}</div>${(d.patch_names&&d.patch_names[i]||"").replace(/ /g,"&nbsp;")}</div>`).join("");
-  $("gridCard").style.display = (d.dE&&d.dE.length)?"":"none";
-}
 </script>
 </body>
 </html>

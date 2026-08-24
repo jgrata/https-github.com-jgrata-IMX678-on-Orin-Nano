@@ -37,10 +37,15 @@ import camera_qmmf            # noqa: E402  (IQ9 capture backend)
 import raw_tools              # noqa: E402  (IQ9 RAW Bayer characterization + preview)
 import mtf_analyze            # noqa: E402  (shared: slanted-edge MTF, analyze_gray path)
 try:
-    import colorchecker       # noqa: E402  (shared: detect + CIEDE2000; analyze_processed)
+    import colorchecker       # noqa: E402  (shared: detect + CIEDE2000; analyze / analyze_processed)
     _HAS_CC = True
 except Exception:
     _HAS_CC = False
+try:
+    import raw_ptc            # noqa: E402  (RAW PTC/OETF/SNR characterization)
+    _HAS_PTC = True
+except Exception:
+    _HAS_PTC = False
 try:
     import history            # noqa: E402  (shared: HDF5 session save)
     _HAS_HISTORY = True
@@ -287,6 +292,11 @@ def raw_page():
     return _page("raw.html")
 
 
+@app.get("/ptc", response_class=HTMLResponse)
+def ptc_page():
+    return _page("ptc.html")
+
+
 # ── camera info / params ─────────────────────────────────────────────────────
 @app.get("/api/info")
 def api_info():
@@ -451,6 +461,126 @@ def api_raw_capture(width: int = 960, wb: int = 1):
             "preview_png": "data:image/png;base64," + base64.b64encode(buf.tobytes()).decode()}
 
 
+@app.get("/fieldmap", response_class=HTMLResponse)
+def fieldmap_page():
+    return _page("fieldmap.html")
+
+
+@app.get("/api/field_map")
+def api_field_map(width: int = 900):
+    """Live RAW field-uniformity heatmap for flat-field / light tuning: green channel,
+    pedestal-subtracted, JET-mapped, plus overall non-uniformity, 3x3 zone brightness
+    (% of the brightest zone), mean DN and clip fraction. Poll this from /fieldmap with the
+    camera in raw mode (NV12 worker idle) so it doesn't thrash the worker."""
+    if not RAW_ENABLE:
+        return JSONResponse({"error": RAW_DISABLED_MSG}, status_code=503)
+    try:
+        frames, meta = _grab_raw(1)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+    raw = frames[0].astype(np.float64)
+    g = np.clip((raw[0::2, 1::2] + raw[1::2, 0::2]) / 2.0 - 200.0, 1.0, None)   # green, pedestal-sub
+    H, W = g.shape
+    zy = np.linspace(0, H, 4).astype(int)
+    zx = np.linspace(0, W, 4).astype(int)
+    Z = np.array([[g[zy[i]:zy[i + 1], zx[j]:zx[j + 1]].mean() for j in range(3)] for i in range(3)])
+    hm = cv2.applyColorMap((np.clip(g / np.percentile(g, 99.5), 0, 1) * 255).astype(np.uint8),
+                           cv2.COLORMAP_JET)
+    ok, buf = cv2.imencode(".jpg", _resize(hm, width), [cv2.IMWRITE_JPEG_QUALITY, 80])
+    import base64
+    return {"nonunif_pct": round(float(100.0 * g.std() / g.mean()), 1),
+            "zones": (100.0 * Z / Z.max()).round(0).astype(int).tolist(),
+            "mean_DN": round(float(g.mean() + 200.0)),
+            "clip_frac": round(float((raw >= 4095).mean()), 4),
+            "map_jpg": "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()}
+
+
+# Only one persistent bayer stream at a time (qtiqmmfsrc can't be opened twice) — shared by the
+# field-map MJPEG and the PTC sweep so they can't collide on the single camera pipeline.
+_stream = {"busy": None, "lock": threading.Lock()}
+
+
+def _stream_acquire(name):
+    """Reserve the persistent camera stream. Returns None on success, else the current holder."""
+    with _stream["lock"]:
+        if _stream["busy"]:
+            return _stream["busy"]
+        _stream["busy"] = name
+        return None
+
+
+def _stream_release(name):
+    with _stream["lock"]:
+        if _stream["busy"] == name:
+            _stream["busy"] = None
+
+
+def _fieldmap_jpeg(raw):
+    """RAW16 (H,W) uint16 -> heatmap JPEG bytes with non-uniformity + zone% overlaid.
+    Works on a downsampled green plane so it keeps up with the ~30fps bayer stream."""
+    gf = (raw[0::2, 1::2].astype(np.float32) + raw[1::2, 0::2]) * 0.5 - 200.0    # green, pedestal-sub
+    g = np.clip(cv2.resize(gf, (480, 271), interpolation=cv2.INTER_AREA), 1.0, None)
+    nonunif = float(100.0 * g.std() / g.mean())
+    zy = np.linspace(0, 271, 4).astype(int); zx = np.linspace(0, 480, 4).astype(int)
+    Z = np.array([[g[zy[i]:zy[i + 1], zx[j]:zx[j + 1]].mean() for j in range(3)] for i in range(3)])
+    zn = (100.0 * Z / Z.max()).round(0).astype(int)
+    hm = cv2.applyColorMap((np.clip(g / np.percentile(g, 99.5), 0, 1) * 255).astype(np.uint8),
+                           cv2.COLORMAP_JET)
+    hm = cv2.resize(hm, (900, 508), interpolation=cv2.INTER_NEAREST)
+    clip = float((raw[::4, ::4] >= 4095).mean())
+    col = (90, 210, 90) if nonunif < 10 else (60, 200, 235) if nonunif < 20 else (70, 70, 235)
+    cv2.putText(hm, "non-unif %.1f%%   mean %d DN   clip %.2f%%" % (nonunif, g.mean() + 200, clip * 100),
+                (10, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.64, col, 2, cv2.LINE_AA)
+    hh, ww = hm.shape[:2]
+    for i in range(3):
+        for j in range(3):
+            cv2.putText(hm, "%d%%" % zn[i, j], (int((j + 0.33) * ww / 3), int((i + 0.55) * hh / 3)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+    ok, buf = cv2.imencode(".jpg", hm, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    return buf.tobytes()
+
+
+def _fieldmap_stream():
+    """Persistent in-process bayer capture -> live heatmap MJPEG (owns the camera lifecycle)."""
+    with _cam_lock:
+        _kill_worker()                                   # release NV12 (one quiesce)
+        cap = camera_qmmf.QmmfCapture(mode="bayer", width=3856, height=2180, fps=30).start()
+    try:
+        for _ in range(3):
+            cap.frame(timeout_s=5.0)                     # warm up
+        while True:
+            raw = cap.frame(timeout_s=5.0)
+            if raw is None:
+                continue
+            jpg = _fieldmap_jpeg(raw)
+            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n"
+    finally:
+        try:
+            cap.stop()
+        except Exception:
+            pass
+        with _cam_lock:
+            if not _raw_mode:
+                _start_worker()                          # restore NV12 live view
+
+
+@app.get("/stream.fieldmap.mjpg")
+def stream_fieldmap():
+    if not RAW_ENABLE:
+        return JSONResponse({"error": RAW_DISABLED_MSG}, status_code=503)
+    holder = _stream_acquire("fieldmap")
+    if holder:
+        return JSONResponse({"error": "camera stream busy (%s)" % holder}, status_code=409)
+
+    def gen():
+        try:
+            yield from _fieldmap_stream()
+        finally:
+            _stream_release("fieldmap")
+
+    return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame")
+
+
 @app.post("/api/raw/save")
 async def api_raw_save(request: Request):
     """Capture N native RAW16 frames and save them (uint16 .npy + JSON sidecar) for
@@ -533,7 +663,7 @@ async def api_mtf(request: Request):
 
 
 # ── history / save (reused shared module; stores the processed frame) ────────
-_last = {"mtf": None, "colorchecker": None, "raw": None}
+_last = {"mtf": None, "colorchecker": None, "colorchecker_raw": None, "raw": None, "ptc": None}
 
 
 @app.post("/api/history/save")
@@ -583,6 +713,335 @@ async def api_colorchecker(request: Request):
         _last["colorchecker"] = {"frame": bgr, "results": res,
                                  "meta": {"source": "nv12-isp", "camera": CAM, "w": W, "h": H}}
     return res
+
+
+# ── colorchecker: RAW-derived CCM (native linear RAW) + head-to-head vs ISP ──
+def _grab_raw_mean(n=4):
+    """Grab n RAW16 frames and return (mean_frame_uint16, meta). Averaging cuts temporal
+    noise for a cleaner CCM fit; detection/analysis then run on the single mean frame."""
+    frames, meta = _grab_raw(max(1, int(n)))
+    if len(frames) <= 1:
+        return frames[0], meta
+    m = np.mean(np.stack(frames, 0).astype(np.float64), axis=0)
+    return np.clip(m, 0, 65535).astype(np.uint16), meta
+
+
+@app.post("/api/colorchecker/raw")
+async def api_colorchecker_raw(request: Request):
+    """RAW-derived CCM colour eval: capture native RAW16, detect the chart on linear RAW,
+    fit a 3x3 CCM and report leave-one-out cross-validated ΔE00 (derived vs vendor) plus a
+    root-poly upper bound — 'what the sensor can do', vs the ISP's baked-in colour."""
+    if not _HAS_CC:
+        return JSONResponse({"error": "colorchecker module not deployed"}, status_code=501)
+    if not RAW_ENABLE:
+        return JSONResponse({"error": RAW_DISABLED_MSG}, status_code=503)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    n = max(1, min(int(body.get("n_frames", 4)), 16))
+    try:
+        frame, meta = await run_in_threadpool(_grab_raw_mean, n)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+    try:
+        res = await run_in_threadpool(colorchecker.analyze, frame, 4095)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    res["source"] = "raw16-derived"
+    res["n_frames"] = n
+    if res.get("detected"):
+        _last["colorchecker_raw"] = {"frame": frame, "results": res,
+                                     "meta": {"source": "raw16", "camera": CAM,
+                                              "w": meta.get("width"), "h": meta.get("height")}}
+    return res
+
+
+@app.post("/api/colorchecker/headtohead")
+async def api_colorchecker_h2h(request: Request):
+    """Apples-to-apples: RAW-derived CCM (analyze) vs the ISP's factory colour
+    (analyze_processed on NV12), same ColorChecker reference. Returns {raw, isp}."""
+    if not _HAS_CC:
+        return JSONResponse({"error": "colorchecker module not deployed"}, status_code=501)
+    if not RAW_ENABLE:
+        return JSONResponse({"error": RAW_DISABLED_MSG}, status_code=503)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    n = max(1, min(int(body.get("n_frames", 4)), 16))
+    out = {}
+    try:
+        frame, meta = await run_in_threadpool(_grab_raw_mean, n)   # kills NV12 worker, then respawns
+        raw_res = await run_in_threadpool(colorchecker.analyze, frame, 4095)
+        raw_res["source"] = "raw16-derived"
+        raw_res["n_frames"] = n
+        out["raw"] = raw_res
+        if raw_res.get("detected"):
+            _last["colorchecker_raw"] = {"frame": frame, "results": raw_res,
+                                         "meta": {"source": "raw16", "camera": CAM,
+                                                  "w": meta.get("width"), "h": meta.get("height")}}
+    except Exception as e:
+        out["raw"] = {"error": str(e)}
+    try:
+        bgr = None
+        for _ in range(25):                                        # wait for a fresh NV12 frame
+            bgr = _frame(timeout_s=5.0)
+            if bgr is not None:
+                break
+            time.sleep(0.2)
+        if bgr is None:
+            out["isp"] = {"error": "no NV12 frame after RAW capture"}
+        else:
+            isp_res = await run_in_threadpool(colorchecker.analyze_processed, bgr)
+            out["isp"] = isp_res
+            if isp_res.get("detected"):
+                _last["colorchecker"] = {"frame": bgr, "results": isp_res,
+                                         "meta": {"source": "nv12-isp", "camera": CAM, "w": W, "h": H}}
+    except Exception as e:
+        out["isp"] = {"error": str(e)}
+    return out
+
+
+# ── RAW PTC / OETF / SNR (stream-based light sweep) ──────────────────────────
+def _dmx_set(fwd, timeout=12):
+    import json as _j
+    import urllib.request
+    try:
+        req = urllib.request.Request(DMX_AGENT_URL + "/dmx", data=_j.dumps(fwd).encode(),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return _j.loads(r.read())
+    except Exception as e:
+        return {"error": "DMX agent unreachable: %s" % e}
+
+
+def _roi_even(H, Wd, frac):
+    """Central ROI (y0,y1,x0,x1) with even offsets so the RGGB Bayer phase is preserved."""
+    frac = max(0.05, min(0.9, float(frac)))
+    fh = int(H * frac); fw = int(Wd * frac)
+    y0 = (H - fh) // 2; x0 = (Wd - fw) // 2
+    y0 -= y0 % 2; x0 -= x0 % 2
+    return (y0, y0 + fh, x0, x0 + fw)
+
+
+_ptc = {"dark": None, "roi": None, "roi_frac": None}
+_PTC_DARK_FILE = "/home/metro/.iq9_ptc_dark.json"   # persistent (survives reboot; /var/volatile is tmpfs)
+
+
+def _ptc_save_dark():
+    """Persist the cached dark so a webui restart (e.g. after a sensor-bin swap) doesn't force
+    re-capping the lens."""
+    try:
+        import json as _j
+        os.makedirs(os.path.dirname(_PTC_DARK_FILE), exist_ok=True)
+        with open(_PTC_DARK_FILE, "w") as f:
+            _j.dump({"dark": _ptc["dark"], "roi": _ptc["roi"], "roi_frac": _ptc["roi_frac"]}, f)
+    except Exception:
+        pass
+
+
+def _ptc_load_dark():
+    if _ptc["dark"] is not None:
+        return
+    try:
+        import json as _j
+        with open(_PTC_DARK_FILE) as f:
+            d = _j.load(f)
+        _ptc["dark"] = d.get("dark")
+        _ptc["roi"] = tuple(d["roi"]) if d.get("roi") else None
+        _ptc["roi_frac"] = d.get("roi_frac")
+    except Exception:
+        pass
+
+
+def _bayer_stream():
+    """Open the persistent bayer capture (caller holds the _stream guard). Kills the NV12 worker."""
+    with _cam_lock:
+        _kill_worker()
+        return camera_qmmf.QmmfCapture(mode="bayer", width=3856, height=2180, fps=30).start()
+
+
+def _bayer_stop(cap):
+    try:
+        cap.stop()
+    except Exception:
+        pass
+    with _cam_lock:
+        if not _raw_mode:
+            _start_worker()                                         # restore NV12 live view
+
+
+def _consecutive(cap, n):
+    frames = []
+    for _ in range(max(2, int(n))):
+        f = cap.frame(timeout_s=5.0)
+        if f is not None:
+            frames.append(f.copy())
+    if len(frames) < 2:
+        raise RuntimeError("bayer stream yielded <2 frames")
+    return frames
+
+
+def _ptc_capture_dark(nframes, roi_frac):
+    cap = _bayer_stream()
+    try:
+        for _ in range(3):
+            cap.frame(timeout_s=5.0)                                # warm up
+        frames = _consecutive(cap, nframes)
+    finally:
+        _bayer_stop(cap)
+    H, Wd = frames[0].shape
+    roi = _roi_even(H, Wd, roi_frac)
+    dark = raw_ptc.measure(frames, roi)
+    _ptc["dark"] = dark; _ptc["roi"] = roi; _ptc["roi_frac"] = float(roi_frac)
+    _ptc_save_dark()
+    return dark, roi
+
+
+def _ptc_capture_sweep(channel, levels, nframes, settle, roi_frac, lux):
+    """ONE persistent bayer stream for the whole sweep, pulled CONTINUOUSLY (never idled). The DMX
+    change runs on a side thread while we keep pulling-and-discarding frames through the burst and
+    the settle, then grab the measurement frames — consecutive, so the 2-frame-diff is true temporal
+    noise. Idling the stream (blocking on the DMX HTTP call or a settle sleep) stalls the qmmf
+    recorder client and KILLS cam-server; continuous pulling is what keeps the field-map stream alive
+    indefinitely, so the sweep does the same. Needs a healthy CAMSS (reboot if cam-server has been
+    crashing)."""
+    cap = _bayer_stream()
+    try:
+        for _ in range(3):
+            cap.frame(timeout_s=5.0)                               # warm up
+        probe = cap.frame(timeout_s=5.0)
+        H, Wd = probe.shape
+        if _ptc["roi"] is not None and _ptc.get("roi_frac") == float(roi_frac):
+            roi = _ptc["roi"]                                      # reuse the dark ROI when it matches
+        else:
+            roi = _roi_even(H, Wd, roi_frac)
+        points = []; table = []
+        for lvl in levels:
+            done = threading.Event()
+
+            def _apply(l=lvl):
+                try:
+                    _dmx_set({channel: int(l)})
+                finally:
+                    done.set()
+
+            threading.Thread(target=_apply, daemon=True).start()
+            while not done.is_set():
+                cap.frame(timeout_s=5.0)                           # pump through the DMX burst
+            t_end = time.monotonic() + settle
+            while time.monotonic() < t_end:
+                cap.frame(timeout_s=5.0)                           # pump through the settle
+            frames = _consecutive(cap, nframes)
+            meas = raw_ptc.measure(frames, roi)
+            sub = frames[0][roi[0]:roi[1], roi[2]:roi[3]]
+            gp = sub[0::2, 1::2].astype(np.float64)                # green within ROI (spatial uniformity)
+            light = float(lux[str(lvl)]) if (lux and str(lvl) in lux) else float(lvl)
+            points.append({"light": light, "meas": meas})
+            table.append({"level": int(lvl), "light": light,
+                          "green_DN": round(float(gp.mean()), 1),
+                          "nonunif_pct": round(float(100.0 * gp.std() / max(gp.mean(), 1e-6)), 1),
+                          "flicker_pct": round(float(meas["G1"]["mean_cv_pct"]), 3),
+                          "clip": round(float((sub >= 4095).mean()), 4)})
+    finally:
+        _bayer_stop(cap)
+    return points, roi, table
+
+
+@app.post("/api/ptc/dark")
+async def api_ptc_dark(request: Request):
+    """Capture a dark reference (CAP THE LENS): consecutive frames from the persistent bayer
+    stream -> per-channel pedestal + temporal read noise. Cached server-side for the sweep."""
+    if not (_HAS_PTC and RAW_ENABLE):
+        return JSONResponse({"error": RAW_DISABLED_MSG if not RAW_ENABLE else "raw_ptc not deployed"},
+                            status_code=503)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    nframes = max(2, min(int(body.get("n_frames", 8)), 32))
+    roi_frac = float(body.get("roi_frac", 0.4))
+    holder = _stream_acquire("ptc")
+    if holder:
+        return JSONResponse({"error": "camera stream busy (%s)" % holder}, status_code=409)
+    try:
+        dark, roi = await run_in_threadpool(_ptc_capture_dark, nframes, roi_frac)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+    finally:
+        _stream_release("ptc")
+    return {"ok": True, "roi": roi, "n_frames": nframes,
+            "channels": {ch: {"pedestal_DN": round(float(dark[ch]["mean"]), 2),
+                              "read_DN": round(float(dark[ch]["var"]) ** 0.5, 3),
+                              "flicker_pct": round(float(dark[ch]["mean_cv_pct"]), 3)}
+                         for ch in raw_ptc.BAYER},
+            "note": "dark cached — uncap the lens, turn the light on, then run the sweep"}
+
+
+@app.post("/api/ptc/sweep")
+async def api_ptc_sweep(request: Request):
+    """Stream-based PTC/OETF/SNR light sweep. body: channel(d65|tungsten), levels[], n_frames,
+    settle_s, roi_frac, lux{level:lux}. Uses CONSECUTIVE frames per level from ONE persistent
+    bayer stream (correct 2-frame-diff temporal noise). With lux, adds responsivity (e-/lux)
+    and lux-referred SNR1s per channel."""
+    if not (_HAS_PTC and RAW_ENABLE):
+        return JSONResponse({"error": RAW_DISABLED_MSG if not RAW_ENABLE else "raw_ptc not deployed"},
+                            status_code=503)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    channel = body.get("channel", "tungsten")
+    if channel not in ("d65", "tungsten"):
+        return JSONResponse({"error": "channel must be d65 or tungsten"}, status_code=400)
+    lv = body.get("levels", [])
+    if isinstance(lv, str):
+        lv = [x for x in lv.replace(",", " ").split() if x]
+    try:
+        levels = [max(0, min(255, int(x))) for x in lv]
+    except Exception:
+        return JSONResponse({"error": "levels must be integers 0-255"}, status_code=400)
+    levels = [x for x in levels if x > 0]                           # dark comes from /api/ptc/dark
+    if len(levels) < 3:
+        return JSONResponse({"error": "need >=3 non-zero levels for a PTC fit"}, status_code=400)
+    nframes = max(2, min(int(body.get("n_frames", 3)), 16))
+    settle = max(0.2, min(float(body.get("settle_s", 1.5)), 8.0))
+    roi_frac = float(body.get("roi_frac", 0.4))
+    lux = body.get("lux") or {}
+    lux = {str(k): float(v) for k, v in lux.items()} if isinstance(lux, dict) else {}
+    _ptc_load_dark()                                                # reload a persisted dark if memory is empty
+    holder = _stream_acquire("ptc")
+    if holder:
+        return JSONResponse({"error": "camera stream busy (%s)" % holder}, status_code=409)
+    try:
+        points, roi, table = await run_in_threadpool(
+            _ptc_capture_sweep, channel, levels, nframes, settle, roi_frac, lux or None)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+    finally:
+        _stream_release("ptc")
+    rep = raw_ptc.characterize(points, _ptc["dark"])
+    have_lux = bool(lux)
+    curves = {}
+    for ch in raw_ptc.BAYER:
+        ped = rep["channels"][ch]["pedestal_DN"]
+        sig = [p["meas"][ch]["mean"] - ped for p in points]
+        var = [p["meas"][ch]["var"] for p in points]
+        snr = [(s / (v ** 0.5)) if v > 0 else None for s, v in zip(sig, var)]
+        curves[ch] = {"signal_DN": [round(float(s), 2) for s in sig],
+                      "var_DN": [round(float(v), 2) for v in var],
+                      "light": [p["light"] for p in points],
+                      "snr": [round(float(x), 3) if x is not None else None for x in snr]}
+        if have_lux:
+            rep["channels"][ch].update(raw_ptc.lux_metrics(rep["channels"][ch]))
+    result = {"channels": rep["channels"], "curves": curves, "table": table, "roi": roi,
+              "channel": channel, "levels": levels, "lux_referred": have_lux,
+              "dark_source": ("cached dark frames" if _ptc["dark"] else "darkest sweep level"),
+              "notes": rep["notes"]}
+    _last["ptc"] = {"results": result, "meta": {"source": "raw16-ptc", "camera": CAM,
+                                                "channel": channel, "levels": levels}}
+    return result
 
 
 if __name__ == "__main__":

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flat-field map — IQ9</title>
+<style>
+  :root { --bg:#15171c; --panel:#1e2128; --ink:#e6e8ec; --mut:#9aa3b2; --acc:#4ea1ff; --line:#2c303a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif;
+         display:flex; flex-direction:column; height:100vh; overflow:hidden; }
+  header { flex:0 0 auto; padding:10px 16px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; }
+  header h1 { font-size:15px; margin:0; }
+  header a { color:var(--acc); text-decoration:none; font-size:13px; }
+  .pill { font-size:11px; padding:1px 8px; border-radius:10px; background:#2a2f3a; color:var(--mut); }
+  .stage { flex:1 1 auto; min-height:0; display:flex; gap:14px; padding:14px; }
+  .view { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; }
+  .view img { width:100%; height:100%; object-fit:contain; border-radius:8px; border:1px solid var(--line); background:#000; display:block; }
+  .side { flex:0 0 260px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin-bottom:12px; font-size:13px; }
+  .card h2 { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--mut); margin:0 0 8px; }
+  .hint { font-size:11.5px; color:var(--mut); }
+  .bar { height:12px; border-radius:3px; margin:6px 0;
+         background:linear-gradient(90deg,#0000ff,#00ffff,#00ff00,#ffff00,#ff0000); }
+  button { background:#2a2f3a; color:var(--ink); border:0; border-radius:6px; padding:8px 12px; cursor:pointer; width:100%; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Flat-field uniformity <span class="pill">live RAW ~30 fps</span></h1>
+  <a href="/">live</a> <a href="/colorchecker">ColorChecker</a> <a href="/raw">RAW</a>
+  <span id="conn" class="pill" style="margin-left:auto">starting…</span>
+</header>
+<div class="stage">
+  <div class="view"><img id="map" alt="field map"></div>
+  <div class="side">
+    <div class="card">
+      <h2>Reading it</h2>
+      The overlay shows <b>non-uniformity %</b>, mean DN, and clip %, plus a <b>3×3 zone grid</b>
+      (each cell = % of the brightest zone). Adjust the lights and watch it update live.
+      <div class="bar"></div>
+      <div class="hint">dim → bright (JET)</div>
+    </div>
+    <div class="card">
+      <h2>Targets</h2>
+      non-uniformity <b>&lt;10%</b> is fine for PTC (the 2-frame difference is gradient-robust);
+      <b>&lt;3%</b> if you want clean full-well / OETF. Keep clip at 0 for the sweep.
+      Move fill light toward the lowest-% zone.
+    </div>
+    <button id="reload">↻ reconnect stream</button>
+    <div class="hint" style="margin-top:8px">Leaving this page restores the NV12 live view.</div>
+  </div>
+</div>
+<script>
+const img = document.getElementById("map"), conn = document.getElementById("conn");
+function start(){
+  conn.textContent = "starting…"; conn.style.color = "";
+  img.src = "/stream.fieldmap.mjpg?t=" + Date.now();
+}
+img.onload = () => { conn.textContent = "live"; conn.style.color = "#5fd08a"; };
+img.onerror = () => { conn.textContent = "stream busy/err — reconnect"; conn.style.color = "#e46a6a"; };
+document.getElementById("reload").onclick = start;
+start();
+// nudge the camera back to NV12 when leaving (the stream's finally also does this on disconnect)
+window.addEventListener("beforeunload", () => {
+  img.src = "";
+  navigator.sendBeacon("/api/raw/mode", new Blob([JSON.stringify({raw:false})], {type:"application/json"}));
+});
+</script>
+</body>
+</html>

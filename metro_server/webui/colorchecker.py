@@ -94,8 +94,16 @@ def _mccamy_cct(x, y):
     return 449 * n ** 3 + 3525 * n ** 2 + 6823.3 * n + 5520.33
 
 
-def _illuminant(neutral_lin):
-    srgb_lin = np.asarray(neutral_lin) @ np.asarray(hdr.VENDOR_CCM).T
+def _illuminant(neutral_lin, ccm=None):
+    """Rough CCT of the scene illuminant from the neutral patches: map neutral raw through
+    a FIXED raw->sRGB matrix (illuminant-INDEPENDENT) -> XYZ -> xy -> McCamy CCT.
+    NOTE: this MUST use a fixed sensor matrix, never the shot's own derived CCM -- the derived
+    CCM is fit to THIS illuminant and white-balances the neutrals to ~D65, so feeding it back
+    would always report ~6500K. The default (hdr.VENDOR_CCM, the eCAM/Jetson tuning) is only
+    approximate on the IQ9, so treat the CCT as a rough label; wb_gains is the calibration-free
+    cast indicator to trust instead."""
+    ccm = hdr.VENDOR_CCM if ccm is None else ccm
+    srgb_lin = np.asarray(neutral_lin) @ np.asarray(ccm).T
     M = np.array([[0.4124, 0.3576, 0.1805],
                   [0.2126, 0.7152, 0.0722],
                   [0.0193, 0.1192, 0.9505]])
@@ -106,6 +114,16 @@ def _illuminant(neutral_lin):
     cct = _mccamy_cct(x, y)
     name = min(STD_ILLUM, key=lambda t: abs(t[1] - cct))[0]
     return float(cct), name
+
+
+def _wb_gains(neutral_rgb):
+    """Calibration-free illuminant cast fingerprint: the per-channel gains that neutralize
+    the measured (black-level-subtracted) neutral patches, normalized to green (G=1).
+    g_R>1 & g_B<1 => warm source (tungsten); g_R<1 & g_B>1 => cool (daylight). Independent
+    of any CCM, so unlike the CCT label it stays meaningful even without a calibrated matrix."""
+    m = np.clip(np.asarray(neutral_rgb, float).mean(axis=0), 1e-6, None)
+    g = m[1] / m                                 # gains that pull each channel up to green
+    return [float(g[0]), 1.0, float(g[2])]
 
 
 def _b64png(bgr):
@@ -302,7 +320,10 @@ def analyze(frame, maxv, black_level=None, rootpoly_degree=2):
     dE_rp_xval = _loo_rootpoly_de2000(chart, ref, ref_lab, rp_deg)
     rp_terms = int(_rootpoly_features(chart[:1], rp_deg).shape[1])
 
-    cct, illum = _illuminant(np.mean(chart[18:21], axis=0))
+    neutral = chart[18:21]                              # white, neutral8, neutral6.5 (bright greys)
+    cct, illum = _illuminant(np.mean(neutral, axis=0))  # via a FIXED matrix (approx) -- see _illuminant
+    wb_gains = _wb_gains(neutral)                        # calibration-free cast indicator
+    white_level = float(chart[18].max())                # brightest neutral channel, frac of full-scale
 
     # detection overlay (green sample boxes) -- ctrs are in ORIGINAL (unpermuted) order
     ov = bgr.copy()
@@ -319,6 +340,10 @@ def analyze(frame, maxv, black_level=None, rootpoly_degree=2):
         "clip_frac": float((frame >= maxv).mean()),
         "illum_cct": cct,
         "illum_name": illum,
+        "illum_approx": True,                             # CCT via a fixed (uncalibrated) matrix
+        "wb_gains": [round(g, 4) for g in wb_gains],       # [R,G,B] gains to neutral (G=1); cast fingerprint
+        "white_level": round(white_level, 4),             # white-patch brightest channel, frac of full-scale
+        "white_clip": bool(white_level >= 0.97),          # white patch at/near saturation -> corrupts CCM
         # vendor CCM (unbiased) vs derived: report BOTH the optimistic self-fit and
         # the honest cross-validated ΔE00. Compare vendor vs xval to judge "does ours win".
         "dE_vendor_mean": float(dE_vendor.mean()),

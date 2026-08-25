@@ -37,6 +37,27 @@ import numpy as np
 RAW_W, RAW_H, RAW_FPS = 3856, 2180, 30
 
 
+def _destride_raw16(a, width, height):
+    """De-pad a flat RAW16 (uint16 LE) buffer to an (H, width) array. On QLI 1.7 the
+    qtiqmmfsrc row stride equalled the requested width; on 2.0 it pads the stride (e.g.
+    3856 -> 3872 px) and returns a few fewer rows (2176), so the naive width*height reshape
+    shears the frame. Detect the true stride from the buffer size — the smallest px-aligned
+    stride >= width that divides the buffer evenly — and crop back to the active width.
+    Returns an (H, width) uint16 copy, or None if the buffer is too small."""
+    n = int(a.size)
+    if n == width * height:                       # 1.7: no line padding
+        return a.reshape(height, width).copy()
+    for align in (8, 16, 32, 64, 128, 256, 512, 1024):
+        s = ((width + align - 1) // align) * align
+        if s > width and n % s == 0:              # 2.0: padded stride (3872 for width 3856)
+            h = n // s
+            if h > 0:
+                return a[:s * h].reshape(h, s)[:, :width].copy()
+    if n >= width * height:                       # fallback: assume no pad
+        return a[:width * height].reshape(height, width).copy()
+    return None
+
+
 def grab_raw16(n_frames=1, width=RAW_W, height=RAW_H, fps=RAW_FPS, camera=0,
                timeout_s=25, retries=1, exposure_ns=None, iso=None, shdr=False):
     """Capture native RAW16 Bayer frames via an isolated gst-launch subprocess.
@@ -98,8 +119,9 @@ def grab_raw16(n_frames=1, width=RAW_W, height=RAW_H, fps=RAW_FPS, camera=0,
         for fp in files:
             a = np.fromfile(fp, dtype="<u2")
             raw_bytes = max(raw_bytes, a.size * 2)
-            if a.size >= width * height:
-                frames.append(a[:width * height].reshape(height, width).copy())
+            f = _destride_raw16(a, width, height)     # 1.7 & 2.0 (stride-padded) safe
+            if f is not None:
+                frames.append(f)
             try:
                 os.remove(fp)
             except OSError:
@@ -224,10 +246,8 @@ class QmmfCapture:
                 stride = mi.size // h
                 a = np.frombuffer(mi.data, np.uint8, count=stride * h).reshape(h, stride)
                 return a[:, :w * 4].reshape(h, w, 4)[:, :, :3].copy()      # -> BGR
-            # bayer (RAW16): uint16 LE, stride == width (no line pad); take the h image rows.
+            # bayer (RAW16): uint16 LE. 1.7 stride == width; 2.0 pads the stride -> de-pad.
             a = np.frombuffer(mi.data, dtype="<u2")
-            if a.size < w * h:
-                return None
-            return a[:w * h].reshape(h, w).copy()
+            return _destride_raw16(a, w, h)
         finally:
             buf.unmap(mi)

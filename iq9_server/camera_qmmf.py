@@ -34,28 +34,28 @@ import tempfile
 import numpy as np
 
 # Sensor-native RAW readout (Leopard IMX678 on this EVK): full RGGB, 12-bit.
-RAW_W, RAW_H, RAW_FPS = 3856, 2180, 30
+# CAPS geometry the qtiqmmfsrc bayer stream accepts is 3856 x 2180 (the driver
+# rejects 2176). The DECODED active image, however, is 3856 x 2176 (datasheet).
+RAW_W, RAW_H, RAW_FPS = 3856, 2180, 30   # width, CAPS height, fps
+RAW_H_ACTIVE = 2176                       # real active rows in the buffer
 
 
 def _destride_raw16(a, width, height):
-    """De-pad a flat RAW16 (uint16 LE) buffer to an (H, width) array. On QLI 1.7 the
-    qtiqmmfsrc row stride equalled the requested width; on 2.0 it pads the stride (e.g.
-    3856 -> 3872 px) and returns a few fewer rows (2176), so the naive width*height reshape
-    shears the frame. Detect the true stride from the buffer size — the smallest px-aligned
-    stride >= width that divides the buffer evenly — and crop back to the active width.
-    Returns an (H, width) uint16 copy, or None if the buffer is too small."""
+    """Reshape a flat RAW16 (uint16 LE) 'bayer' buffer to a (RAW_H_ACTIVE, width) RGGB array.
+
+    The qtiqmmfsrc bayer(bpp=16) buffer is a PLAIN LINEAR raster whose pixel stride
+    equals the active width (3856 px / 7712 B) with NO per-row padding; the active image
+    is the first width*RAW_H_ACTIVE samples and the remainder is a trailing padding/
+    metadata block. NOTE: on QLI 2.0 GstVideoMeta MISREPORTS the layout (stride 7728 B =
+    3864 px, height 2180) — trusting it (or stride = buffer//height) shears the frame by
+    ~15 px/row. Adjacent-row cross-correlation is flat only at stride == width, and the
+    result matches the ColorChecker with no shear and correct RGGB order. The `height`
+    arg (CAPS height, 2180) is ignored for the pixel layout. Verified on 2.0 (Aug 2026)."""
     n = int(a.size)
-    if n == width * height:                       # 1.7: no line padding
-        return a.reshape(height, width).copy()
-    for align in (8, 16, 32, 64, 128, 256, 512, 1024):
-        s = ((width + align - 1) // align) * align
-        if s > width and n % s == 0:              # 2.0: padded stride (3872 for width 3856)
-            h = n // s
-            if h > 0:
-                return a[:s * h].reshape(h, s)[:, :width].copy()
-    if n >= width * height:                       # fallback: assume no pad
-        return a[:width * height].reshape(height, width).copy()
-    return None
+    rows = min(RAW_H_ACTIVE, n // width)
+    if rows <= 0:
+        return None
+    return a[:width * rows].reshape(rows, width).copy()
 
 
 def grab_raw16(n_frames=1, width=RAW_W, height=RAW_H, fps=RAW_FPS, camera=0,

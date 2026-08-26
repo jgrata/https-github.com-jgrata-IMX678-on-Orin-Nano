@@ -361,6 +361,54 @@ async def api_dmx_get():
     return await run_in_threadpool(work)
 
 
+@app.get("/api/dmx/status")
+async def api_dmx_status():
+    """Current DMX agent URL and whether it's reachable right now."""
+    def work():
+        import json as _j
+        import urllib.request
+        try:
+            with urllib.request.urlopen(DMX_AGENT_URL + "/dmx", timeout=4) as r:
+                return {"url": DMX_AGENT_URL, "connected": True, "levels": _j.loads(r.read())}
+        except Exception as e:
+            return {"url": DMX_AGENT_URL, "connected": False, "error": str(e)}
+    return await run_in_threadpool(work)
+
+
+@app.post("/api/dmx/connect")
+async def api_dmx_connect(request: Request):
+    """(Re)point the webui at the PC-side DMX agent and test it. With no host/url in the body,
+    uses the requesting client's IP -- the browser runs on the PC that hosts the agent, so this
+    works over whatever network is currently up (LAN/WiFi), not just the dead direct link.
+    Latches the new URL only if the agent answers, so a bad address can't break a working one."""
+    global DMX_AGENT_URL
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    url = str(body.get("url", "")).strip()
+    if not url:
+        host = str(body.get("host", "")).strip() or (request.client.host if request.client else "127.0.0.1")
+        port = int(body.get("port", 9200))
+        url = "http://%s:%d" % (host, port)
+    if not url.startswith("http"):
+        url = "http://" + url
+    url = url.rstrip("/")
+
+    def work():
+        import json as _j
+        import urllib.request
+        try:
+            with urllib.request.urlopen(url + "/dmx", timeout=5) as r:
+                return {"connected": True, "url": url, "levels": _j.loads(r.read())}
+        except Exception as e:
+            return {"connected": False, "url": url, "error": str(e)}
+    res = await run_in_threadpool(work)
+    if res.get("connected"):
+        DMX_AGENT_URL = url          # latch only on success
+    return res
+
+
 @app.post("/api/dmx")
 async def api_dmx_set(request: Request):
     """Set illuminant levels via the PC-side DMX agent (d65/tungsten, 0-255)."""

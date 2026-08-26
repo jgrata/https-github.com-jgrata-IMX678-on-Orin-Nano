@@ -1,0 +1,17 @@
+[Unit]
+Description=IQ9 IMX678 characterization webui
+After=network-online.target cam-server.service
+Wants=network-online.target cam-server.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/iq9_server
+Environment=IQ9_RAW_ENABLE=1
+Environment=PORT=8080
+ExecStart=/usr/bin/python3 /root/iq9_server/server.py
+Restart=on-failure
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target

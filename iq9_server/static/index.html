@@ -63,6 +63,12 @@
     </div>
     <div class="card">
       <h2>Lighting (DMX)</h2>
+      <div class="row">
+        <button id="dmxconnect">Connect to DMX</button>
+        <input type="text" id="dmxhost" placeholder="auto (this PC)"
+          title="DMX agent host/IP; blank = auto-detect from your browser IP"
+          style="flex:1;min-width:5em;background:#2a2f3a;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px;font:inherit"></div>
+      <div class="row"><span class="note" id="dmxconn" style="margin-top:0">checking…</span></div>
       <div class="row"><span style="width:4.2em;color:var(--mut)">D65</span>
         <input type="range" id="d65" min="0" max="255" step="1" value="0">
         <input type="number" id="d65v" min="0" max="255" step="1" value="0"
@@ -170,7 +176,26 @@ function dmxPair(slider,num){
 dmxPair("d65","d65v"); dmxPair("tung","tungv");
 $("lightoff").onclick=()=>{ ["d65","d65v","tung","tungv"].forEach(id=>$(id).value=0); setDmx(); };
 
-refreshInfo(); refreshHist(); refreshDmx();
+function dmxConn(t,c){ const n=$("dmxconn"); n.textContent=t;
+  n.style.color = c==="bad"?"var(--bad)":c==="ok"?"var(--ok)":"var(--mut)"; }
+async function dmxStatus(){
+  try{ const d = await (await fetch("/api/dmx/status")).json();
+    dmxConn((d.connected?"connected: ":"not connected: ")+d.url, d.connected?"ok":"mut");
+  }catch(e){ dmxConn("status unavailable","bad"); }
+}
+async function connectDmx(){
+  dmxConn("connecting…","mut");
+  const host=$("dmxhost").value.trim();
+  try{
+    const r = await (await fetch("/api/dmx/connect",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(host?{host}:{})})).json();
+    if(r.connected){ dmxConn("connected: "+r.url,"ok"); refreshDmx(); }
+    else dmxConn("failed ("+r.url+"): "+(r.error||"unreachable"),"bad");
+  }catch(e){ dmxConn("connect failed","bad"); }
+}
+$("dmxconnect").onclick=connectDmx;
+
+refreshInfo(); refreshHist(); refreshDmx(); dmxStatus();
 setInterval(refreshInfo, 3000);
 setInterval(refreshHist, 1500);
 setInterval(()=>{ if(!dmxBusy) refreshDmx(); }, 4000);

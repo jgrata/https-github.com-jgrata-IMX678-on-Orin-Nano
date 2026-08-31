@@ -89,6 +89,10 @@ app = FastAPI(title="IMX678 on IQ9 — Web UI")
 _worker = None
 _cam_lock = threading.Lock()
 _raw_mode = False                                   # cold RAW mode: worker killed, camera idle
+# Setup-safe camera lock: when True, reject raw-mode toggles and RAW grabs (the camera
+# reconfigures that wedge the 2.0 cam-server). NV12 live view + fieldmap work fine while locked.
+# Unlock via POST /api/cam_lock {"locked": false} for RAW characterization (PTC/SNR1s/CCM/DCG).
+_cam_locked = os.environ.get("IQ9_CAM_LOCK", "1") not in ("0", "false", "False")
 _exposure_comp = None                               # last-requested exposure-compensation (cached)
 SHM = os.environ.get("IQ9_SHM", "/dev/shm/iq9_nv12")
 CTL = SHM + ".ctl"
@@ -192,8 +196,11 @@ def _read_shm(timeout_s=5.0):
 
 
 def _set_raw_mode(on):
-    """Enter/exit cold RAW mode (kills / restores the NV12 worker)."""
+    """Enter/exit cold RAW mode (kills / restores the NV12 worker). No-op while the camera is
+    locked to NV12 (setup mode) so a stray toggle can't wedge the 2.0 stack."""
     global _raw_mode
+    if _cam_locked and bool(on) != _raw_mode:
+        return _raw_mode                             # locked: refuse the reconfigure
     with _cam_lock:
         if on and not _raw_mode:
             _kill_worker()
@@ -220,6 +227,9 @@ def _grab_raw(n_frames=1, width=None, height=None, shdr=False):
     (unless in cold RAW mode). width/height override the capture geometry (e.g. the taller
     DCG/Clear HDR frame); omit for the shipping-mode default. shdr=True requests the Raw
     SHDR (2-exposure) usecase (vhdr=shdr-raw) for Clear HDR / DOL dual-VC capture."""
+    if _cam_locked:
+        raise RuntimeError("camera locked to NV12 (setup mode); "
+                           "POST /api/cam_lock {\"locked\": false} to enable RAW")
     with _cam_lock:
         cold = _raw_mode
         _kill_worker()                              # full camera release
@@ -488,6 +498,27 @@ async def api_raw_mode(request: Request):
                      else "NV12 live view active")}
 
 
+@app.get("/api/cam_lock")
+def api_cam_lock_get():
+    """Setup-safe camera lock state. Locked => NV12-only: raw-mode toggles are no-ops and RAW
+    grabs are refused, so a stray /raw, /ptc, or raw-mode request (e.g. from a second browser)
+    can't reconfigure and wedge the 2.0 camera. NV12 live view + /fieldmap work while locked."""
+    return {"locked": _cam_locked, "raw_mode": _raw_mode}
+
+
+@app.post("/api/cam_lock")
+async def api_cam_lock_set(request: Request):
+    """Lock/unlock the camera. Unlock (locked:false) before RAW characterization (PTC/SNR1s/
+    CCM/DCG); lock (locked:true) for setup/uniformity/alignment so nothing can wedge it."""
+    global _cam_locked
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    _cam_locked = bool(body.get("locked", True))
+    return {"locked": _cam_locked, "raw_mode": _raw_mode}
+
+
 @app.get("/api/raw/capture")
 def api_raw_capture(width: int = 960, wb: int = 1):
     """Capture one native RAW16 frame; return characterization stats + a preview PNG."""
@@ -516,30 +547,26 @@ def fieldmap_page():
 
 @app.get("/api/field_map")
 def api_field_map(width: int = 900):
-    """Live RAW field-uniformity heatmap for flat-field / light tuning: green channel,
-    pedestal-subtracted, JET-mapped, plus overall non-uniformity, 3x3 zone brightness
-    (% of the brightest zone), mean DN and clip fraction. Poll this from /fieldmap with the
-    camera in raw mode (NV12 worker idle) so it doesn't thrash the worker."""
-    if not RAW_ENABLE:
-        return JSONResponse({"error": RAW_DISABLED_MSG}, status_code=503)
-    try:
-        frames, meta = _grab_raw(1)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=502)
-    raw = frames[0].astype(np.float64)
-    g = np.clip((raw[0::2, 1::2] + raw[1::2, 0::2]) / 2.0 - 200.0, 1.0, None)   # green, pedestal-sub
+    """Live illumination-uniformity heatmap for light tuning, off the NV12 worker (8-bit ISP
+    luma = lens-shading-corrected illumination; STABLE, no camera reconfigure). Reports overall
+    non-uniformity, 3x3 zone brightness (% of the brightest zone), mean and clip fraction.
+    NV12 is gamma-encoded, so the % is relative (good for leveling, not an absolute figure)."""
+    bgr = _frame(timeout_s=5.0)
+    if bgr is None:
+        return JSONResponse({"error": "no NV12 frame (camera in raw mode?)"}, status_code=502)
+    g = np.clip(bgr[:, :, 1].astype(np.float64), 1.0, None)                    # ISP green as luma
     H, W = g.shape
     zy = np.linspace(0, H, 4).astype(int)
     zx = np.linspace(0, W, 4).astype(int)
     Z = np.array([[g[zy[i]:zy[i + 1], zx[j]:zx[j + 1]].mean() for j in range(3)] for i in range(3)])
-    hm = cv2.applyColorMap((np.clip(g / np.percentile(g, 99.5), 0, 1) * 255).astype(np.uint8),
+    hm = cv2.applyColorMap((np.clip(g / max(g.max(), 1.0), 0, 1) * 255).astype(np.uint8),
                            cv2.COLORMAP_JET)
     ok, buf = cv2.imencode(".jpg", _resize(hm, width), [cv2.IMWRITE_JPEG_QUALITY, 80])
     import base64
     return {"nonunif_pct": round(float(100.0 * g.std() / g.mean()), 1),
             "zones": (100.0 * Z / Z.max()).round(0).astype(int).tolist(),
-            "mean_DN": round(float(g.mean() + 200.0)),
-            "clip_frac": round(float((raw >= 4095).mean()), 4),
+            "mean_DN": round(float(g.mean())),
+            "clip_frac": round(float((bgr[:, :, 1] >= 250).mean()), 4),
             "map_jpg": "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()}
 
 
@@ -612,21 +639,53 @@ def _fieldmap_stream():
                 _start_worker()                          # restore NV12 live view
 
 
+def _fieldmap_jpeg_nv12(bgr):
+    """NV12 (BGR) frame -> illumination-uniformity heatmap JPEG with non-uniformity + zone%
+    overlaid. Uses the ISP green (luma proxy) so it reflects illumination AFTER lens-shading
+    correction (8-bit, gamma-encoded -> relative). No pedestal subtraction (NV12 black ~0)."""
+    g = np.clip(cv2.resize(bgr[:, :, 1].astype(np.float32), (480, 271),
+                           interpolation=cv2.INTER_AREA), 1.0, None)
+    nonunif = float(100.0 * g.std() / g.mean())
+    zy = np.linspace(0, 271, 4).astype(int); zx = np.linspace(0, 480, 4).astype(int)
+    Z = np.array([[g[zy[i]:zy[i + 1], zx[j]:zx[j + 1]].mean() for j in range(3)] for i in range(3)])
+    zn = (100.0 * Z / Z.max()).round(0).astype(int)
+    hm = cv2.applyColorMap((np.clip(g / max(g.max(), 1.0), 0, 1) * 255).astype(np.uint8),
+                           cv2.COLORMAP_JET)
+    hm = cv2.resize(hm, (900, 508), interpolation=cv2.INTER_NEAREST)
+    clip = float((bgr[::4, ::4, 1] >= 250).mean())
+    col = (90, 210, 90) if nonunif < 10 else (60, 200, 235) if nonunif < 20 else (70, 70, 235)
+    cv2.putText(hm, "non-unif %.1f%%   mean %d   clip %.2f%%   [NV12 8-bit]" %
+                (nonunif, g.mean(), clip * 100), (10, 26),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, col, 2, cv2.LINE_AA)
+    hh, ww = hm.shape[:2]
+    for i in range(3):
+        for j in range(3):
+            cv2.putText(hm, "%d%%" % zn[i, j], (int((j + 0.33) * ww / 3), int((i + 0.55) * hh / 3)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+    ok, buf = cv2.imencode(".jpg", hm, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    return buf.tobytes()
+
+
+def _fieldmap_stream_nv12():
+    """Live illumination heatmap MJPEG off the NV12 worker. Reads shared frames via _frame()
+    (no camera reconfigure, no exclusive lock) so it's stable and coexists with the live view."""
+    import time as _t
+    while True:
+        bgr = _frame(timeout_s=5.0)
+        if bgr is None:
+            _t.sleep(0.15)
+            continue
+        yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + _fieldmap_jpeg_nv12(bgr) + b"\r\n"
+        _t.sleep(0.05)                                   # ~20 fps cap
+
+
 @app.get("/stream.fieldmap.mjpg")
 def stream_fieldmap():
-    if not RAW_ENABLE:
-        return JSONResponse({"error": RAW_DISABLED_MSG}, status_code=503)
-    holder = _stream_acquire("fieldmap")
-    if holder:
-        return JSONResponse({"error": "camera stream busy (%s)" % holder}, status_code=409)
-
-    def gen():
-        try:
-            yield from _fieldmap_stream()
-        finally:
-            _stream_release("fieldmap")
-
-    return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame")
+    """Live illumination heatmap MJPEG off the NV12 worker (8-bit, stable). No RAW_ENABLE gate
+    and no exclusive stream lock -- it just reads the shared NV12 frames, so multiple viewers
+    and the main live view coexist. (The RAW/bayer field-map wedged cam-server on 2.0.)"""
+    return StreamingResponse(_fieldmap_stream_nv12(),
+                             media_type="multipart/x-mixed-replace; boundary=frame")
 
 
 @app.post("/api/raw/save")

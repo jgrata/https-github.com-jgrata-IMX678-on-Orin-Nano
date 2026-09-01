@@ -50,8 +50,17 @@ provenance:  tuning_scenario(Chromatix), pipeline_version
 2. **Metadata** — ✅ DONE (commit c84246b). Per-frame CamX result metadata + sensor timestamp
    published; `/api/frame_meta` composes the full requested-vs-actual provenance record. See
    **How the metadata is actually extracted** below.
-3. **RTSP** — TODO. 3 encode→`qtirtspbin` branches (H264-1080/8554, H265-1080/8555, H264-4k/8556);
-   verify Venus (`qtismartvencbin`) capacity alongside NV12 + RAW @30fps.
+3. **RTSP** — ✅ DONE (commits aae983e, 12eacca). 3 HW-encoded streams TEED off the SAME camera
+   session (single-client): the two 1080p tee off the NV12 pad (no extra camera stream), the 4k uses
+   its own pad (video_2). Each = leaky queue → `v4l2{h264,h265}enc` (dmabuf-import) →
+   `{h264,h265}parse config-interval=1` → `qtirtspbin` (own port + mount):
+   `rtsp://<board>:8554/h264-1080`, `:8555/h265-1080`, `:8556/h264-4k` (bound 0.0.0.0). Validated:
+   all three deliver frames while NV12 + RAW + metadata stay live; CamX/Venus hold 3 streams + 3
+   encodes. **Two gotchas:** (a) `qtirtspbin`'s RTSP server services clients from GLib main-loop
+   callbacks — the daemon's blocking appsink-pull loop has none, so run a `GLib.MainLoop` in a daemon
+   thread or the server accepts TCP but never answers OPTIONS (client timeout). (b) `v4l2*enc` runs
+   CONTINUOUSLY (extra SoC heat) — set `IQ9_RTSP=0` + reboot for temperature-sensitive characterization.
+   `/api/info` surfaces the stream URLs. Gated by `IQ9_RTSP` / `IQ9_RTSP_4K` in iq9cam.service.
 
 ## How the metadata is actually extracted (the non-obvious part)
 The buffer meta (`attach-cam-meta` / `GstCameraMeta` in `libgstqticamerabase`) is a proprietary C

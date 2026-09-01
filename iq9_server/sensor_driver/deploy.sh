@@ -16,9 +16,13 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CMD="${1:-status}"
 
-HOST="${IQ9_HOST:-192.168.99.2}"; SSHH="metro@$HOST"
-DEVDIR="/usr/lib/camera"
+# QLI 2.0 (lemans): root is passwordless and the sensormodule .bin lives under camx/lemans/camera.
+# (1.7 was metro@ + /usr/lib/camera.) A .bin swap needs a reboot for a clean bring-up in the new
+# mode on 2.0 -- IQ9_DEPLOY_POST=restart to try a cam-server restart instead (reconfigure test).
+HOST="${IQ9_HOST:-192.168.99.2}"; SSHH="root@$HOST"
+DEVDIR="${IQ9_DEVDIR:-/usr/lib/camx/lemans/camera}"
 DEVBIN="$DEVDIR/com.qti.sensormodule.cmk_imx678_cam0.bin"
+POST="${IQ9_DEPLOY_POST:-reboot}"
 BACKUP="/var/li_backup/com.qti.sensormodule.cmk_imx678_cam0.bin.orig"
 CHICDK="${CHICDK:-/c/Users/JGrata/iq9075-ref/qualcomm-toolchain-mm/qualcomm-linux-spf-1-0_ap_standard_oem_nm-qimpsdk-r1.0_00114.0/qualcomm-linux-spf-1-0_ap_standard_oem_nm-qimpsdk-r1.0_00114.0-cc0652ada55b237510884c34fc4dd2f3f8a2201d/LE.QCLINUX.1.0.r1/apps_proc/sources/vendor/qcom/proprietary/chi-cdk}"
 MODULE="$HERE/baseline/cmk_imx678_module_cam0.xml"
@@ -39,8 +43,8 @@ if [ "$CMD" = "restore" ]; then
   ssh_do 'set -e; test -f '"$BACKUP"' || { echo "no backup found"; exit 1; }
           mount -o remount,rw /usr 2>/dev/null || true
           rm -f '"$DEVBIN"'; cp '"$BACKUP"' '"$DEVBIN"'; sync
-          systemctl restart cam-server; sleep 4; systemctl restart iq9web
-          echo "restored: $(md5sum '"$DEVBIN"' | cut -c1-12)"'
+          echo "restored: $(md5sum '"$DEVBIN"' | cut -c1-12); rebooting"
+          ( sleep 2; systemctl reboot ) >/dev/null 2>&1 &'
   exit 0
 fi
 
@@ -82,10 +86,8 @@ ssh_do 'set -e
   mount -o remount,rw /usr 2>/dev/null || true
   rm -f '"$DEVBIN"'; cp /tmp/cam0_variant.bin '"$DEVBIN"'; sync
   echo "installed: $(md5sum '"$DEVBIN"' | cut -c1-12)  (backup: $(md5sum '"$BACKUP"' | cut -c1-12))"
-  systemctl restart cam-server; sleep 4; systemctl restart iq9web'
+  if [ "'"$POST"'" = restart ]; then systemctl restart cam-server; sleep 4;
+  else echo rebooting; ( sleep 2; systemctl reboot ) >/dev/null 2>&1 & fi'
 
-# 3) validate via the resilience supervisor (board back? can it stream RAW?)
-echo "== validating (iq9_client) =="
-"$PY" "$HERE/../iq9_client.py" health || true
-echo "deployed variant: $VARIANT"
-echo "  characterize with the DAQ, then './deploy.sh <next>' or './deploy.sh restore'."
+echo "deployed variant: $VARIANT (post=$POST); board coming back — validate manually via /api/frame_meta"
+echo "  restore with './deploy.sh restore'."

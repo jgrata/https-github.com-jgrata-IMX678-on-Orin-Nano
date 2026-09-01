@@ -789,13 +789,44 @@ async def api_colorchecker(request: Request):
     if bgr is None:
         return JSONResponse({"error": "no frame"}, status_code=502)
     try:
-        res = colorchecker.analyze_processed(bgr)
+        res = await run_in_threadpool(_cc_venv, "processed", bgr)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
     if res.get("detected"):
         _last["colorchecker"] = {"frame": bgr, "results": res,
                                  "meta": {"source": "nv12-isp", "camera": CAM, "w": W, "h": H}}
     return res
+
+
+CCVENV_PY = os.environ.get("IQ9_CCVENV", os.path.join(HERE, ".ccvenv", "bin", "python"))
+
+
+def _cc_venv(mode, frame, maxv=4095):
+    """Run ColorChecker analysis in the .ccvenv (working cv2.mcc 4.11). The webui's own cv2 has a
+    BROKEN mcc stub, so in-process detection always fails; instead dump the frame to a temp .npy and
+    subprocess cc_web.py under the venv, then parse the marker-delimited JSON result (with overlay/
+    swatch pngs intact). mode='raw' -> colorchecker.analyze(frame, maxv); else analyze_processed."""
+    import tempfile
+    import json as _j
+    fd, p = tempfile.mkstemp(suffix=".npy", dir="/dev/shm")
+    os.close(fd)
+    try:
+        np.save(p, frame)
+        args = [CCVENV_PY, os.path.join(HERE, "cc_web.py"), mode, p]
+        if mode == "raw":
+            args.append(str(int(maxv)))
+        r = subprocess.run(args, capture_output=True, text=True, timeout=90)
+        for line in r.stdout.splitlines():
+            if line.startswith("@@CCJSON@@"):
+                return _j.loads(line[len("@@CCJSON@@"):])
+        return {"detected": False, "error": "cc venv: no result", "stderr": (r.stderr or "")[-300:]}
+    except Exception as e:
+        return {"detected": False, "error": "cc venv failed: %s" % e}
+    finally:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
 
 
 # ── colorchecker: RAW-derived CCM (native linear RAW) + head-to-head vs ISP ──
@@ -828,7 +859,7 @@ async def api_colorchecker_raw(request: Request):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
     try:
-        res = await run_in_threadpool(colorchecker.analyze, frame, 4095)
+        res = await run_in_threadpool(_cc_venv, "raw", frame, 4095)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
     res["source"] = "raw16-derived"
@@ -856,7 +887,7 @@ async def api_colorchecker_h2h(request: Request):
     out = {}
     try:
         frame, meta = await run_in_threadpool(_grab_raw_mean, n)   # kills NV12 worker, then respawns
-        raw_res = await run_in_threadpool(colorchecker.analyze, frame, 4095)
+        raw_res = await run_in_threadpool(_cc_venv, "raw", frame, 4095)
         raw_res["source"] = "raw16-derived"
         raw_res["n_frames"] = n
         out["raw"] = raw_res
@@ -876,7 +907,7 @@ async def api_colorchecker_h2h(request: Request):
         if bgr is None:
             out["isp"] = {"error": "no NV12 frame after RAW capture"}
         else:
-            isp_res = await run_in_threadpool(colorchecker.analyze_processed, bgr)
+            isp_res = await run_in_threadpool(_cc_venv, "processed", bgr)
             out["isp"] = isp_res
             if isp_res.get("detected"):
                 _last["colorchecker"] = {"frame": bgr, "results": isp_res,

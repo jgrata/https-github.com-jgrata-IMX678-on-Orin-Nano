@@ -37,6 +37,27 @@ RAW_MAGIC = b"IQ9R"
 EXP_NS = os.environ.get("IQ9_EXP_NS")
 ISO = os.environ.get("IQ9_ISO")
 
+# RTSP: HW-encoded streams teed off the SAME camera session (see camera_qmmf.DualCapture). Gated so
+# a bad encode config can't permanently break the core camera (set IQ9_RTSP=0 + reboot to recover).
+# IQ9_RTSP=1 -> H264+H265 1080p off video_0 (no extra camera stream). IQ9_RTSP_4K=1 -> add a
+# dedicated 4k H264 stream on video_2 (an EXTRA camera stream -- verify CamX/Venus capacity).
+RTSP = os.environ.get("IQ9_RTSP", "1") not in ("0", "false", "False")
+RTSP_4K = os.environ.get("IQ9_RTSP_4K", "0") == "1"
+_ENC_IO = "capture-io-mode=dmabuf output-io-mode=dmabuf-import"    # zero-copy import of the ISP dmabuf
+
+
+def _rtsp_config():
+    streams, s4k = [], None
+    if RTSP:
+        streams = [
+            {"enc": "v4l2h264enc " + _ENC_IO, "parse": "h264parse", "port": 8554, "mpoint": "/h264-1080"},
+            {"enc": "v4l2h265enc " + _ENC_IO, "parse": "h265parse", "port": 8555, "mpoint": "/h265-1080"},
+        ]
+        if RTSP_4K:
+            s4k = {"enc": "v4l2h264enc " + _ENC_IO, "parse": "h264parse", "port": 8556,
+                   "mpoint": "/h264-4k", "width": 3840, "height": 2160}
+    return streams, s4k
+
 NV_META = NV_SHM + ".meta"                # per-frame provenance sidecar (JSON): seq, pts, actual
 RAW_META = RAW_SHM + ".meta"
 CAM_BIN = "/dev/shm/iq9_cammeta.bin"       # latest serialized camera_metadata_t (webui may re-parse)
@@ -118,10 +139,28 @@ def _probe_dump(cam_raw, pts_ns):
 
 
 def main():
+    rtsp_streams, rtsp_4k = _rtsp_config()
     cam = camera_qmmf.DualCapture(
         nv_w=W, nv_h=H, fps=FPS, camera=CAM,
         exposure_ns=int(EXP_NS) if EXP_NS else None,
-        iso=int(ISO) if ISO else None).start()
+        iso=int(ISO) if ISO else None,
+        rtsp_streams=rtsp_streams, rtsp_4k=rtsp_4k).start()
+    _write_atomic("/dev/shm/iq9_rtsp.json", json.dumps({
+        "enabled": bool(rtsp_streams), "streams": [
+            {"codec": s["parse"].replace("parse", ""), "port": s["port"], "mpoint": s["mpoint"],
+             "resolution": ("3840x2160" if s is rtsp_4k else "%dx%d" % (W, H))}
+            for s in (rtsp_streams + ([rtsp_4k] if rtsp_4k else []))]}))
+    # qtirtspbin's embedded RTSP server services client requests from GLib main-loop callbacks; our
+    # capture loop below uses BLOCKING appsink pulls (no main loop), so the server would accept the
+    # TCP connection but never answer OPTIONS/DESCRIBE. Run a GLib main loop in a daemon thread so
+    # the RTSP server (and any other GSource) is dispatched.
+    if rtsp_streams or rtsp_4k:
+        try:
+            import threading
+            from gi.repository import GLib
+            threading.Thread(target=GLib.MainLoop().run, daemon=True).start()
+        except Exception:
+            pass
     time.sleep(1.2)                                    # 3A settle
     nseq = 0
     rseq = 0

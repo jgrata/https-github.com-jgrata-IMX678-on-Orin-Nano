@@ -12,6 +12,11 @@ Environment=IQ9_FPS=30
 Environment=IQ9_CAM=0
 Environment=IQ9_SHM=/dev/shm/iq9_nv12
 Environment=IQ9_RAW_SHM=/dev/shm/iq9_raw
+# RTSP (phase 3): H264+H265 1080p teed off the NV12 pad (no extra camera stream). Set IQ9_RTSP=0 +
+# reboot to recover if an encode config ever breaks the core camera. IQ9_RTSP_4K=1 adds a dedicated
+# 4k H264 stream (an EXTRA camera stream -- only after verifying CamX/Venus capacity).
+Environment=IQ9_RTSP=1
+Environment=IQ9_RTSP_4K=0
 # Wait for CAMSS/cam-server to be fully up before the first (sole) camera open, else it lands
 # before the sensor is ready. cam-server can take ~30 s to activate on 2.0.
 ExecStartPre=/bin/bash -c 'until systemctl is-active --quiet cam-server; do sleep 1; done; sleep 4'

@@ -362,11 +362,20 @@ class DualCapture:
     simultaneously (2026-08-31)."""
 
     def __init__(self, nv_w=1920, nv_h=1080, raw_w=RAW_W, raw_h=RAW_H, fps=30, camera=0,
-                 exposure_ns=None, iso=None, attach_meta=True):
+                 exposure_ns=None, iso=None, attach_meta=True, rtsp_streams=None,
+                 rtsp_4k=None):
         _ensure_gst()
         self.nv_w, self.nv_h, self.raw_w, self.raw_h = nv_w, nv_h, raw_w, raw_h
         self._cam_raw = None            # latest serialized camera_metadata_t bytes (from signal)
         self._cam_seq = 0               # increments each result-metadata callback
+        # RTSP: encoded streams TEED off the SAME camera session (single-client constraint). The
+        # 1080p streams tee off the NV12 live pad (video_0) -> no extra camera stream; a 4k stream
+        # needs its own pad (video_2). Each = HW encode (v4l2*enc) -> parse -> qtirtspbin (own port
+        # + mount). rtsp_streams: [{enc,parse,port,mpoint}] off video_0; rtsp_4k: one such dict at
+        # 3840x2160 off video_2. Encode branch queues are leaky so RTSP never back-pressures the
+        # live view / RAW / metadata. See docs/daq-camera-streaming-metadata.md phase 3.
+        self.rtsp_streams = list(rtsp_streams or [])
+        self.rtsp_4k = rtsp_4k
         props = "" if camera == 0 else ("camera=%d " % camera)
         # NOTE: attach-cam-meta is a PAD property (GstQmmfSrcVideoPad), NOT an element property
         # -- putting it on qtiqmmfsrc makes parse_launch fail. It's set on the pads below. The
@@ -377,13 +386,31 @@ class DualCapture:
             props += "exposure-mode=off manual-exposure-time=%d " % int(exposure_ns)
         if iso is not None:
             props += "iso-mode=manual manual-iso-value=%d " % max(100, min(3200, int(iso)))
-        desc = ("qtiqmmfsrc name=c %s"
-                "c.video_0 ! video/x-raw,format=NV12,width=%d,height=%d,framerate=%d/1 "
-                "! videoconvert ! video/x-raw,format=BGRx "
-                "! appsink name=nv max-buffers=2 drop=true sync=false "
-                "c.video_1 ! video/x-bayer,format=rggb,bpp=(string)16,width=%d,height=%d,framerate=%d/1 "
-                "! appsink name=raw max-buffers=2 drop=true sync=false"
-                % (props, nv_w, nv_h, fps, raw_w, raw_h, fps))
+
+        def _enc_branch(src, s, i):
+            return ("%s ! queue max-size-buffers=4 leaky=downstream ! %s ! %s config-interval=1 "
+                    "! qtirtspbin name=rtsp%d address=0.0.0.0 port=%d mpoint=%s "
+                    % (src, s["enc"], s["parse"], i, int(s["port"]), s["mpoint"]))
+
+        if self.rtsp_streams:                          # tee video_0: live-view appsink + encoders
+            nv = ("c.video_0 ! video/x-raw,format=NV12,width=%d,height=%d,framerate=%d/1 ! tee name=t0 "
+                  "t0. ! queue max-size-buffers=3 leaky=downstream ! videoconvert ! video/x-raw,format=BGRx "
+                  "! appsink name=nv max-buffers=2 drop=true sync=false " % (nv_w, nv_h, fps))
+            for i, s in enumerate(self.rtsp_streams):
+                nv += _enc_branch("t0.", s, i)
+        else:
+            nv = ("c.video_0 ! video/x-raw,format=NV12,width=%d,height=%d,framerate=%d/1 "
+                  "! videoconvert ! video/x-raw,format=BGRx "
+                  "! appsink name=nv max-buffers=2 drop=true sync=false " % (nv_w, nv_h, fps))
+        raw = ("c.video_1 ! video/x-bayer,format=rggb,bpp=(string)16,width=%d,height=%d,framerate=%d/1 "
+               "! appsink name=raw max-buffers=2 drop=true sync=false " % (raw_w, raw_h, fps))
+        fourk = ""
+        if self.rtsp_4k:                               # dedicated 4k camera stream (video_2) -> encode
+            s = self.rtsp_4k
+            fourk = _enc_branch(
+                "c.video_2 ! video/x-raw,format=NV12,width=%d,height=%d,framerate=%d/1 "
+                % (int(s.get("width", 3840)), int(s.get("height", 2160)), fps), s, 9)
+        desc = "qtiqmmfsrc name=c %s%s%s%s" % (props, nv, raw, fourk)
         self.desc = desc
         self.pipe = Gst.parse_launch(desc)
         self.nv_sink = self.pipe.get_by_name("nv")

@@ -251,3 +251,94 @@ class QmmfCapture:
             return _destride_raw16(a, w, h)
         finally:
             buf.unmap(mi)
+
+
+class DualCapture:
+    """ONE qtiqmmfsrc with TWO request video pads -- NV12 (live view / field-map) AND bayer
+    RAW16 (characterization) -- from a SINGLE persistent camera session. This is the fix for the
+    QLI 2.0 CCI/I2C wedge: the sensor faults on any open-after-close (REG_bank unlock / CCI not
+    enabled / i2c -22), so we never close -- both consumers pull from one session and the RAW path
+    no longer has to kill the NV12 worker. Constraint: ONE qtiqmmfsrc per process (qmmfsrc_init
+    asserts context != NULL), but that one element holds both pads. Verified: NV12 + RAW deliver
+    simultaneously (2026-08-31)."""
+
+    def __init__(self, nv_w=1920, nv_h=1080, raw_w=RAW_W, raw_h=RAW_H, fps=30, camera=0,
+                 exposure_ns=None, iso=None):
+        _ensure_gst()
+        self.nv_w, self.nv_h, self.raw_w, self.raw_h = nv_w, nv_h, raw_w, raw_h
+        props = "" if camera == 0 else ("camera=%d " % camera)
+        if exposure_ns is not None or iso is not None:
+            props += "control-mode=off "
+        if exposure_ns is not None:
+            props += "exposure-mode=off manual-exposure-time=%d " % int(exposure_ns)
+        if iso is not None:
+            props += "iso-mode=manual manual-iso-value=%d " % max(100, min(3200, int(iso)))
+        desc = ("qtiqmmfsrc name=c %s"
+                "c.video_0 ! video/x-raw,format=NV12,width=%d,height=%d,framerate=%d/1 "
+                "! videoconvert ! video/x-raw,format=BGRx "
+                "! appsink name=nv max-buffers=2 drop=true sync=false "
+                "c.video_1 ! video/x-bayer,format=rggb,bpp=(string)16,width=%d,height=%d,framerate=%d/1 "
+                "! appsink name=raw max-buffers=2 drop=true sync=false"
+                % (props, nv_w, nv_h, fps, raw_w, raw_h, fps))
+        self.desc = desc
+        self.pipe = Gst.parse_launch(desc)
+        self.nv_sink = self.pipe.get_by_name("nv")
+        self.raw_sink = self.pipe.get_by_name("raw")
+        self.src = self.pipe.get_by_name("c")
+
+    def start(self):
+        self.pipe.set_state(Gst.State.PLAYING)
+        return self
+
+    def stop(self):
+        self.pipe.set_state(Gst.State.NULL)
+
+    def __enter__(self):
+        return self.start()
+
+    def __exit__(self, *exc):
+        self.stop()
+
+    def nv12_frame(self, timeout_s=5.0):
+        """Latest NV12 frame as BGR HxWx3 uint8, or None."""
+        samp = self.nv_sink.emit("try-pull-sample", int(timeout_s * Gst.SECOND))
+        if samp is None:
+            return None
+        buf = samp.get_buffer()
+        st = samp.get_caps().get_structure(0)
+        w = st.get_value("width"); h = st.get_value("height")
+        ok, mi = buf.map(Gst.MapFlags.READ)
+        if not ok:
+            return None
+        try:
+            stride = mi.size // h                              # BGRx = 4 B/px, de-pad stride
+            a = np.frombuffer(mi.data, np.uint8, count=stride * h).reshape(h, stride)
+            return a[:, :w * 4].reshape(h, w, 4)[:, :, :3].copy()
+        finally:
+            buf.unmap(mi)
+
+    def raw_frame(self, timeout_s=5.0):
+        """Latest RAW16 Bayer frame as (H, W) uint16 (de-strided), or None."""
+        samp = self.raw_sink.emit("try-pull-sample", int(timeout_s * Gst.SECOND))
+        if samp is None:
+            return None
+        buf = samp.get_buffer()
+        st = samp.get_caps().get_structure(0)
+        w = st.get_value("width"); h = st.get_value("height")
+        ok, mi = buf.map(Gst.MapFlags.READ)
+        if not ok:
+            return None
+        try:
+            a = np.frombuffer(mi.data, dtype="<u2")
+            return _destride_raw16(a, w, h)
+        finally:
+            buf.unmap(mi)
+
+    def set_prop(self, name, value):
+        try:
+            if self.src is not None and self.src.find_property(name) is not None:
+                self.src.set_property(name, value)
+                return True
+        except Exception:
+            pass
+        return False

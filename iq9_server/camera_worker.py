@@ -1,17 +1,17 @@
-"""IQ9 NV12 live-view worker — owns qtiqmmfsrc in ITS OWN process.
+"""IQ9 dual-pad camera daemon -- ONE qtiqmmfsrc, NV12 + bayer RAW16 from a single session.
 
-Why a separate process: an in-process `Gst NULL` does NOT fully disconnect the
-cam-server recorder client, so the camera stays claimed and a subsequent RAW/RDI
-capture gets no frame. Fully KILLING this process releases the camera cleanly (the
-only path that reliably yields RAW frames). The server therefore runs NV12 here and
-SIGKILLs this worker for the RAW window, then respawns it.
+QLI 2.0 wedges the sensor on any camera open/close (CCI/I2C fault: REG_bank unlock / CCI not
+enabled / i2c -22 @ slave 0x9e). This daemon holds ONE persistent qtiqmmfsrc with two request
+pads so NV12 (live view / field-map) and RAW16 (characterization) coexist with NO reopen -- the
+RAW path no longer has to kill the NV12 worker, so the wedge can't trigger.
 
-Publishes the latest frame as raw BGR to POSIX shm (/dev/shm) via atomic rename, and
-polls a small JSON control file for live tweaks (exposure-compensation). BGR (not
-JPEG) so the MTF slanted-edge and ColorChecker ΔE keep full fidelity.
+Publishes latest frames to POSIX shm (atomic rename -> no torn frames):
+  /dev/shm/iq9_nv12   BGR    : magic 'IQ9N' + u32 w + u32 h + u32 seq + BGR bytes (w*h*3)
+  /dev/shm/iq9_raw    RAW16  : magic 'IQ9R' + u32 w + u32 h + u32 seq + u16 LE bytes (w*h*2)
+RAW is published ONLY while /dev/shm/iq9_raw.on exists (the webui touches it for a capture burst),
+so setup/live view doesn't churn 16 MB/frame. Polls /dev/shm/iq9_nv12.ctl for exposure-comp.
 
-Env: IQ9_W IQ9_H IQ9_FPS IQ9_CAM IQ9_SHM (default /dev/shm/iq9_nv12)
-Frame file layout: magic 'IQ9N' + u32 width + u32 height + u32 seq + BGR bytes (w*h*3).
+Env: IQ9_W IQ9_H IQ9_FPS IQ9_CAM IQ9_SHM IQ9_RAW_SHM IQ9_EXP_NS IQ9_ISO
 """
 import json
 import os
@@ -19,30 +19,33 @@ import struct
 import tempfile
 import time
 
+import numpy as np
+
 import camera_qmmf
 
 W = int(os.environ.get("IQ9_W", "1920"))
 H = int(os.environ.get("IQ9_H", "1080"))
 FPS = int(os.environ.get("IQ9_FPS", "30"))
 CAM = int(os.environ.get("IQ9_CAM", "0"))
-SHM = os.environ.get("IQ9_SHM", "/dev/shm/iq9_nv12")
-CTL = SHM + ".ctl"
-MAGIC = b"IQ9N"
-# Optional construction-time manual exposure/gain for the NV12 live path (None -> 3A auto).
-EXP_NS = os.environ.get("IQ9_EXP_NS")   # manual exposure, nanoseconds
-ISO = os.environ.get("IQ9_ISO")         # manual ISO/gain, 100..3200
+NV_SHM = os.environ.get("IQ9_SHM", "/dev/shm/iq9_nv12")
+RAW_SHM = os.environ.get("IQ9_RAW_SHM", "/dev/shm/iq9_raw")
+RAW_ON = RAW_SHM + ".on"
+CTL = NV_SHM + ".ctl"
+NV_MAGIC = b"IQ9N"
+RAW_MAGIC = b"IQ9R"
+EXP_NS = os.environ.get("IQ9_EXP_NS")
+ISO = os.environ.get("IQ9_ISO")
 
 
-def _publish(bgr, seq):
-    h, w = bgr.shape[:2]
-    hdr = MAGIC + struct.pack("<III", w, h, seq)
-    d = os.path.dirname(SHM) or "."
-    fd, tmp = tempfile.mkstemp(dir=d, prefix=".nv12_")
+def _publish(path, magic, arr, w, h, seq):
+    hdr = magic + struct.pack("<III", w, h, seq)
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".pub_")
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(hdr)
-            f.write(bgr.tobytes())
-        os.replace(tmp, SHM)                       # atomic on tmpfs -> server never sees a torn frame
+            f.write(arr.tobytes())
+        os.replace(tmp, path)                          # atomic on tmpfs
     except Exception:
         try:
             os.remove(tmp)
@@ -51,22 +54,28 @@ def _publish(bgr, seq):
 
 
 def main():
-    cam = camera_qmmf.QmmfCapture(
-        W, H, FPS, mode="nv12", camera=CAM,
+    cam = camera_qmmf.DualCapture(
+        nv_w=W, nv_h=H, fps=FPS, camera=CAM,
         exposure_ns=int(EXP_NS) if EXP_NS else None,
         iso=int(ISO) if ISO else None).start()
-    time.sleep(1.2)                                # 3A settle
-    seq = 0
+    time.sleep(1.2)                                    # 3A settle
+    nseq = 0
+    rseq = 0
     applied_ec = None
     last_ctl = 0.0
     try:
         while True:
-            bgr = cam.frame(timeout_s=3.0)
+            bgr = cam.nv12_frame(timeout_s=3.0)
             if bgr is not None:
-                seq += 1
-                _publish(bgr, seq)
+                nseq += 1
+                _publish(NV_SHM, NV_MAGIC, bgr, bgr.shape[1], bgr.shape[0], nseq)
+            if os.path.exists(RAW_ON):                 # RAW only during a capture burst
+                raw = cam.raw_frame(timeout_s=1.0)
+                if raw is not None:
+                    rseq += 1
+                    _publish(RAW_SHM, RAW_MAGIC, raw, raw.shape[1], raw.shape[0], rseq)
             now = time.monotonic()
-            if now - last_ctl > 1.0:               # poll control file ~1 Hz
+            if now - last_ctl > 1.0:
                 last_ctl = now
                 try:
                     if os.path.exists(CTL):

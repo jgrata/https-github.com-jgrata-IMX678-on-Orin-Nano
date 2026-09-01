@@ -98,6 +98,11 @@ SHM = os.environ.get("IQ9_SHM", "/dev/shm/iq9_nv12")
 CTL = SHM + ".ctl"
 _MAGIC = b"IQ9N"
 _HDR = len(_MAGIC) + 12                              # magic + u32 width,height,seq
+# RAW16 shm published by the dual-pad daemon (camera_worker) -- second pad of the SAME camera
+# session, so RAW no longer needs to kill/reopen the camera (the fix for the 2.0 CCI wedge).
+RAW_SHM = os.environ.get("IQ9_RAW_SHM", "/dev/shm/iq9_raw")
+RAW_ON = RAW_SHM + ".on"                             # touch => daemon publishes RAW; remove => stop
+_RAW_MAGIC = b"IQ9R"
 
 
 def _pdeathsig():
@@ -125,7 +130,7 @@ def _start_worker():
         except OSError:
             pass
     env = dict(os.environ, IQ9_W=str(W), IQ9_H=str(H), IQ9_FPS=str(FPS),
-               IQ9_CAM=str(CAM), IQ9_SHM=SHM)
+               IQ9_CAM=str(CAM), IQ9_SHM=SHM, IQ9_RAW_SHM=RAW_SHM)
     if _exposure_comp is not None:
         _write_ctl(_exposure_comp)
     _worker = subprocess.Popen([sys.executable, os.path.join(HERE, "camera_worker.py")],
@@ -221,30 +226,58 @@ def _frame(timeout_s=5.0):
     return _read_shm(timeout_s=timeout_s)           # lock-free read (may wait for first frame)
 
 
-def _grab_raw(n_frames=1, width=None, height=None, shdr=False):
-    """Capture native RAW16 Bayer frames. Fully KILLS the NV12 worker first (the only
-    reliable way to release the camera from cam-server), captures, then respawns it
-    (unless in cold RAW mode). width/height override the capture geometry (e.g. the taller
-    DCG/Clear HDR frame); omit for the shipping-mode default. shdr=True requests the Raw
-    SHDR (2-exposure) usecase (vhdr=shdr-raw) for Clear HDR / DOL dual-VC capture."""
-    if _cam_locked:
-        raise RuntimeError("camera locked to NV12 (setup mode); "
-                           "POST /api/cam_lock {\"locked\": false} to enable RAW")
-    with _cam_lock:
-        cold = _raw_mode
-        _kill_worker()                              # full camera release
+def _read_raw_shm(prev_seq, timeout_s=6.0):
+    """Latest RAW16 frame (H,W uint16) from the daemon's shm with seq > prev_seq (a NEW frame),
+    else (None, prev_seq). Deep-copies out of the mmap'd file."""
+    deadline = time.monotonic() + timeout_s
+    while True:
         try:
-            kw = {}
-            if width:
-                kw["width"] = int(width)
-            if height:
-                kw["height"] = int(height)
-            if shdr:
-                kw["shdr"] = True
-            return camera_qmmf.grab_raw16(n_frames=n_frames, camera=CAM, **kw)
-        finally:
-            if not cold:
-                _start_worker()
+            with open(RAW_SHM, "rb") as f:
+                buf = f.read()
+            if len(buf) >= _HDR and buf[:4] == _RAW_MAGIC:
+                w, h, seq = struct.unpack("<III", buf[4:_HDR])
+                need = _HDR + w * h * 2
+                if len(buf) >= need and seq > prev_seq:
+                    a = np.frombuffer(buf, dtype="<u2", count=w * h, offset=_HDR).reshape(h, w)
+                    return a.astype(np.uint16), seq
+        except (FileNotFoundError, ValueError):
+            pass
+        except Exception:
+            pass
+        if time.monotonic() >= deadline:
+            return None, prev_seq
+        time.sleep(0.02)
+
+
+def _grab_raw(n_frames=1, width=None, height=None, shdr=False):
+    """Capture n RAW16 Bayer frames from the persistent DUAL-PAD daemon via shm. The daemon holds
+    NV12 + bayer on ONE camera session, so RAW no longer kills/reopens the camera -- the 2.0
+    open-after-close CCI wedge can't trigger. Touch the raw-publish flag so the daemon starts
+    emitting RAW, read n distinct (consecutive) frames, then clear it. width/height/shdr are not
+    supported on this path (the daemon serves the standard RGGB geometry); use the offline
+    build_clearhdr flow for DCG/SHDR."""
+    if not _worker_alive():
+        with _cam_lock:
+            _start_worker()
+    frames = []
+    try:
+        open(RAW_ON, "w").close()                    # ask the daemon to publish RAW frames
+        seq = 0
+        for _ in range(max(1, int(n_frames))):
+            a, seq = _read_raw_shm(seq, timeout_s=6.0)
+            if a is None:
+                break
+            frames.append(a)
+    finally:
+        try:
+            os.remove(RAW_ON)
+        except OSError:
+            pass
+    if not frames:
+        raise RuntimeError("no RAW frame from camera daemon (is camera_worker the dual-pad build?)")
+    meta = {"width": int(frames[0].shape[1]), "height": int(frames[0].shape[0]),
+            "frames": len(frames), "source": "dual-pad-daemon"}
+    return frames, meta
 
 
 @app.on_event("shutdown")

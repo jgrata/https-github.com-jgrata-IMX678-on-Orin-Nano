@@ -114,59 +114,31 @@ def _pdeathsig():
 
 
 def _worker_alive():
-    return _worker is not None and _worker.poll() is None
+    """The dual-pad camera daemon runs as the standalone iq9cam systemd service; treat it as alive
+    when its NV12 shm is fresh (it publishes continuously at ~30 fps)."""
+    try:
+        return (time.time() - os.path.getmtime(SHM)) < 5.0
+    except OSError:
+        return False
 
 
 def _start_worker():
-    """Spawn the NV12 worker if not running (caller holds _cam_lock)."""
-    global _worker
-    if _raw_mode or _worker_alive():
-        return
-    subprocess.run(["pkill", "-9", "-f", "camera_worker.py"],
-                   capture_output=True)             # reap any orphan from a prior server
-    for p in (SHM, CTL):
-        try:
-            os.remove(p)
-        except OSError:
-            pass
-    env = dict(os.environ, IQ9_W=str(W), IQ9_H=str(H), IQ9_FPS=str(FPS),
-               IQ9_CAM=str(CAM), IQ9_SHM=SHM, IQ9_RAW_SHM=RAW_SHM)
-    if _exposure_comp is not None:
-        _write_ctl(_exposure_comp)
-    _worker = subprocess.Popen([sys.executable, os.path.join(HERE, "camera_worker.py")],
-                               env=env, preexec_fn=_pdeathsig)
+    """No-op. The dual-pad daemon (camera_worker.py) runs as the standalone iq9cam.service and owns
+    the camera from boot; the webui is a pure shm consumer + control-file writer and NEVER opens or
+    kills the camera (opening it here would be the single-client collision that wedges the 2.0 CCI)."""
+    return
 
 
 def _set_resolution(w, h):
-    """Restart the NV12 worker at a new output resolution (ISP downscale). Holds _cam_lock."""
-    global W, H
-    with _cam_lock:
-        W, H = int(w), int(h)
-        _kill_worker()
-        _start_worker()
+    """NV12 resolution is fixed at daemon boot (iq9cam.service env IQ9_W/IQ9_H). Changing it needs a
+    unit edit + reboot (a daemon restart re-wedges the 2.0 camera). Runtime no-op."""
+    return
 
 
 def _kill_worker():
-    """Fully kill the NV12 worker so cam-server releases the camera (caller holds _cam_lock)."""
-    global _worker
-    if _worker is not None:
-        try:
-            _worker.terminate()
-            try:
-                _worker.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                _worker.kill()
-                _worker.wait(timeout=3)
-        except Exception:
-            pass
-        _worker = None
-    subprocess.run(["pkill", "-9", "-f", "camera_worker.py"], capture_output=True)
-    try:
-        os.remove(SHM)
-    except OSError:
-        pass
-    time.sleep(RAW_QUIESCE_S)                       # let cam-server fully complete the IFE/RDI release
-                                                    # (short quiesce correlated with the RDI hang)
+    """No-op -- see _start_worker. The daemon is a systemd service, not a webui child, so the webui
+    never kills it (a kill+respawn is the open-after-close that wedges the 2.0 camera)."""
+    return
 
 
 def _write_ctl(exposure_comp):

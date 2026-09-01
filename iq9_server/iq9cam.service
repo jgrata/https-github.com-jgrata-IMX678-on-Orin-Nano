@@ -1,0 +1,26 @@
+[Unit]
+Description=IQ9 IMX678 dual-pad camera daemon (NV12 + RAW16 -> shm)
+After=cam-server.service network-online.target
+Wants=cam-server.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/iq9_server
+Environment=IQ9_W=1920
+Environment=IQ9_H=1080
+Environment=IQ9_FPS=30
+Environment=IQ9_CAM=0
+Environment=IQ9_SHM=/dev/shm/iq9_nv12
+Environment=IQ9_RAW_SHM=/dev/shm/iq9_raw
+# Wait for CAMSS/cam-server to be fully up before the first (sole) camera open, else it lands
+# before the sensor is ready. cam-server can take ~30 s to activate on 2.0.
+ExecStartPre=/bin/bash -c 'until systemctl is-active --quiet cam-server; do sleep 1; done; sleep 4'
+ExecStart=/usr/bin/python3 /root/iq9_server/camera_worker.py
+# Restart ONLY on a real crash; do NOT restart on a wedged camera (a restart is the open-after-close
+# that wedges 2.0 -- recover with a reboot instead).
+Restart=on-failure
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

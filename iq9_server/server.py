@@ -201,19 +201,10 @@ def _read_shm(timeout_s=5.0):
 
 
 def _set_raw_mode(on):
-    """Enter/exit cold RAW mode (kills / restores the NV12 worker). No-op while the camera is
-    locked to NV12 (setup mode) so a stray toggle can't wedge the 2.0 stack."""
-    global _raw_mode
-    if _cam_locked and bool(on) != _raw_mode:
-        return _raw_mode                             # locked: refuse the reconfigure
-    with _cam_lock:
-        if on and not _raw_mode:
-            _kill_worker()
-            _raw_mode = True
-        elif not on and _raw_mode:
-            _raw_mode = False
-            _start_worker()
-    return _raw_mode
+    """OBSOLETE with the dual-pad daemon: NV12 and RAW16 share ONE camera session, so there is no
+    NV12<->RAW handoff to toggle. Kept as a hard no-op (camera stays NV12-live; RAW pulled on demand
+    via the shm flag) so an old /raw or /ptc client can't kill the daemon. _raw_mode stays False."""
+    return False
 
 
 def _frame(timeout_s=5.0):
@@ -515,20 +506,16 @@ def stream(width: int = 960):
 # ── RAW (native 12-bit RGGB Bayer via qtiqmmfsrc RAW16) ──────────────────────
 @app.post("/api/raw/mode")
 async def api_raw_mode(request: Request):
-    """Enter/exit cold RAW mode. Cold mode releases the NV12 live view and leaves the
-    camera idle so RAW captures avoid the NV12<->RAW handoff churn (the most reliable
-    trigger of the CAMSS/RDI hang). Entering requires RAW enabled; exiting is always OK."""
+    """OBSOLETE with the dual-pad daemon. NV12 and RAW16 share ONE camera session, so there is no
+    cold 'raw mode' to enter -- RAW capture (/api/raw/*, /api/ptc/*, colorchecker) coexists with the
+    live NV12 view. This is now a no-op that always reports NV12 live; kept for old clients."""
     try:
-        body = await request.json()
+        await request.json()
     except Exception:
-        body = {}
-    want = bool(body.get("raw", False))
-    if want and not RAW_ENABLE:
-        return JSONResponse({"error": RAW_DISABLED_MSG}, status_code=503)
-    on = _set_raw_mode(want)
-    return {"raw_mode": on, "live_view": (not on),
-            "note": ("camera idle — RAW captures run without NV12 handoff churn" if on
-                     else "NV12 live view active")}
+        pass
+    _set_raw_mode(False)                              # no-op; daemon always serves NV12 + RAW
+    return {"raw_mode": False, "live_view": True,
+            "note": "dual-pad daemon: NV12 live + RAW16 coexist; raw-mode toggle obsolete"}
 
 
 @app.get("/api/cam_lock")
@@ -623,53 +610,9 @@ def _stream_release(name):
             _stream["busy"] = None
 
 
-def _fieldmap_jpeg(raw):
-    """RAW16 (H,W) uint16 -> heatmap JPEG bytes with non-uniformity + zone% overlaid.
-    Works on a downsampled green plane so it keeps up with the ~30fps bayer stream."""
-    gf = (raw[0::2, 1::2].astype(np.float32) + raw[1::2, 0::2]) * 0.5 - 200.0    # green, pedestal-sub
-    g = np.clip(cv2.resize(gf, (480, 271), interpolation=cv2.INTER_AREA), 1.0, None)
-    nonunif = float(100.0 * g.std() / g.mean())
-    zy = np.linspace(0, 271, 4).astype(int); zx = np.linspace(0, 480, 4).astype(int)
-    Z = np.array([[g[zy[i]:zy[i + 1], zx[j]:zx[j + 1]].mean() for j in range(3)] for i in range(3)])
-    zn = (100.0 * Z / Z.max()).round(0).astype(int)
-    hm = cv2.applyColorMap((np.clip(g / np.percentile(g, 99.5), 0, 1) * 255).astype(np.uint8),
-                           cv2.COLORMAP_JET)
-    hm = cv2.resize(hm, (900, 508), interpolation=cv2.INTER_NEAREST)
-    clip = float((raw[::4, ::4] >= 4095).mean())
-    col = (90, 210, 90) if nonunif < 10 else (60, 200, 235) if nonunif < 20 else (70, 70, 235)
-    cv2.putText(hm, "non-unif %.1f%%   mean %d DN   clip %.2f%%" % (nonunif, g.mean() + 200, clip * 100),
-                (10, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.64, col, 2, cv2.LINE_AA)
-    hh, ww = hm.shape[:2]
-    for i in range(3):
-        for j in range(3):
-            cv2.putText(hm, "%d%%" % zn[i, j], (int((j + 0.33) * ww / 3), int((i + 0.55) * hh / 3)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
-    ok, buf = cv2.imencode(".jpg", hm, [cv2.IMWRITE_JPEG_QUALITY, 80])
-    return buf.tobytes()
-
-
-def _fieldmap_stream():
-    """Persistent in-process bayer capture -> live heatmap MJPEG (owns the camera lifecycle)."""
-    with _cam_lock:
-        _kill_worker()                                   # release NV12 (one quiesce)
-        cap = camera_qmmf.QmmfCapture(mode="bayer", width=3856, height=2180, fps=30).start()
-    try:
-        for _ in range(3):
-            cap.frame(timeout_s=5.0)                     # warm up
-        while True:
-            raw = cap.frame(timeout_s=5.0)
-            if raw is None:
-                continue
-            jpg = _fieldmap_jpeg(raw)
-            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n"
-    finally:
-        try:
-            cap.stop()
-        except Exception:
-            pass
-        with _cam_lock:
-            if not _raw_mode:
-                _start_worker()                          # restore NV12 live view
+# (removed) the old RAW/bayer _fieldmap_jpeg + _fieldmap_stream: they opened a private
+# QmmfCapture(bayer) and killed the NV12 worker -> collide with the dual-pad daemon and wedge the
+# 2.0 camera. The field-map now runs off NV12 (below).
 
 
 def _fieldmap_jpeg_nv12(bgr):
@@ -995,42 +938,12 @@ def _ptc_load_dark():
         pass
 
 
-def _bayer_stream():
-    """Open the persistent bayer capture (caller holds the _stream guard). Kills the NV12 worker."""
-    with _cam_lock:
-        _kill_worker()
-        return camera_qmmf.QmmfCapture(mode="bayer", width=3856, height=2180, fps=30).start()
-
-
-def _bayer_stop(cap):
-    try:
-        cap.stop()
-    except Exception:
-        pass
-    with _cam_lock:
-        if not _raw_mode:
-            _start_worker()                                         # restore NV12 live view
-
-
-def _consecutive(cap, n):
-    frames = []
-    for _ in range(max(2, int(n))):
-        f = cap.frame(timeout_s=5.0)
-        if f is not None:
-            frames.append(f.copy())
-    if len(frames) < 2:
-        raise RuntimeError("bayer stream yielded <2 frames")
-    return frames
-
-
 def _ptc_capture_dark(nframes, roi_frac):
-    cap = _bayer_stream()
-    try:
-        for _ in range(3):
-            cap.frame(timeout_s=5.0)                                # warm up
-        frames = _consecutive(cap, nframes)
-    finally:
-        _bayer_stop(cap)
+    """Dark reference: n CONSECUTIVE RAW frames from the persistent dual-pad daemon (shm) ->
+    per-channel pedestal + temporal read noise. No private bayer stream, no NV12 kill."""
+    frames, _ = _grab_raw(nframes)
+    if len(frames) < 2:
+        raise RuntimeError("dual-pad daemon yielded <2 RAW frames")
     H, Wd = frames[0].shape
     roi = _roi_even(H, Wd, roi_frac)
     dark = raw_ptc.measure(frames, roi)
@@ -1040,52 +953,34 @@ def _ptc_capture_dark(nframes, roi_frac):
 
 
 def _ptc_capture_sweep(channel, levels, nframes, settle, roi_frac, lux):
-    """ONE persistent bayer stream for the whole sweep, pulled CONTINUOUSLY (never idled). The DMX
-    change runs on a side thread while we keep pulling-and-discarding frames through the burst and
-    the settle, then grab the measurement frames — consecutive, so the 2-frame-diff is true temporal
-    noise. Idling the stream (blocking on the DMX HTTP call or a settle sleep) stalls the qmmf
-    recorder client and KILLS cam-server; continuous pulling is what keeps the field-map stream alive
-    indefinitely, so the sweep does the same. Needs a healthy CAMSS (reboot if cam-server has been
-    crashing)."""
-    cap = _bayer_stream()
-    try:
-        for _ in range(3):
-            cap.frame(timeout_s=5.0)                               # warm up
-        probe = cap.frame(timeout_s=5.0)
-        H, Wd = probe.shape
-        if _ptc["roi"] is not None and _ptc.get("roi_frac") == float(roi_frac):
-            roi = _ptc["roi"]                                      # reuse the dark ROI when it matches
-        else:
-            roi = _roi_even(H, Wd, roi_frac)
-        points = []; table = []
-        for lvl in levels:
-            done = threading.Event()
-
-            def _apply(l=lvl):
-                try:
-                    _dmx_set({channel: int(l)})
-                finally:
-                    done.set()
-
-            threading.Thread(target=_apply, daemon=True).start()
-            while not done.is_set():
-                cap.frame(timeout_s=5.0)                           # pump through the DMX burst
-            t_end = time.monotonic() + settle
-            while time.monotonic() < t_end:
-                cap.frame(timeout_s=5.0)                           # pump through the settle
-            frames = _consecutive(cap, nframes)
-            meas = raw_ptc.measure(frames, roi)
-            sub = frames[0][roi[0]:roi[1], roi[2]:roi[3]]
-            gp = sub[0::2, 1::2].astype(np.float64)                # green within ROI (spatial uniformity)
-            light = float(lux[str(lvl)]) if (lux and str(lvl) in lux) else float(lvl)
-            points.append({"light": light, "meas": meas})
-            table.append({"level": int(lvl), "light": light,
-                          "green_DN": round(float(gp.mean()), 1),
-                          "nonunif_pct": round(float(100.0 * gp.std() / max(gp.mean(), 1e-6)), 1),
-                          "flicker_pct": round(float(meas["G1"]["mean_cv_pct"]), 3),
-                          "clip": round(float((sub >= 4095).mean()), 4)})
-    finally:
-        _bayer_stop(cap)
+    """PTC/OETF/SNR light sweep on the persistent dual-pad daemon (RAW via shm; no camera reopen,
+    no NV12<->RAW handoff). Per level: set the DMX, settle, then read n CONSECUTIVE RAW frames for
+    the true 2-frame-diff temporal noise. The daemon keeps pulling NV12 continuously, so cam-server
+    stays healthy across the DMX call + settle WITHOUT this code having to pump a private stream
+    (that continuous-pull requirement was an artifact of the old single-client bayer stream)."""
+    probe, _ = _grab_raw(1)
+    H, Wd = probe[0].shape
+    if _ptc["roi"] is not None and _ptc.get("roi_frac") == float(roi_frac):
+        roi = _ptc["roi"]                                          # reuse the dark ROI when it matches
+    else:
+        roi = _roi_even(H, Wd, roi_frac)
+    points = []; table = []
+    for lvl in levels:
+        _dmx_set({channel: int(lvl)})                              # set the illuminant
+        time.sleep(settle)                                        # settle (daemon keeps NV12 alive)
+        frames, _ = _grab_raw(nframes)                            # n consecutive RAW frames
+        if len(frames) < 2:
+            raise RuntimeError("dual-pad daemon yielded <2 RAW frames at level %d" % lvl)
+        meas = raw_ptc.measure(frames, roi)
+        sub = frames[0][roi[0]:roi[1], roi[2]:roi[3]]
+        gp = sub[0::2, 1::2].astype(np.float64)                    # green within ROI (spatial uniformity)
+        light = float(lux[str(lvl)]) if (lux and str(lvl) in lux) else float(lvl)
+        points.append({"light": light, "meas": meas})
+        table.append({"level": int(lvl), "light": light,
+                      "green_DN": round(float(gp.mean()), 1),
+                      "nonunif_pct": round(float(100.0 * gp.std() / max(gp.mean(), 1e-6)), 1),
+                      "flicker_pct": round(float(meas["G1"]["mean_cv_pct"]), 3),
+                      "clip": round(float((sub >= 4095).mean()), 4)})
     return points, roi, table
 
 

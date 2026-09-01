@@ -324,14 +324,28 @@ def ptc_page():
 
 
 # ── camera info / params ─────────────────────────────────────────────────────
+def _rtsp_status(host):
+    """Available RTSP streams (published by the daemon), with resolved URLs for `host`."""
+    try:
+        with open("/dev/shm/iq9_rtsp.json") as f:
+            d = json.load(f)
+        for s in d.get("streams", []):
+            s["url"] = "rtsp://%s:%d%s" % (host, s["port"], s["mpoint"])
+        return d
+    except Exception:
+        return {"enabled": False, "streams": []}
+
+
 @app.get("/api/info")
-def api_info():
+def api_info(request: Request = None):
     exp_comp = _exposure_comp
+    host = (request.url.hostname if request is not None else None) or "192.168.99.2"
     return {
         "platform": "IQ9 QCS9075", "source": "nv12-isp (qtiqmmfsrc)",
         "camera": CAM, "width": W, "height": H, "fps": FPS,
         "bit_depth": 8, "sensormode": 0, "exposure_ns": 0, "gain": 0,
         "exposure_compensation": exp_comp,
+        "rtsp": _rtsp_status(host),
         "raw_available": True,
         "raw_enabled": RAW_ENABLE,
         "raw_mode": _raw_mode,

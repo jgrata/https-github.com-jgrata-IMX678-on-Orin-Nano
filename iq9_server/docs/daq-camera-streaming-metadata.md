@@ -44,9 +44,38 @@ provenance:  tuning_scenario(Chromatix), pipeline_version
 - EIS, if ever active, is flagged since it perturbs effective intrinsics.
 
 ## Build phases (each = one reboot + validation; daemon restart re-wedges, so daemon iters need a boot)
-1. **Standalone `iq9cam` daemon** — move the dual-pad daemon to its own service; webui → pure shm reader.
-2. **Metadata** — `attach-cam-meta=true`; probe the exact CamX field names; parse actual settings +
-   the ISP/CCM provenance; publish the record (shm sidecar + `/api/frame_meta`).
-3. **RTSP** — 3 encode→`qtirtspbin` branches; verify Venus capacity.
+1. **Standalone `iq9cam` daemon** — ✅ DONE (commit de38751). Dual-pad daemon runs as its own
+   service (owns the camera from boot); webui is a pure shm consumer. `systemctl restart iq9web` no
+   longer wedges the camera → webui deploys need no reboot.
+2. **Metadata** — ✅ DONE (commit c84246b). Per-frame CamX result metadata + sensor timestamp
+   published; `/api/frame_meta` composes the full requested-vs-actual provenance record. See
+   **How the metadata is actually extracted** below.
+3. **RTSP** — TODO. 3 encode→`qtirtspbin` branches (H264-1080/8554, H265-1080/8555, H264-4k/8556);
+   verify Venus (`qtismartvencbin`) capacity alongside NV12 + RAW @30fps.
+
+## How the metadata is actually extracted (the non-obvious part)
+The buffer meta (`attach-cam-meta` / `GstCameraMeta` in `libgstqticamerabase`) is a proprietary C
+struct with **no header/typelib**, so it is NOT readable from Python. Instead we read the
+**`result-metadata` element signal** (emitted per frame with a `G_TYPE_POINTER` to a
+`qmmf::CameraMetadata`):
+- PyGObject marshals the pointer as a **`GPointer` wrapper** whose `int()` raises. The wrapped C
+  pointer is at **offset 16** of the CPython object (offset 24 holds the gtype `0x44` = G_TYPE_POINTER,
+  which confirms 16). Read it with `ctypes.c_void_p.from_address(id(ptr)+16)`.
+- ctypes-call `qmmf::CameraMetadata::getbuffer()` (mangled `_ZN4qmmf14CameraMetadata9getbufferEv` in
+  `libqmmf_camera_metadata.so.1`) → the serialized **Android `camera_metadata_t`** (its first u32 =
+  total size; copy that many bytes).
+- `cam_meta.py` parses it: **all-uint32 header, 48 bytes** (size, version, flags, entry_count,
+  entry_capacity, entries_start=48, data_count, data_capacity, data_start, padding, then u64
+  vendor_id), 16-byte entries (tag u32, count u32, data u32/inline, type u8). Tag NAMES resolve
+  authoritatively from `libcamera_metadata_lemans.so.0` (QCS9075 = "lemans") via
+  `get_camera_metadata_tag_name`. **Pure Python → the parser iterates with no daemon reboot.**
+- **CRASH SAFETY:** a wrong `this` fed to the C++ `getbuffer` segfaults the whole process
+  (uncatchable in Python), so the extractor uses ONLY the confirmed offset 16, guarded to look like a
+  userspace VA.
+
+Key tags (confirmed on this build): `0x00000001` transform=CCM (rat[9]), `0x00000002` gains=AWB
+(f32[4]), `0x000e0000` exposureTime (i64 ns), `0x000e0001` frameDuration, `0x000e0002` sensitivity
+(ISO), `0x000e0010` sensor timestamp, `0x000e001c` dynamicBlackLevel (f32[4]), `0x000e001d`
+dynamicWhiteLevel, `0x000d0000` cropRegion, `0x000c0000` frameCount.
 
 Schema is intentionally open — add/drop fields as the ISP pipeline + optics evolve.

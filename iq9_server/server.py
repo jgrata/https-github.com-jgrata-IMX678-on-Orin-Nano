@@ -12,6 +12,7 @@ opened for the server's lifetime; frame pulls are serialised with a lock.
 Run:  IQ9_W=1920 IQ9_H=1080 IQ9_FPS=30 IQ9_CAM=0 PORT=8080 python3 server.py
 """
 import ctypes
+import json
 import os
 import signal
 import struct
@@ -103,6 +104,25 @@ _HDR = len(_MAGIC) + 12                              # magic + u32 width,height,
 RAW_SHM = os.environ.get("IQ9_RAW_SHM", "/dev/shm/iq9_raw")
 RAW_ON = RAW_SHM + ".on"                             # touch => daemon publishes RAW; remove => stop
 _RAW_MAGIC = b"IQ9R"
+
+# Per-frame provenance the daemon publishes alongside each frame: a JSON sidecar (sensor timestamp +
+# decoded CamX 'actual' values) and the raw serialized camera_metadata_t (webui re-parses it
+# authoritatively via cam_meta). See docs/daq-camera-streaming-metadata.md.
+NV_META = SHM + ".meta"
+RAW_META = RAW_SHM + ".meta"
+CAM_BIN = "/dev/shm/iq9_cammeta.bin"
+# Requested sensor config (what the daemon COMMANDS via its env; None => 3A auto). The daemon
+# (iq9cam.service) sets these; mirror them here for the requested-vs-actual record.
+REQ_EXPOSURE_NS = os.environ.get("IQ9_EXP_NS")
+REQ_ISO = os.environ.get("IQ9_ISO")
+# Vendor ISP tuning in effect for the NV12/ISP product (factory Chromatix). See memory
+# imx678-iq9-chromatix-tuning: Scenario.Default / IPE / cc13_ipe_v2.xml.
+TUNING_SCENARIO = "Chromatix Default (IPE cc13_ipe_v2)"
+
+try:
+    import cam_meta                                   # pure-Python camera_metadata_t parser
+except Exception:
+    cam_meta = None
 
 
 def _pdeathsig():
@@ -322,6 +342,137 @@ def api_info():
         "note": "ISP-processed NV12 live; native 12-bit RAW16 via /api/raw/capture"
                 + ("" if RAW_ENABLE else " (gated off — see raw.caution)"),
     }
+
+
+def _read_json_sidecar(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _read_cammeta_bin():
+    """Authoritatively re-parse the latest raw camera_metadata_t on the webui side (so parser
+    fixes need no daemon reboot). Returns the decoded 'actual' dict, or None."""
+    if cam_meta is None:
+        return None
+    try:
+        with open(CAM_BIN, "rb") as f:
+            raw = f.read()
+        return cam_meta.decode(cam_meta.parse(raw))
+    except Exception:
+        return None
+
+
+def _isp_tasks(product, act):
+    """ISP task provenance. RAW16 = sensor data (everything off). NV12 = the CamX vendor pipeline;
+    each task's source is the factory Chromatix tuning unless a user override is applied. `act` is
+    the decoded CamX actual dict (may be empty)."""
+    act = act or {}
+    if product == "raw16":
+        return [{"task": t, "applied": False, "source": "off"} for t in (
+            "DPC", "BLC", "LSC", "CAC", "demosaic", "AWB", "CCM", "GTM", "LTM", "gamma_OETF",
+            "sharpen", "NR", "WDR_DRC", "HDR_fusion", "binning_scaling", "EIS")]
+    ccm = act.get("ccm")
+    return [
+        {"task": "DPC", "applied": True, "source": "vendor-default"},
+        {"task": "BLC", "applied": True, "source": "vendor-default",
+         "params": {"dynamic_black_level": act.get("dynamic_black_level"),
+                    "white_level": act.get("dynamic_white_level")}},
+        {"task": "LSC", "applied": True, "source": "vendor-default"},
+        {"task": "CAC", "applied": True, "source": "vendor-default"},
+        {"task": "demosaic", "applied": True, "source": "vendor-default"},
+        {"task": "AWB", "applied": True, "source": "vendor-default",
+         "params": {"gains": act.get("awb_gains")}},
+        {"task": "CCM", "applied": ccm is not None, "source": "vendor-default",
+         "params": {"illuminant": "auto (scene-selected)", "matrix": ccm,
+                    "traceability": "CamX Chromatix " + TUNING_SCENARIO
+                    + "; a user custom CCM applies only in the offline cc_analyze path, not this live stream"}},
+        {"task": "GTM", "applied": True, "source": "vendor-default"},
+        {"task": "LTM", "applied": True, "source": "vendor-default"},
+        {"task": "gamma_OETF", "applied": True, "source": "vendor-default"},
+        {"task": "sharpen", "applied": True, "source": "vendor-default"},
+        {"task": "NR", "applied": True, "source": "vendor-default"},
+        {"task": "WDR_DRC", "applied": False, "source": "off"},
+        {"task": "HDR_fusion", "applied": False, "source": "off",
+         "note": "linear NV12 live (no SHDR/DOL)"},
+        {"task": "binning_scaling", "applied": True, "source": "vendor-default",
+         "params": {"note": "ISP downscale to the output resolution"}},
+        {"task": "EIS", "applied": False, "source": "off"},
+    ]
+
+
+def _compose_frame_meta(product="nv12"):
+    """Full per-frame provenance record: requested (what the daemon commands) + actual (CamX result
+    metadata) + ISP task table + CCM traceability + lens/focus + product. See the design doc."""
+    side = _read_json_sidecar(NV_META if product == "nv12" else RAW_META) or {}
+    act = side.get("cam") if side.get("cam", {}).get("_available") else None
+    if act is None:
+        act = _read_cammeta_bin()                    # fallback: re-parse the latest raw blob
+    act = act or {}
+    if product == "raw16":
+        prod = {"type": "RAW16", "resolution": "%dx%d" % (camera_qmmf.RAW_W, camera_qmmf.RAW_H_ACTIVE),
+                "pixfmt": "RGGB bayer", "bit_depth": 12}
+    else:
+        prod = {"type": "NV12-ISP", "resolution": "%dx%d" % (W, H),
+                "pixfmt": "NV12 (delivered BGR)", "bit_depth": 8}
+    req_exp = int(REQ_EXPOSURE_NS) if REQ_EXPOSURE_NS else None
+    req_iso = int(REQ_ISO) if REQ_ISO else None
+    fps_act = round(1e9 / act["frame_duration_ns"], 3) if act.get("frame_duration_ns") else None
+    return {
+        "product": prod,
+        "timing": {
+            "frame_seq": side.get("seq"),
+            "pts_ns": side.get("pts_ns"),
+            "sensor_timestamp_ns": act.get("sensor_timestamp_ns"),
+            "host_recv_ns": side.get("host_ns"),
+            "host_epoch_ns": side.get("host_epoch_ns"),
+            "frame_count": act.get("frame_count"),
+        },
+        "sensor": {
+            "bit_depth": prod["bit_depth"],
+            "exposure_ns": {"requested": req_exp if req_exp is not None else "auto(3A)",
+                            "actual": act.get("exposure_ns")},
+            "gain_iso": {"requested": req_iso if req_iso is not None else "auto(3A)",
+                         "actual": act.get("iso")},
+            "conv_gain": {"requested": "n/a (ISP path)", "actual": "not in NV12 result-meta"},
+            "fps": {"requested": FPS, "actual": fps_act},
+            "roi": {"requested": "full", "actual": act.get("crop_region")},
+            "hdr_mode": {"requested": "linear", "actual": "linear"},
+            "black_level": {"actual": act.get("dynamic_black_level")},
+            "white_level": {"actual": act.get("dynamic_white_level")},
+            "rolling_shutter_skew_ns": act.get("rolling_shutter_skew_ns"),
+        },
+        "lens_focus": {
+            "type": "fixed", "focus_pos": {"requested": None, "actual": None},
+            "focus_distance_m": None, "calib_id": "fixed-lens-0",
+            "intrinsics": None, "distortion": {"radial": None, "tangential": None},
+            "note": "fixed lens => single calibration entry. Schema ready for a liquid lens (driver "
+                    "on the IQ9): a per-focus-position calib table keyed focus_pos -> calib_id, each "
+                    "with its own radial/tangential distortion for LDC/CAC to consume per frame.",
+        },
+        "isp": _isp_tasks(product, act),
+        "provenance": {
+            "tuning_scenario": TUNING_SCENARIO,
+            "pipeline": "CamX (qtiqmmfsrc)",
+            "metadata_source": "CamX result-metadata (camera_metadata_t via qmmf::CameraMetadata::getbuffer)",
+            "awb_gains_actual": act.get("awb_gains"),
+            "control_mode": act.get("control_mode"),
+            "capture_intent": act.get("capture_intent"),
+        },
+        "_meta_available": bool(act.get("_available")) or bool(act.get("exposure_ns")),
+        "_notes": "requested = commanded by the daemon (env/API); actual = CamX per-frame result "
+                  "metadata. RAW16 product => all ISP tasks off (raw sensor data).",
+    }
+
+
+@app.get("/api/frame_meta")
+def api_frame_meta(product: str = "nv12"):
+    """Per-frame provenance metadata (requested vs actual, ISP task table, CCM traceability,
+    lens/focus, product). product=nv12 (default) or raw16."""
+    p = "raw16" if str(product).lower() in ("raw", "raw16", "bayer") else "nv12"
+    return _compose_frame_meta(p)
 
 
 @app.post("/api/params")

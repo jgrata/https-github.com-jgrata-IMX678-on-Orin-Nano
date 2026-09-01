@@ -28,10 +28,16 @@ must first release the camera (stop its own QmmfCapture) -- the camera is single
 """
 import glob
 import os
+import struct
 import subprocess
 import tempfile
 
 import numpy as np
+
+try:
+    import cam_meta                        # pure-Python camera_metadata_t parser (diagnostics)
+except Exception:
+    cam_meta = None
 
 # Sensor-native RAW readout (Leopard IMX678 on this EVK): full RGGB, 12-bit.
 # CAPS geometry the qtiqmmfsrc bayer stream accepts is 3856 x 2180 (the driver
@@ -160,6 +166,99 @@ def _ensure_gst():
         _INIT = True
 
 
+# --- CamX result-metadata extraction (best-effort, never fatal) -------------------------
+# qtiqmmfsrc emits the `result-metadata` signal per frame with a gpointer to a
+# qmmf::CameraMetadata (wraps Android camera_metadata_t). There is NO Python binding / header
+# for it, so we reach the raw serialized buffer via ctypes: call the (non-static) method
+# qmmf::CameraMetadata::getbuffer() -> camera_metadata_t*, read its first 8 bytes (`size`),
+# and copy that many bytes. cam_meta.parse() (pure Python) decodes it. If ANY step fails we
+# just return None and the daemon keeps publishing pixels + PTS.
+import ctypes                                                       # noqa: E402
+
+_CAM_GETBUF = None
+_CAM_GETBUF_TRIED = False
+
+
+def _diag_write(path, text, append=False):
+    """Best-effort diagnostic write (never raises)."""
+    try:
+        with open(path, "a" if append else "w") as f:
+            f.write(text)
+    except Exception:
+        pass
+
+
+# CONFIRMED PyGPointer layout on this build (GStreamer 1.28 / PyGObject): a raw G_TYPE_POINTER
+# signal arg marshals to a `GPointer` wrapper whose int() raises. The wrapped C pointer sits at
+# offset 16 in the CPython object (offset 24 holds the gtype = 0x44 = G_TYPE_POINTER, which
+# confirmed offset 16 is the qmmf::CameraMetadata*). Feeding a WRONG `this` to getbuffer segfaults
+# the whole process (uncatchable), so we ONLY read offset 16 and guard it looks like a userspace VA.
+_CAM_META_PTR_OFF = 16
+
+
+def _plausible_ptr(v):
+    """A value that looks like a userspace VA (excludes small ints / obvious non-pointers)."""
+    return isinstance(v, int) and 0x10000 <= v < (1 << 48)
+
+
+def _extract_cam(ptr):
+    """Serialized camera_metadata_t bytes from a result-metadata GPointer arg, or None."""
+    if ptr is None:
+        return None
+    if isinstance(ptr, int):
+        return _cam_getbuffer(ptr) if _plausible_ptr(ptr) else None
+    try:
+        cand = ctypes.c_void_p.from_address(id(ptr) + _CAM_META_PTR_OFF).value or 0
+    except Exception:
+        return None
+    return _cam_getbuffer(cand) if _plausible_ptr(cand) else None
+
+
+_GB_DIAG = False
+CAM_GB_DBG = "/dev/shm/iq9_meta_gb.dbg"
+
+
+def _cam_getbuffer(addr):
+    """ctypes qmmf::CameraMetadata::getbuffer(this=addr) -> serialized camera_metadata_t bytes,
+    or None. `addr` MUST be a valid CameraMetadata* (a wrong `this` segfaults the process). Dumps
+    the returned pointer + header once to CAM_GB_DBG so the size-field type can be confirmed."""
+    global _CAM_GETBUF, _CAM_GETBUF_TRIED, _GB_DIAG
+    try:
+        if not addr:
+            return None
+        if _CAM_GETBUF is None:
+            if _CAM_GETBUF_TRIED:
+                return None
+            _CAM_GETBUF_TRIED = True
+            lib = ctypes.CDLL("libqmmf_camera_metadata.so.1")
+            fn = lib._ZN4qmmf14CameraMetadata9getbufferEv      # mangled: getbuffer()
+            fn.restype = ctypes.c_void_p
+            fn.argtypes = [ctypes.c_void_p]
+            _CAM_GETBUF = fn
+        raw_ptr = _CAM_GETBUF(ctypes.c_void_p(int(addr)))
+        if not raw_ptr:
+            if not _GB_DIAG:
+                _GB_DIAG = True
+                _diag_write(CAM_GB_DBG, "getbuffer(this=0x%x) -> NULL\n" % addr)
+            return None
+        head = ctypes.string_at(raw_ptr, 16)
+        s32 = struct.unpack_from("<I", head, 0)[0]
+        s64 = struct.unpack_from("<Q", head, 0)[0]
+        if not _GB_DIAG:
+            _GB_DIAG = True
+            _diag_write(CAM_GB_DBG, "getbuffer(this=0x%x) -> raw_ptr=0x%x head16=%s s32=%d s64=%d\n"
+                        % (addr, raw_ptr, head.hex(), s32, s64))
+        for size in (s64, s32):                            # accept whichever size field is sane
+            if 48 <= size <= (64 << 20):
+                return ctypes.string_at(raw_ptr, int(size))
+        return None
+    except Exception as e:
+        if not _GB_DIAG:
+            _GB_DIAG = True
+            _diag_write(CAM_GB_DBG, "getbuffer exc: %r\n" % (e,))
+        return None
+
+
 class QmmfCapture:
     def __init__(self, width=1920, height=1080, fps=30, mode="nv12", camera=0,
                  exposure_ns=None, iso=None):
@@ -263,10 +362,15 @@ class DualCapture:
     simultaneously (2026-08-31)."""
 
     def __init__(self, nv_w=1920, nv_h=1080, raw_w=RAW_W, raw_h=RAW_H, fps=30, camera=0,
-                 exposure_ns=None, iso=None):
+                 exposure_ns=None, iso=None, attach_meta=True):
         _ensure_gst()
         self.nv_w, self.nv_h, self.raw_w, self.raw_h = nv_w, nv_h, raw_w, raw_h
+        self._cam_raw = None            # latest serialized camera_metadata_t bytes (from signal)
+        self._cam_seq = 0               # increments each result-metadata callback
         props = "" if camera == 0 else ("camera=%d " % camera)
+        # NOTE: attach-cam-meta is a PAD property (GstQmmfSrcVideoPad), NOT an element property
+        # -- putting it on qtiqmmfsrc makes parse_launch fail. It's set on the pads below. The
+        # per-frame CamX metadata is read from the `result-metadata` element signal regardless.
         if exposure_ns is not None or iso is not None:
             props += "control-mode=off "
         if exposure_ns is not None:
@@ -285,6 +389,43 @@ class DualCapture:
         self.nv_sink = self.pipe.get_by_name("nv")
         self.raw_sink = self.pipe.get_by_name("raw")
         self.src = self.pipe.get_by_name("c")
+        if attach_meta and self.src is not None:
+            # Enable per-frame CamX result metadata: (1) connect the element `result-metadata`
+            # signal (our read path -> _on_result_meta -> _extract_cam), (2) best-effort set the
+            # PAD property attach-cam-meta=true on each video src pad. Both are non-fatal.
+            try:
+                self.src.connect("result-metadata", self._on_result_meta)
+            except Exception:
+                pass
+            try:
+                it = self.src.iterate_pads()
+                while True:
+                    res, pad = it.next()
+                    if res != Gst.IteratorResult.OK:
+                        break
+                    try:
+                        if pad.get_direction() == Gst.PadDirection.SRC and \
+                           pad.find_property("attach-cam-meta") is not None:
+                            pad.set_property("attach-cam-meta", True)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+    def _on_result_meta(self, element, ptr, *user):
+        """result-metadata signal: stash the latest serialized camera_metadata_t bytes.
+        Runs on the qmmf callback thread; keep it minimal (copy bytes, return)."""
+        try:
+            self._cam_seq += 1
+            raw = _extract_cam(ptr)
+            if raw:
+                self._cam_raw = raw
+        except Exception:
+            pass
+
+    def latest_cam_raw(self):
+        """Most recent serialized camera_metadata_t bytes (or None), and its callback seq."""
+        return self._cam_raw, self._cam_seq
 
     def start(self):
         self.pipe.set_state(Gst.State.PLAYING)
@@ -299,38 +440,48 @@ class DualCapture:
     def __exit__(self, *exc):
         self.stop()
 
+    @staticmethod
+    def _pts_ns(buf):
+        try:
+            pts = buf.pts
+            return int(pts) if pts != Gst.CLOCK_TIME_NONE else None
+        except Exception:
+            return None
+
     def nv12_frame(self, timeout_s=5.0):
-        """Latest NV12 frame as BGR HxWx3 uint8, or None."""
+        """Latest NV12 frame as (BGR HxWx3 uint8, pts_ns), or (None, None)."""
         samp = self.nv_sink.emit("try-pull-sample", int(timeout_s * Gst.SECOND))
         if samp is None:
-            return None
+            return None, None
         buf = samp.get_buffer()
         st = samp.get_caps().get_structure(0)
         w = st.get_value("width"); h = st.get_value("height")
+        pts = self._pts_ns(buf)
         ok, mi = buf.map(Gst.MapFlags.READ)
         if not ok:
-            return None
+            return None, pts
         try:
             stride = mi.size // h                              # BGRx = 4 B/px, de-pad stride
             a = np.frombuffer(mi.data, np.uint8, count=stride * h).reshape(h, stride)
-            return a[:, :w * 4].reshape(h, w, 4)[:, :, :3].copy()
+            return a[:, :w * 4].reshape(h, w, 4)[:, :, :3].copy(), pts
         finally:
             buf.unmap(mi)
 
     def raw_frame(self, timeout_s=5.0):
-        """Latest RAW16 Bayer frame as (H, W) uint16 (de-strided), or None."""
+        """Latest RAW16 Bayer frame as ((H, W) uint16 de-strided, pts_ns), or (None, None)."""
         samp = self.raw_sink.emit("try-pull-sample", int(timeout_s * Gst.SECOND))
         if samp is None:
-            return None
+            return None, None
         buf = samp.get_buffer()
         st = samp.get_caps().get_structure(0)
         w = st.get_value("width"); h = st.get_value("height")
+        pts = self._pts_ns(buf)
         ok, mi = buf.map(Gst.MapFlags.READ)
         if not ok:
-            return None
+            return None, pts
         try:
             a = np.frombuffer(mi.data, dtype="<u2")
-            return _destride_raw16(a, w, h)
+            return _destride_raw16(a, w, h), pts
         finally:
             buf.unmap(mi)
 

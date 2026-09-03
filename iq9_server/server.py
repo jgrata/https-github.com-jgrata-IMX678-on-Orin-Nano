@@ -325,12 +325,22 @@ def ptc_page():
 
 # ── camera info / params ─────────────────────────────────────────────────────
 def _rtsp_status(host):
-    """Available RTSP streams (published by the daemon), with resolved URLs for `host`."""
+    """Available RTSP streams (published by the daemon), with resolved URLs for `host`. In on-demand
+    mode each stream's encoder idles until a client connects; `active` reflects the live state."""
     try:
         with open("/dev/shm/iq9_rtsp.json") as f:
             d = json.load(f)
+        active = []
+        try:
+            with open("/dev/shm/iq9_rtsp_active.json") as f:
+                active = json.load(f).get("active_ports", [])
+        except Exception:
+            pass
+        ondemand = d.get("mode") == "ondemand"
         for s in d.get("streams", []):
             s["url"] = "rtsp://%s:%d%s" % (host, s["port"], s["mpoint"])
+            # in on-demand mode encoders run only while a client is connected; "always" => always on
+            s["active"] = (s["port"] in active) if ondemand else True
         return d
     except Exception:
         return {"enabled": False, "streams": []}

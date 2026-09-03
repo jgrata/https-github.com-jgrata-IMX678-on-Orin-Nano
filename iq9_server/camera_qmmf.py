@@ -388,9 +388,15 @@ class DualCapture:
             props += "iso-mode=manual manual-iso-value=%d " % max(100, min(3200, int(iso)))
 
         def _enc_branch(src, s, i):
-            return ("%s ! queue max-size-buffers=4 leaky=downstream ! %s ! %s config-interval=1 "
+            # `valve` (named by port) gates the encoder ON-DEMAND: closed (drop=true) -> the encoder
+            # gets no buffers and idles (no HW-encode CPU/heat) while no client is watching; the
+            # daemon opens it when a client connects (camera_worker polls /proc/net/tcp). Starts
+            # OPEN so qtirtspbin negotiates caps at boot; the daemon closes it after a grace window.
+            return ("%s ! queue max-size-buffers=4 leaky=downstream "
+                    "! valve name=rtspvalve%d drop=false "
+                    "! %s ! %s config-interval=1 "
                     "! qtirtspbin name=rtsp%d address=0.0.0.0 port=%d mpoint=%s "
-                    % (src, s["enc"], s["parse"], i, int(s["port"]), s["mpoint"]))
+                    % (src, int(s["port"]), s["enc"], s["parse"], i, int(s["port"]), s["mpoint"]))
 
         if self.rtsp_streams:                          # tee video_0: live-view appsink + encoders
             nv = ("c.video_0 ! video/x-raw,format=NV12,width=%d,height=%d,framerate=%d/1 ! tee name=t0 "
@@ -416,6 +422,12 @@ class DualCapture:
         self.nv_sink = self.pipe.get_by_name("nv")
         self.raw_sink = self.pipe.get_by_name("raw")
         self.src = self.pipe.get_by_name("c")
+        # collect the per-port encoder valves for on-demand gating
+        self.rtsp_valves = {}
+        for s in (self.rtsp_streams + ([self.rtsp_4k] if self.rtsp_4k else [])):
+            v = self.pipe.get_by_name("rtspvalve%d" % int(s["port"]))
+            if v is not None:
+                self.rtsp_valves[int(s["port"])] = v
         if attach_meta and self.src is not None:
             # Enable per-frame CamX result metadata: (1) connect the element `result-metadata`
             # signal (our read path -> _on_result_meta -> _extract_cam), (2) best-effort set the
@@ -453,6 +465,24 @@ class DualCapture:
     def latest_cam_raw(self):
         """Most recent serialized camera_metadata_t bytes (or None), and its callback seq."""
         return self._cam_raw, self._cam_seq
+
+    def rtsp_ports(self):
+        return list(self.rtsp_valves.keys())
+
+    def set_rtsp_active(self, port, active):
+        """Open (active=True -> drop=false, encoder runs) or close (idle) the per-port encoder valve.
+        Returns True if the valve state changed."""
+        v = self.rtsp_valves.get(int(port))
+        if v is None:
+            return False
+        try:
+            want_drop = (not active)
+            if bool(v.get_property("drop")) != want_drop:
+                v.set_property("drop", want_drop)
+                return True
+        except Exception:
+            pass
+        return False
 
     def start(self):
         self.pipe.set_state(Gst.State.PLAYING)

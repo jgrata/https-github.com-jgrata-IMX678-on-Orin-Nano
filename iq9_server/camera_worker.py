@@ -43,7 +43,38 @@ ISO = os.environ.get("IQ9_ISO")
 # dedicated 4k H264 stream on video_2 (an EXTRA camera stream -- verify CamX/Venus capacity).
 RTSP = os.environ.get("IQ9_RTSP", "1") not in ("0", "false", "False")
 RTSP_4K = os.environ.get("IQ9_RTSP_4K", "0") == "1"
+# ON-DEMAND encoding: "ondemand" (default) idles each HW encoder (via its `valve`) while no client is
+# connected to its RTSP port, so the SoC isn't pegged when nobody's watching (matters for thermally
+# sensitive characterization). "always" keeps encoders running (legacy). Detected by counting
+# ESTABLISHED TCP connections on the RTSP ports in /proc/net/tcp -- no external tools, no qtirtspbin
+# signal needed. Valves start OPEN for RTSP_GRACE_S so qtirtspbin negotiates caps, then gate by client.
+RTSP_MODE = os.environ.get("IQ9_RTSP_MODE", "ondemand")
+RTSP_GRACE_S = float(os.environ.get("IQ9_RTSP_GRACE_S", "20"))
+RTSP_ACTIVE = "/dev/shm/iq9_rtsp_active.json"
 _ENC_IO = "capture-io-mode=dmabuf output-io-mode=dmabuf-import"    # zero-copy import of the ISP dmabuf
+
+
+def _rtsp_client_ports(ports):
+    """Subset of `ports` with >=1 ESTABLISHED TCP connection (a client watching). Reads
+    /proc/net/tcp[6] directly; local port is uppercase hex there. Never raises."""
+    if not ports:
+        return set()
+    want = {("%04X" % p): p for p in ports}
+    active = set()
+    for fn in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(fn) as f:
+                next(f, None)                              # skip header
+                for line in f:
+                    c = line.split()
+                    if len(c) < 4 or c[3] != "01":         # 01 = TCP_ESTABLISHED
+                        continue
+                    ph = c[1].rsplit(":", 1)[-1].upper()   # local "ADDR:PORT" -> PORT hex
+                    if ph in want:
+                        active.add(want[ph])
+        except Exception:
+            pass
+    return active
 
 
 def _rtsp_config():
@@ -146,7 +177,8 @@ def main():
         iso=int(ISO) if ISO else None,
         rtsp_streams=rtsp_streams, rtsp_4k=rtsp_4k).start()
     _write_atomic("/dev/shm/iq9_rtsp.json", json.dumps({
-        "enabled": bool(rtsp_streams), "streams": [
+        "enabled": bool(rtsp_streams), "mode": (RTSP_MODE if (rtsp_streams or rtsp_4k) else "off"),
+        "streams": [
             {"codec": s["parse"].replace("parse", ""), "port": s["port"], "mpoint": s["mpoint"],
              "resolution": ("3840x2160" if s is rtsp_4k else "%dx%d" % (W, H))}
             for s in (rtsp_streams + ([rtsp_4k] if rtsp_4k else []))]}))
@@ -167,6 +199,12 @@ def main():
     applied_ec = None
     last_ctl = 0.0
     probed = False
+    # on-demand RTSP: gate each encoder by client presence (valves start open for a grace window so
+    # qtirtspbin can negotiate media caps, then idle when no client is connected to that port).
+    rtsp_ports = cam.rtsp_ports() if RTSP_MODE == "ondemand" else []
+    rtsp_start = time.monotonic()
+    last_rtsp = 0.0
+    rtsp_prev = None
     try:
         while True:
             bgr, pts = cam.nv12_frame(timeout_s=3.0)
@@ -199,6 +237,19 @@ def main():
                                 applied_ec = ec
                 except Exception:
                     pass
+            if rtsp_ports and now - last_rtsp > 1.0:       # on-demand encoder gating
+                last_rtsp = now
+                if now - rtsp_start < RTSP_GRACE_S:
+                    active = set(rtsp_ports)               # warm-up: keep encoders on for caps
+                else:
+                    active = _rtsp_client_ports(rtsp_ports)
+                if active != rtsp_prev:
+                    for p in rtsp_ports:
+                        cam.set_rtsp_active(p, p in active)
+                    _write_atomic(RTSP_ACTIVE, json.dumps(
+                        {"mode": RTSP_MODE, "active_ports": sorted(active),
+                         "ports": sorted(rtsp_ports), "host_ns": time.monotonic_ns()}))
+                    rtsp_prev = active
     finally:
         cam.stop()
 

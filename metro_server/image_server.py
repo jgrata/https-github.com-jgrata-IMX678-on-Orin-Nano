@@ -51,10 +51,10 @@ HDR_SAT_THRESHOLD  = 0.95
 HDR_EXPOSURE_RATIO = 4
 
 SENSOR_MODES = {
-    0: {'width':3840,'height':2160,'bpp':12,'hdr':False},
-    1: {'width':3840,'height':2160,'bpp':10,'hdr':False},
-    2: {'width':1920,'height':1080,'bpp':12,'hdr':False},
-    3: {'width':3840,'height':2160,'bpp':10,'hdr':True},
+    0: {'width':3840,'height':2160,'bpp':12,'hdr':False,'max_fps':60},
+    1: {'width':3840,'height':2160,'bpp':10,'hdr':False,'max_fps':72},
+    2: {'width':1920,'height':1080,'bpp':12,'hdr':False,'max_fps':72},
+    3: {'width':3840,'height':2160,'bpp':10,'hdr':True,'max_fps':30},
 }
 
 CMD_CAPTURE     = 0x01
@@ -607,10 +607,21 @@ class Camera:
             if m not in SENSOR_MODES: raise ValueError("bad sensormode")
             self.sensor_mode = m; self._refresh()
             self.rcp.sensor_mode = m; changed.append("sensormode="+str(m))
+            # clamp fps to the new mode's cap (e.g. mode 0 = 12-bit tops out at 60)
+            cap = SENSOR_MODES[m].get('max_fps', 60)
+            if self.fps > cap:
+                self.fps = cap; self.rcp.fps = cap
+                changed.append("fps="+str(cap)+"(clamped to mode cap)")
             restart = True
         if 'fps' in params:
-            self.fps = int(params['fps']); self.rcp.fps = self.fps
-            changed.append("fps="+str(self.fps)); restart = True
+            req_fps = int(params['fps'])
+            cap = SENSOR_MODES[self.sensor_mode].get('max_fps', 60)
+            self.fps = min(max(1, req_fps), cap); self.rcp.fps = self.fps
+            if self.fps != req_fps:
+                changed.append("fps="+str(self.fps)+"(clamped from "+str(req_fps)+")")
+            else:
+                changed.append("fps="+str(self.fps))
+            restart = True
         if 'exposure_ns' in params:
             self.exposure_ns = int(params['exposure_ns'])
             self.rcp.exposure_ns = self.exposure_ns
@@ -658,6 +669,7 @@ class Camera:
         with self._ae_lock: ae = self.actual_exp; ag = self.actual_gain
         exp_d = ae if (self.exposure_ns==0 and ae>0) else self.exposure_ns
         return {
+            'max_fps':            SENSOR_MODES[self.sensor_mode].get('max_fps', 60),
             'width':              self.width,
             'height':             self.height,
             'fps':                self.fps,

@@ -1,3 +1,0 @@
-/home/metro/raw_capture/CMakeFiles/raw_capture.dir
-/home/metro/raw_capture/CMakeFiles/edit_cache.dir
-/home/metro/raw_capture/CMakeFiles/rebuild_cache.dir

@@ -31,3 +31,8 @@
 *.pdf binary
 *.png binary
 *.xlsx binary
+
+# Shell + Python scripts must stay LF (they run on the Jetson/IQ9 Linux boards)
+*.sh   text eol=lf
+*.py   text eol=lf
+*.service text eol=lf

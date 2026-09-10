@@ -1,0 +1,25 @@
+# systemd unit to auto-start the IMX678 web UI + RAW backend at boot (headless).
+# Edit User= and the two paths for your install, then:
+#   sudo cp metro-webui.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now metro-webui
+#   journalctl -u metro-webui -f          # follow logs
+[Unit]
+Description=IMX678 Jetson web UI + RAW/DAQ backend
+After=network-online.target nvargus-daemon.service
+Wants=network-online.target
+Requires=nvargus-daemon.service
+
+[Service]
+Type=simple
+User=metro
+# --- EDIT: absolute path to the metro_server directory on this Jetson ---
+WorkingDirectory=/home/metro/metro_server
+Environment=NO_BROWSER=1
+Environment=PORT=8080
+Environment=IMG_PORT=9000
+ExecStart=/home/metro/metro_server/run.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

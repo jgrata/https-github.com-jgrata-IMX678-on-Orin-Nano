@@ -1,0 +1,13 @@
+# Python deps for the IMX678 Jetson RAW server + web UI.
+# On Jetson, the heavy numeric/vision packages are best installed from apt as
+# prebuilt aarch64 packages (install.sh does this): python3-numpy python3-scipy
+# python3-opencv python3-h5py. The two below are the pip-only web deps.
+fastapi
+uvicorn
+
+# Fallbacks (uncomment only if the apt packages above are unavailable on your
+# JetPack; building these from source on aarch64 is slow):
+# numpy
+# scipy
+# opencv-python
+# h5py

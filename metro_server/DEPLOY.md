@@ -79,3 +79,17 @@ journalctl -u metro-webui -f
 - **`Address already in use`** → a previous run is still up: `./stop.sh` then re-run.
 - **First frame is slow** → Argus init takes ~7 s on first capture; the launcher waits up to 40 s for :9000.
 - **Permission prompt on start** → the `nvargus-daemon` restart needs sudo (see Prerequisites).
+
+## Static ethernet IP for the DAQ link (optional)
+
+The host talks to the board over a direct cable or a switch. To pin the board's
+wired NIC to a fixed address on that link (no gateway, won't touch your normal
+internet routing):
+
+```bash
+sudo ./set-daq-ip.sh 192.168.99.3        # /24, auto-detects the wired NIC
+sudo ./set-daq-ip.sh --dhcp              # revert to DHCP
+```
+
+Then browse `http://192.168.99.3:8080`. Pick an address that's free on your DAQ
+subnet (avoid collisions with other boards on the same switch).

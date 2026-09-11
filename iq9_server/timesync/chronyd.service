@@ -1,0 +1,14 @@
+[Unit]
+Description=chrony NTP client — sub-ms discipline to PC 192.168.99.1 (interim before PTP/5G)
+After=network-online.target
+Wants=network-online.target
+Conflicts=systemd-timesyncd.service
+[Service]
+Type=simple
+# -n = run in foreground (this build omits privdrop, so no -u/user drop)
+ExecStartPre=/bin/mkdir -p /run/chrony /var/lib/chrony
+ExecStart=/usr/sbin/chronyd -n -f /etc/chrony.conf
+Restart=on-failure
+RestartSec=3
+[Install]
+WantedBy=multi-user.target

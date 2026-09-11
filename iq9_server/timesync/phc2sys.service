@@ -1,0 +1,11 @@
+[Unit]
+Description=phc2sys -- discipline CLOCK_REALTIME from the end0 PHC (so host_epoch_ns is PTP time)
+After=ptp4l.service
+Requires=ptp4l.service
+[Service]
+Type=simple
+ExecStart=/usr/sbin/phc2sys -s end0 -c CLOCK_REALTIME -w -m
+Restart=on-failure
+RestartSec=3
+[Install]
+WantedBy=multi-user.target

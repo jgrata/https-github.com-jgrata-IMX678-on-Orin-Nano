@@ -346,6 +346,33 @@ def _rtsp_status(host):
         return {"enabled": False, "streams": []}
 
 
+_CLK = {"t": None, "v": {"source": "chrony", "synced": False}}
+
+
+def clock_status():
+    """chrony clock-sync status for the info block (cached ~3s). Offset is vs the
+    NTP/PTP source disciplining CLOCK_REALTIME -- i.e. the per-frame host_epoch_ns clock."""
+    import subprocess, time as _t
+    now = _t.monotonic(); c = _CLK
+    if c["t"] is not None and now - c["t"] < 3.0:
+        return c["v"]
+    v = {"source": "chrony", "synced": False}
+    try:
+        out = subprocess.run(["chronyc", "-c", "tracking"], capture_output=True,
+                             text=True, timeout=2).stdout.strip()
+        f = out.split(",")
+        if len(f) >= 14:
+            v["ref"] = f[1]; v["stratum"] = int(f[2])
+            v["offset_us"] = round(float(f[5]) * 1e6, 1)
+            v["rms_offset_us"] = round(float(f[6]) * 1e6, 1)
+            v["leap"] = f[13]
+            v["synced"] = (f[13] == "Normal" and int(f[2]) > 0)
+    except Exception as e:
+        v["error"] = str(e)
+    c["t"] = now; c["v"] = v
+    return v
+
+
 _MEAS = {"seq": None, "t": None, "fps": 0.0}
 
 
@@ -388,6 +415,7 @@ def api_info(request: Request = None):
         "measured_fps": mfps,
         "bits_per_sec": _link_bits,
         "throughput_gbps": round(_link_bits / 1e9, 3),
+        "clock": clock_status(),
         "bit_depth": 8, "sensormode": 0, "exposure_ns": 0, "gain": 0,
         "exposure_compensation": exp_comp,
         "rtsp": _rtsp_status(host),

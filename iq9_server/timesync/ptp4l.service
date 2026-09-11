@@ -1,0 +1,15 @@
+[Unit]
+Description=PTP slave (ptp4l) on end0 -- disciplines to a PTP grandmaster (e.g. future 5G master)
+Documentation=man:ptp4l(8)
+After=network-online.target
+Wants=network-online.target
+# NOTE: PTP and NTP both discipline the clock -- when enabling this, disable the NTP interim:
+#   systemctl disable --now systemd-timesyncd ; systemctl enable --now ptp4l phc2sys
+[Service]
+Type=simple
+# -s = slaveOnly (never become master); hardware timestamping on end0 PHC (/dev/ptp0)
+ExecStart=/usr/sbin/ptp4l -i end0 -s -m
+Restart=on-failure
+RestartSec=3
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+[Unit]
+Description=Pin Jetson clocks to max (jetson_clocks) for full-rate camera capture
+# nvpmodel sets the power envelope (mode 0 = 15W, already default on this Orin Nano);
+# jetson_clocks then pins CPU/GPU/EMC/VI/CSI to the max within that envelope so the
+# 4K camera capture path is not DVFS-throttled to 30fps.
+After=nvpmodel.service nvargus-daemon.service
+Wants=nvpmodel.service
+
+[Service]
+Type=oneshot
+# Ensure max power mode first (no-op if already there), then pin clocks.
+ExecStart=/usr/sbin/nvpmodel -m 0
+ExecStart=/usr/bin/jetson_clocks
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

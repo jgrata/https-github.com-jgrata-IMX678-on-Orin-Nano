@@ -24,7 +24,10 @@ DEVDIR="${IQ9_DEVDIR:-/usr/lib/camx/lemans/camera}"
 DEVBIN="$DEVDIR/com.qti.sensormodule.cmk_imx678_cam0.bin"
 POST="${IQ9_DEPLOY_POST:-reboot}"
 BACKUP="/var/li_backup/com.qti.sensormodule.cmk_imx678_cam0.bin.orig"
-CHICDK="${CHICDK:-/c/Users/JGrata/iq9075-ref/qualcomm-toolchain-mm/qualcomm-linux-spf-1-0_ap_standard_oem_nm-qimpsdk-r1.0_00114.0/qualcomm-linux-spf-1-0_ap_standard_oem_nm-qimpsdk-r1.0_00114.0-cc0652ada55b237510884c34fc4dd2f3f8a2201d/LE.QCLINUX.1.0.r1/apps_proc/sources/vendor/qcom/proprietary/chi-cdk}"
+# NB: MUST be the 2.0 chi-cdk ParameterParser -- the 1.7 toolchain PP produces sensor bins whose
+# symbol table 2.0 CamX rejects (SIGSEGV at enumeration: "Symbol table entry ID 0 out of range").
+# The 2.0 PP reproduces the working board bin byte-for-byte. See memory imx678-iq9-subraw-highfps.
+CHICDK="${CHICDK:-/c/Users/JGrata/iq9075-2.0/built-chi-cdk/chi-cdk}"
 MODULE="$HERE/baseline/cmk_imx678_module_cam0.xml"
 PY="${PY:-python}"
 

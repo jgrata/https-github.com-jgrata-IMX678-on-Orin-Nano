@@ -18,7 +18,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 # chi-cdk root, in this shell's path form. Override CHICDK to relocate the toolchain.
-CHICDK="${CHICDK:-/c/Users/JGrata/iq9075-ref/qualcomm-toolchain-mm/qualcomm-linux-spf-1-0_ap_standard_oem_nm-qimpsdk-r1.0_00114.0/qualcomm-linux-spf-1-0_ap_standard_oem_nm-qimpsdk-r1.0_00114.0-cc0652ada55b237510884c34fc4dd2f3f8a2201d/LE.QCLINUX.1.0.r1/apps_proc/sources/vendor/qcom/proprietary/chi-cdk}"
+# MUST be the 2.0 chi-cdk PP (the 1.7 PP makes bins 2.0 CamX SIGSEGVs on -- bad symbol table).
+CHICDK="${CHICDK:-/c/Users/JGrata/iq9075-2.0/built-chi-cdk/chi-cdk}"
 GEN="$HERE/generated"
 MODULE="$HERE/baseline/cmk_imx678_module_cam0.xml"
 OUT="${OUT:-$HERE/bins}"

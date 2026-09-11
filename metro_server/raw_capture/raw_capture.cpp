@@ -331,6 +331,7 @@ struct Session {
     uint64_t                   actual_exp_ns = 0;
     float                      actual_gain   = 0.0f;
     uint64_t                   actual_sof_ns = 0;   /* sensor start-of-frame timestamp */
+    uint64_t                   frames_recv   = 0;   /* CAPTURE_COMPLETE count = frames received over the link */
 
     /* Drain capture-complete events; keep the most recent actual exp/gain.
      * Non-blocking; called from the server loop (single Argus thread). */
@@ -345,6 +346,7 @@ struct Session {
             const IEventCaptureComplete* iCC =
                 interface_cast<const IEventCaptureComplete>(ev);
             if (!iCC) continue;
+            frames_recv++;   /* one sensor frame received over the CSI/GMSL link */
             const CaptureMetadata* m = iCC->getMetadata();
             const ICaptureMetadata* iM = interface_cast<const ICaptureMetadata>(m);
             if (iM) {
@@ -367,12 +369,24 @@ struct Session {
         apply_exposure(exp_ns, gain);
         cur_exp_ns = exp_ns;
         cur_gain   = gain;
-        /* Re-submit so the mutated request takes effect. The server loop
-         * submits a fresh capture after each acquire anyway; this ensures
-         * the change lands even if the pipeline is momentarily drained. */
-        iSess->capture(req.get());
+        /* Re-submit so the mutated request takes effect. Under repeat() we
+         * re-arm the repeating request; otherwise one-shot submit (warmup). */
+        if (repeating) iSess->repeat(req.get());
+        else           iSess->capture(req.get());
         return true;
     }
+
+    /* Continuous streaming. repeat() makes Argus re-issue the capture request at
+     * the sensor's frame-duration rate, INDEPENDENT of how fast the CUDA consumer
+     * acquires. Without it, one-shot capture()-per-acquire pins the sensor (and
+     * thus the CSI/GMSL link) to the consumer's ~30fps decode rate — the frame
+     * duration only sets the MAX rate, not a free-run. With repeat()+MAILBOX the
+     * sensor free-runs at the configured fps (link fully driven) and the consumer
+     * just reads the latest frame. Canonical Argus video path (what econ's
+     * eCAM_argus_camera uses to sustain 60/72fps). */
+    bool repeating = false;
+    void start_repeat() { if (iSess) { iSess->repeat(req.get()); repeating = true; } }
+    void stop_repeat()  { if (iSess && repeating) { iSess->stopRepeat(); iSess->waitForIdle(); repeating = false; } }
 
     bool init(const Config& cfg)
     {
@@ -571,7 +585,7 @@ struct Session {
         int n_iter = timeout_ms / 10;
         int submitted = 0;
         for (int i=0;i<n_iter&&g_running;i++) {
-            if (i%5==0) {  /* every 50ms */
+            if (!repeating && i%5==0) {  /* every 50ms (skip if repeat() is streaming) */
                 iSess->capture(req.get());
                 submitted++;
             }
@@ -1006,11 +1020,19 @@ int main(int argc,char*argv[])
         fprintf(stderr,"[RAW] session init failed\n"); return 1;
     }
 
-    /* Pre-fill pipeline with requests so sensor starts streaming */
+    /* Start streaming. Server mode uses repeat() so Argus free-runs the sensor at
+     * the full frame-duration rate (the CSI/GMSL link is driven at the configured
+     * fps regardless of consumer speed); single-shot keeps the one-shot fill. */
     const int PIPELINE_DEPTH = 10;
-    printf("[RAW] filling pipeline (%d captures)...\n",PIPELINE_DEPTH);
-    fflush(stdout);
-    session.fill_pipeline(PIPELINE_DEPTH);
+    if (cfg.server) {
+        printf("[RAW] starting continuous capture via repeat() @ %d fps...\n", cfg.fps);
+        fflush(stdout);
+        session.start_repeat();
+    } else {
+        printf("[RAW] filling pipeline (%d captures)...\n",PIPELINE_DEPTH);
+        fflush(stdout);
+        session.fill_pipeline(PIPELINE_DEPTH);
+    }
 
     /* Wait for first frame */
     printf("[RAW] waiting for first frame...\n"); fflush(stdout);
@@ -1088,6 +1110,7 @@ int main(int argc,char*argv[])
 
         /* Stats */
         int frames_captured = 0;
+        uint64_t last_pub_sof = 0;   /* SOF of last published frame (duplicate-skip) */
 
         while (g_running) {
 
@@ -1109,18 +1132,28 @@ int main(int argc,char*argv[])
                 100U);  /* 100ms — short so we can check clients often */
 
             if (cr==CUDA_SUCCESS && cuRes) {
-                /* Got a frame — decode into buffer */
+                /* Drain capture metadata FIRST (updates actual exp/gain + the
+                 * sensor SOF of the latest completed frame). Under repeat()+
+                 * MAILBOX, acquire returns the latest frame immediately even if
+                 * we already published it, so DROP duplicates: if no new sensor
+                 * frame (SOF unchanged) has arrived, release and retry without
+                 * re-decoding/re-publishing. Keeps measured_fps == true sensor
+                 * rate and avoids burning CPU on duplicate frames. */
+                session.poll_metadata();
+                if (session.actual_sof_ns != 0 && session.actual_sof_ns == last_pub_sof) {
+                    cuEGLStreamConsumerReleaseFrame(&session.cuConn, cuRes, nullptr);
+                    if (!session.repeating) session.iSess->capture(session.req.get());
+                    usleep(1000);   /* real frames arrive every ~14-17ms; brief yield */
+                    continue;
+                }
+
+                /* New frame — decode into buffer */
                 std::vector<uint16_t> px;
                 bool ok=cuda_frame_to_u16(cuRes,session.W,session.H,session.BPP,px);
                 cuEGLStreamConsumerReleaseFrame(
                     &session.cuConn,cuRes,nullptr);
 
                 if (ok) {
-                    /* Tag with the ACTUAL sensor exp/gain from capture metadata
-                     * (what AE/AGC settled on), falling back to the requested
-                     * values if metadata isn't available yet. This is what the
-                     * client reads back as actual_exposure_ns / actual_gain. */
-                    session.poll_metadata();
                     uint64_t rep_exp  = session.actual_exp_ns > 0
                                         ? session.actual_exp_ns : session.cur_exp_ns;
                     float    rep_gain = session.actual_gain > 0.0f
@@ -1133,26 +1166,32 @@ int main(int argc,char*argv[])
                     { std::lock_guard<std::mutex> lk(g_pub_mtx); g_pub = fb; }
                     g_shm.publish(fb->pixels.data(), fb->w, fb->h, fb->bpp,
                                   rep_exp, session.actual_sof_ns, rep_gain, fb->capture_time);
+                    if (g_shm.hdr) g_shm.hdr->_pad2 = (uint32_t)session.frames_recv;  /* link frames received -> received_fps */
+                    last_pub_sof = session.actual_sof_ns;   /* mark for duplicate-skip */
                     frames_captured++;
 
                     if (frames_captured%30==1) {
-                        static double t_last=0; static int f_last=0;
+                        static double t_last=0; static int f_last=0; static uint64_t r_last=0;
                         struct timespec ts; clock_gettime(CLOCK_MONOTONIC,&ts);
                         double now=ts.tv_sec+ts.tv_nsec*1e-9;
                         double fps=(t_last>0)?(frames_captured-f_last)/(now-t_last):0.0;
-                        printf("[Buffer] frame=%d  decode=%.1fms  serve=%.1fms(thread)  fps=%.1f\n",
-                               frames_captured, g_dec_ms, g_serve_ms, fps);
+                        double recv_fps=(t_last>0)?(double)(session.frames_recv-r_last)/(now-t_last):0.0;
+                        printf("[Buffer] frame=%d  decode=%.1fms  serve=%.1fms(thread)  pub_fps=%.1f  recv_fps=%.1f(link)\n",
+                               frames_captured, g_dec_ms, g_serve_ms, fps, recv_fps);
                         fflush(stdout);
-                        t_last=now; f_last=frames_captured;
+                        t_last=now; f_last=frames_captured; r_last=session.frames_recv;
                     }
 
-                    /* Immediately submit next capture to keep pipeline full */
-                    session.iSess->capture(session.req.get());
+                    /* repeat() keeps the sensor streaming — no per-frame submit
+                     * (an extra capture() under repeat would double-queue). */
+                    if (!session.repeating)
+                        session.iSess->capture(session.req.get());
                 }
 
             } else if (cr==CUDA_ERROR_LAUNCH_TIMEOUT) {
-                /* No frame in 100ms — pipeline might be stalling */
-                session.fill_pipeline(3);
+                /* No frame in 100ms — under repeat() re-arm; else top up the queue. */
+                if (session.repeating) session.iSess->repeat(session.req.get());
+                else                   session.fill_pipeline(3);
             }
             /* CUDA_ERROR_UNKNOWN or other: ignore, try again */
             /* Serving is handled by serve_thr — the capture loop no longer blocks on it. */
@@ -1164,6 +1203,7 @@ int main(int argc,char*argv[])
         close(srv);
     }
 
+    session.stop_repeat();
     session.shutdown();
     return 0;
 }

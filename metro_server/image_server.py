@@ -35,11 +35,11 @@ DARK_DIR         = os.path.join(_HERE, 'darks')  # persisted 2D darks, per (mode
 # per Bayer channel, in 10-bit DN. Scale by 2**(bpp-10) for the current mode.
 VENDOR_OPTICAL_BLACK_10B = 49.0
 
-DEFAULT_SENSOR_MODE = 1
-DEFAULT_FPS         = 30
-DEFAULT_EXPOSURE_NS = 33000000
+DEFAULT_SENSOR_MODE = 0
+DEFAULT_FPS         = 60
+DEFAULT_EXPOSURE_NS = 0        # 0 = auto-exposure within the fps frame period
 DEFAULT_GAIN        = 0.0
-DEFAULT_BIT_DEPTH   = 10
+DEFAULT_BIT_DEPTH   = 12
 DEFAULT_LOSSLESS    = True    # lossless-by-default; True => RAW10 packed
 
 # Frame wire dtypes (status 0x00 frame header: [0x00][H u32][W u32][dtype u8])
@@ -56,6 +56,14 @@ SENSOR_MODES = {
     2: {'width':1920,'height':1080,'bpp':12,'hdr':False,'max_fps':72},
     3: {'width':3840,'height':2160,'bpp':10,'hdr':True,'max_fps':30},
 }
+
+# Sensor exposure/gain limits (eCAM86/IMX678, from raw_capture --list-modes;
+# Argus clamps to the real per-mode range). 0.45 ms exposure floor is the sensor
+# minimum; analog gain 1.0-31.62x.
+SENSOR_EXP_MIN_NS = 450000
+SENSOR_EXP_MAX_NS = 400000000
+SENSOR_GAIN_MIN   = 1.0
+SENSOR_GAIN_MAX   = 31.62
 
 CMD_CAPTURE     = 0x01
 CMD_STREAM_ON   = 0x02
@@ -670,6 +678,10 @@ class Camera:
         exp_d = ae if (self.exposure_ns==0 and ae>0) else self.exposure_ns
         return {
             'max_fps':            SENSOR_MODES[self.sensor_mode].get('max_fps', 60),
+            'exp_min_ms':         SENSOR_EXP_MIN_NS / 1e6,
+            'exp_max_ms':         SENSOR_EXP_MAX_NS / 1e6,
+            'gain_min':           SENSOR_GAIN_MIN,
+            'gain_max':           SENSOR_GAIN_MAX,
             'width':              self.width,
             'height':             self.height,
             'fps':                self.fps,

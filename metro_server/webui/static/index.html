@@ -60,8 +60,8 @@
     <div class="card">
       <h2>Exposure / Gain (live)</h2>
       <div class="row">
-        <div><label>Exposure (ms)</label><input id="exp_ms" type="number" step="0.1" min="0"></div>
-        <div><label>Gain (×)</label><input id="gain" type="number" step="0.1" min="1"></div>
+        <div><label>Exposure (ms) <span id="expRange" class="hint"></span></label><input id="exp_ms" type="number" step="0.1" min="0"></div>
+        <div><label>Gain (×) <span id="gainRange" class="hint"></span></label><input id="gain" type="number" step="0.1" min="1"></div>
       </div>
       <button id="applyEG">Apply exposure / gain</button>
     </div>
@@ -75,7 +75,7 @@
         <option value="2">2 — 1080p 12-bit</option>
         <option value="3">3 — 4K 10-bit HDR</option>
       </select>
-      <label>FPS</label><input id="fps" type="number" step="1" min="1">
+      <label>FPS <span id="fpsRange" class="hint"></span></label><input id="fps" type="number" step="1" min="1">
       <button id="applyMode" class="sec">Set mode / fps</button>
     </div>
 
@@ -125,6 +125,13 @@ async function refreshInfo(){
     if(document.activeElement!==$("gain"))   $("gain").value   = (+d.gain).toFixed(2);
     if(document.activeElement!==$("mode"))   $("mode").value   = d.sensormode;
     if(document.activeElement!==$("fps"))    $("fps").value    = d.fps;
+    // valid ranges from the sensor (via /api/info)
+    if(d.exp_max_ms!=null){ $("exp_ms").max=d.exp_max_ms;
+      $("expRange").textContent="(0=auto \u00b7 "+(+d.exp_min_ms).toFixed(2)+"\u2013"+(+d.exp_max_ms).toFixed(0)+" ms)"; }
+    if(d.gain_max!=null){ $("gain").max=d.gain_max;
+      $("gainRange").textContent="("+(+d.gain_min).toFixed(1)+"\u2013"+(+d.gain_max).toFixed(1)+"\u00d7)"; }
+    if(d.max_fps!=null){ $("fps").max=d.max_fps;
+      $("fpsRange").textContent="(1\u2013"+d.max_fps+")"; }
     setStatus("connected", "ok");
   }catch(e){ setStatus("no backend: "+e.message, "bad"); }
 }

@@ -346,13 +346,48 @@ def _rtsp_status(host):
         return {"enabled": False, "streams": []}
 
 
+_MEAS = {"seq": None, "t": None, "fps": 0.0}
+
+
+def measured_fps():
+    """Delivered fps: the rate the live NV12 shm seq counter advances (both camera
+    pads run at the same session rate), measured across calls (>=0.25 s window).
+    Reflects the frames actually reaching consumers -- mirrors the Jetson metric."""
+    try:
+        with open(SHM, "rb") as f:
+            buf = f.read(_HDR)
+        if len(buf) < _HDR or buf[:len(_MAGIC)] != _MAGIC:
+            return _MEAS["fps"]
+        _w, _h, seq = struct.unpack("<III", buf[len(_MAGIC):_HDR])
+    except Exception:
+        return _MEAS["fps"]
+    now = time.monotonic(); m = _MEAS
+    if m["seq"] is None:
+        m["seq"] = seq; m["t"] = now
+    else:
+        dt = now - m["t"]
+        if dt >= 0.25:
+            dseq = seq - m["seq"]
+            if dseq >= 0:                              # ignore worker-restart seq resets
+                m["fps"] = dseq / dt
+            m["seq"] = seq; m["t"] = now
+    return round(m["fps"], 2)
+
+
 @app.get("/api/info")
 def api_info(request: Request = None):
     exp_comp = _exposure_comp
     host = (request.url.hostname if request is not None else None) or "192.168.99.2"
+    # measured (delivered) fps = live shm seq rate; link throughput = the 12-bit
+    # 4K RAW sensor load at that rate (both camera pads share the session rate).
+    mfps = measured_fps()
+    _link_bits = int(camera_qmmf.RAW_W * camera_qmmf.RAW_H * 12 * mfps)
     return {
         "platform": "IQ9 QCS9075", "source": "nv12-isp (qtiqmmfsrc)",
         "camera": CAM, "width": W, "height": H, "fps": FPS,
+        "measured_fps": mfps,
+        "bits_per_sec": _link_bits,
+        "throughput_gbps": round(_link_bits / 1e9, 3),
         "bit_depth": 8, "sensormode": 0, "exposure_ns": 0, "gain": 0,
         "exposure_compensation": exp_comp,
         "rtsp": _rtsp_status(host),

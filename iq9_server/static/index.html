@@ -97,7 +97,9 @@ async function refreshInfo(){
     const d = await (await fetch("/api/info")).json();
     $("info").innerHTML =
       [["platform",d.platform],["source",d.source],["camera",d.camera],
-       ["resolution",d.width+"×"+d.height],["fps",d.fps],["bit depth",d.bit_depth]]
+       ["resolution",d.width+"×"+d.height],["fps",d.fps],["bit depth",d.bit_depth],
+       ["measured fps", d.measured_fps!=null ? (+d.measured_fps).toFixed(1) : "\u2013"],
+       ["throughput", d.throughput_gbps!=null ? d.throughput_gbps+" Gb/s (12-bit 4K link)" : "\u2013"]]
       .map(([k,v])=>`<div class="k">${k}</div><div class="v">${v}</div>`).join("");
     if(d.exposure_compensation!=null && document.activeElement!==$("ec")){
       $("ec").value=d.exposure_compensation; $("ecv").textContent=d.exposure_compensation;

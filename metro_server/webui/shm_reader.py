@@ -121,6 +121,30 @@ def sensor_timing(duration_s=2.0, sleep_s=0.0):
     }
 
 
+_MEAS = {"seq": None, "t": None, "fps": 0.0}
+
+def measured_fps():
+    """Delivered fps: rate the shm frame-seq counter advances, measured across
+    calls (>=0.25 s window). Reflects the frames actually reaching consumers."""
+    import time as _t
+    try:
+        with ShmReader() as r:
+            seq = r._hdr()[3]
+    except Exception:
+        return _MEAS["fps"]
+    now = _t.monotonic(); m = _MEAS
+    if m["seq"] is None:
+        m["seq"] = seq; m["t"] = now
+    else:
+        dt = now - m["t"]
+        if dt >= 0.25:
+            dseq = seq - m["seq"]
+            if dseq >= 0:
+                m["fps"] = dseq / dt
+            m["seq"] = seq; m["t"] = now
+    return round(m["fps"], 2)
+
+
 if __name__ == "__main__":
     import time
     r = ShmReader()

@@ -116,6 +116,8 @@ async function refreshInfo(){
       ["fps", d.fps],["exposure", (d.exposure_ns/1e6).toFixed(2)+" ms"],
       ["gain", (+d.gain).toFixed(2)+"×"],["actual exp", (d.actual_exposure_ns/1e6).toFixed(2)+" ms"],
       ["actual gain", (+d.actual_gain).toFixed(2)+"×"],["bayer", d.bayer],
+      ["measured fps", d.measured_fps!=null ? (+d.measured_fps).toFixed(1) : "\u2013"],
+      ["throughput", d.throughput_gbps!=null ? d.throughput_gbps+" Gb/s" : "\u2013"],
       ["pipeline", d.pipeline_running ? "running" : "down"],
     ];
     $("info").querySelector("tbody").innerHTML =

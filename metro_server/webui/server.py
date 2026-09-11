@@ -160,7 +160,19 @@ def index():
 def api_info():
     try:
         with _client() as c:
-            return c.info()
+            info = c.info()
+        # measured (delivered) fps + raw link throughput = W*H*native_bpp*fps
+        try:
+            import shm_reader
+            mfps = shm_reader.measured_fps()
+            w = int(info.get("width", 0)); h = int(info.get("height", 0))
+            bpp = int(info.get("native_bpp", info.get("bit_depth", 12)))
+            info["measured_fps"] = mfps
+            info["bits_per_sec"] = int(w * h * bpp * mfps)
+            info["throughput_gbps"] = round(w * h * bpp * mfps / 1e9, 3)
+        except Exception:
+            pass
+        return info
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
 
